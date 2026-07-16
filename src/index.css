@@ -149,25 +149,6 @@
     width: 100vw;
   }
 
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background-color: var(--border-focus);
-    border-radius: 2px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background-color: var(--text-secondary);
-  }
-
   /* Selection */
   ::selection {
     background-color: var(--text-primary);
@@ -185,4 +166,23 @@
   .border-border-shadcn {
     border-color: hsl(var(--border-shadcn));
   }
+}
+
+/* Global minimalistic scrollbar override (outside Tailwind layers for maximum specificity) */
+::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-focus) !important;
+  border-radius: 2px !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary) !important;
 }
