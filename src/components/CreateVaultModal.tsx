@@ -10,11 +10,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Database, FolderOpen, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
 import { PasswordStrength } from './PasswordStrength';
 import { isTauri } from '@/lib/backend';
+import type { Vault } from '@/types';
 
 interface CreateVaultModalProps {
   open: boolean;
   onClose: () => void;
-  onCreated: (name: string, path: string) => void;
+  onCreated: (vault: Vault) => void;
 }
 
 export default function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalProps) {
@@ -138,18 +139,22 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
 
     setLoading(true);
     try {
+      let info;
       if (isTauri()) {
         const { getBackend } = await import('@/lib/backend');
         const backend = await getBackend();
-        await backend.createVault(name.trim(), password, targetPath);
+        info = await backend.createVault(name.trim(), password, targetPath);
+      } else {
+        info = { id: crypto.randomUUID(), name: name.trim(), path: targetPath };
       }
 
-      // Save to recent vaults
+      // Save to recent vaults using the real ID
       const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
-      const newVault = { id: crypto.randomUUID(), name: name.trim(), path: targetPath };
-      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...recent.slice(0, 9)]));
+      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+      const newVault = { id: info.id, name: info.name, path: info.path };
+      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
-      onCreated(name.trim(), targetPath);
+      onCreated(newVault);
       
       // Security: clear password from state
       setPassword('');

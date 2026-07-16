@@ -55,9 +55,8 @@ export default function VaultSelect() {
     navigate('/login');
   };
 
-  const handleVaultCreated = (name: string, path: string) => {
+  const handleVaultCreated = (vault: Vault) => {
     setShowCreate(false);
-    const vault: Vault = { id: crypto.randomUUID(), name, path };
     setCurrentVault(vault);
     setIsLocked(false);
     navigate('/app');
@@ -75,7 +74,9 @@ export default function VaultSelect() {
       if (selected) {
         const path = typeof selected === 'string' ? selected : selected;
         const fileName = String(path).split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'Vault';
-        const vault: Vault = { id: crypto.randomUUID(), name: fileName, path: String(path) };
+        // Use a temporary ID for import. Upon successful login, Login.tsx will update
+        // this with the real vault ID and save it to Recent list.
+        const vault: Vault = { id: `temp-import-${crypto.randomUUID()}`, name: fileName, path: String(path) };
         handleSelect(vault);
       }
     } catch (e) {

@@ -10,7 +10,7 @@ const LOCKOUT_DELAYS = [0, 0, 0, 5000, 15000, 30000]; // ms delay per attempt
 
 export default function Login() {
   const navigate = useNavigate();
-  const { currentVault, setIsLocked } = useAppState();
+  const { currentVault, setIsLocked, setCurrentVault } = useAppState();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -53,10 +53,22 @@ export default function Login() {
 
       setLoading(true);
       try {
+        let info;
         if (isTauri() && currentVault) {
           const backend = await getBackend();
-          await backend.openVault(currentVault.path, password);
+          info = await backend.openVault(currentVault.path, password);
+        } else {
+          info = { id: currentVault?.id || crypto.randomUUID(), name: currentVault?.name || 'Vault', path: currentVault?.path || '' };
         }
+
+        // Save to recent vaults list & update search paths using internal ID
+        const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+        const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+        const newVault = { id: info.id, name: info.name, path: info.path };
+        localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+
+        // Update currentVault state in global context with real ID & path
+        setCurrentVault(newVault);
 
         // Success
         setIsLocked(false);
@@ -89,7 +101,7 @@ export default function Login() {
         setLoading(false);
       }
     },
-    [password, setIsLocked, navigate, currentVault, attempts, isLockedOut, lockoutRemaining]
+    [password, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining]
   );
 
   return (
