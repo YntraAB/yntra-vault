@@ -1,0 +1,52 @@
+[package]
+name = "yntra-vault-core"
+version = "0.1.0"
+edition = "2024"
+description = "Yntra Vault - Core cryptographic engine"
+license = "MIT"
+
+[lib]
+name = "yntra_vault_core"
+path = "src/lib.rs"
+
+[dependencies]
+# KDF - Argon2id (memory-hard, GPU-resistant)
+argon2 = { version = "0.5", features = ["std"] }
+
+# Encryption - Multi-layer
+chacha20poly1305 = "0.10"   # XChaCha20-Poly1305 AEAD (Layer 1 - vault)
+aes-gcm = "0.10"            # AES-256-GCM AEAD (Layer 2 - per-entry)
+
+# Key derivation
+hkdf = "0.12"
+sha2 = "0.10"
+sha1 = "0.10"               # For HIBP SHA-1 hashing
+hmac = "0.12"
+
+# TOTP (RFC 6238)
+data-encoding = "2.6"       # Base32 decode for TOTP secrets
+
+# Security
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.9"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+
+# HTTP client for HIBP breach checking
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
+
+[features]
+default = []
+wasm = []  # Feature flag for WASM compilation

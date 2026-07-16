@@ -1,0 +1,182 @@
+@font-face {
+  font-family: 'Geist Sans';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark mode is default - applied to :root */
+    --bg-base: #0a0a0a;
+    --bg-surface: #141414;
+    --bg-elevated: #1a1a1a;
+    --bg-hover: #222222;
+    --bg-active: #2a2a2a;
+    --border: #2a2a2a;
+    --border-subtle: #1f1f1f;
+    --border-focus: #404040;
+    --text-primary: #e8e8e8;
+    --text-secondary: #888888;
+    --text-tertiary: #555555;
+    --accent: #e8e8e8;
+    --accent-hover: #ffffff;
+    --accent-bg: #222222;
+    --destructive: #c75c5c;
+    --success: #5a9e6f;
+
+    /* Shadcn compat */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 91%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 91%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 91%;
+    --primary: 0 0% 91%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 16%;
+    --secondary-foreground: 0 0% 91%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 53%;
+    --accent-color: 0 0% 16%;
+    --accent-foreground: 0 0% 91%;
+    --destructive: 0 47% 56%;
+    --destructive-foreground: 0 0% 91%;
+    --border-shadcn: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 0 0% 25%;
+    --radius: 0.25rem;
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 91%;
+    --sidebar-primary: 0 0% 91%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 16%;
+    --sidebar-accent-foreground: 0 0% 91%;
+    --sidebar-border: 0 0% 12%;
+    --sidebar-ring: 0 0% 25%;
+
+    /* Transition tokens */
+    --transition-fast: 100ms ease;
+    --transition-base: 150ms ease;
+    --transition-slow: 250ms ease;
+
+    /* Layout */
+    --sidebar-width: 220px;
+    --passwordlist-width: 320px;
+
+    color-scheme: dark;
+  }
+
+  .light {
+    --bg-base: #fafafa;
+    --bg-surface: #f0f0f0;
+    --bg-elevated: #ffffff;
+    --bg-hover: #e8e8e8;
+    --bg-active: #e0e0e0;
+    --border: #d8d8d8;
+    --border-subtle: #e8e8e8;
+    --border-focus: #aaaaaa;
+    --text-primary: #111111;
+    --text-secondary: #666666;
+    --text-tertiary: #999999;
+    --accent: #111111;
+    --accent-hover: #000000;
+    --accent-bg: #e8e8e8;
+    --destructive: #b54949;
+    --success: #3d8b54;
+
+    --background: 0 0% 98%;
+    --foreground: 0 0% 7%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+    --primary: 0 0% 7%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 93%;
+    --secondary-foreground: 0 0% 7%;
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 40%;
+    --accent-color: 0 0% 93%;
+    --accent-foreground: 0 0% 7%;
+    --destructive: 0 47% 49%;
+    --destructive-foreground: 0 0% 98%;
+    --border-shadcn: 0 0% 85%;
+    --input: 0 0% 85%;
+    --ring: 0 0% 67%;
+    --sidebar-background: 0 0% 94%;
+    --sidebar-foreground: 0 0% 15%;
+    --sidebar-primary: 0 0% 7%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 0 0% 93%;
+    --sidebar-accent-foreground: 0 0% 7%;
+    --sidebar-border: 0 0% 85%;
+    --sidebar-ring: 0 0% 67%;
+
+    color-scheme: light;
+  }
+
+  * {
+    @apply border-border-shadcn;
+  }
+
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Geist Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--border-focus);
+  }
+
+  /* Selection */
+  ::selection {
+    background-color: var(--text-primary);
+    color: var(--bg-base);
+  }
+}
+
+@layer utilities {
+  .border-border-shadcn {
+    border-color: hsl(var(--border-shadcn));
+  }
+}
