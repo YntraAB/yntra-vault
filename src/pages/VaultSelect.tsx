@@ -134,7 +134,7 @@ export default function VaultSelect() {
                 Recent Vaults
               </span>
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 max-h-[176px] overflow-y-auto pr-1">
               {recentVaults.map((vault, i) => (
                 <motion.div
                   key={vault.id}
