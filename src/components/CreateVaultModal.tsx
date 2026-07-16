@@ -59,7 +59,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
     if (name && !path) {
       const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
       if (isTauri()) {
-        setPath(`${safeName}.yntravault`);
+        setPath(`${safeName}.vdb`);
       } else {
         setPath(`~/.yntra-vault/${safeName}.db`);
       }
@@ -72,8 +72,8 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
       const { save } = await import('@tauri-apps/plugin-dialog');
       const selected = await save({
         title: 'Choose vault location',
-        defaultPath: `${name || 'vault'}.yntravault`,
-        filters: [{ name: 'Yntra Vault Vault', extensions: ['Yntra Vault', 'db'] }],
+        defaultPath: `${name || 'vault'}.vdb`,
+        filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
       });
       if (selected) setPath(selected);
     } catch (e) {
@@ -181,7 +181,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                     type="text"
                     value={path}
                     onChange={(e) => setPath(e.target.value)}
-                    placeholder="vault.yntravault"
+                    placeholder="vault.vdb"
                     className="h-9 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
                   />
                   {isTauri() && (
@@ -284,4 +284,6 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
     </AnimatePresence>
   );
 }
+
+
 

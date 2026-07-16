@@ -239,3 +239,4 @@ mod tests {
         assert!(mixed.entropy_bits > letters_only.entropy_bits);
     }
 }
+

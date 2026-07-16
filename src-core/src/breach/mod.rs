@@ -161,3 +161,4 @@ mod tests {
         assert!(matches!(status, BreachStatus::Safe { .. }));
     }
 }
+

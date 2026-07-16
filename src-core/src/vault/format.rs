@@ -1,4 +1,4 @@
-//! .yntravault binary vault file format
+//! .vdb binary vault file format
 //!
 //! ┌──────────────────────────────────┐
 //! │  Magic: "YNTR" (4 bytes)         │
@@ -40,7 +40,7 @@ impl Default for KdfParams {
     }
 }
 
-/// File header — written unencrypted at the start of the .yntravault file.
+/// File header — written unencrypted at the start of the .vdb file.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileHeader {
     pub version: u16,
@@ -112,7 +112,7 @@ impl VaultFile {
             .map_err(|_| VaultError::InvalidFormat("Too short to read magic bytes".into()))?;
         if &magic != MAGIC_BYTES {
             return Err(VaultError::InvalidFormat(
-                "Not a valid .yntravault file (wrong magic bytes)".into(),
+                "Not a valid .vdb file (wrong magic bytes)".into(),
             ));
         }
 
@@ -221,3 +221,4 @@ mod tests {
         assert!(result.is_err());
     }
 }
+

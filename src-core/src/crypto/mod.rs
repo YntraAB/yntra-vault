@@ -7,3 +7,4 @@ pub use cipher::{
     encrypt_entry, decrypt_entry,
     compute_hmac, verify_hmac,
 };
+

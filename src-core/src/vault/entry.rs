@@ -104,3 +104,4 @@ pub struct TrashedEntryPreview {
     pub deleted_at: chrono::DateTime<chrono::Utc>,
     pub days_until_permanent: i64,
 }
+

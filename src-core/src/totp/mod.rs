@@ -398,3 +398,4 @@ mod tests {
         assert!(parse_otpauth_uri("otpauth://totp/Test?digits=6").is_err()); // missing secret
     }
 }
+

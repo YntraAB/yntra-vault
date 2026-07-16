@@ -69,7 +69,7 @@ export default function VaultSelect() {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({
         title: 'Open Vault File',
-        filters: [{ name: 'Yntra Vault Vault', extensions: ['Yntra Vault', 'db'] }],
+        filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
         multiple: false,
       });
       if (selected) {
@@ -218,4 +218,6 @@ export default function VaultSelect() {
     </motion.div>
   );
 }
+
+
 

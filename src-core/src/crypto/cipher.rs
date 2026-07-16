@@ -204,3 +204,4 @@ mod tests {
         assert_eq!(decrypted, plaintext);
     }
 }
+

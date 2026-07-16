@@ -271,3 +271,5 @@ const IssueRow: React.FC<{ issue: SecurityIssue; onClick?: () => void }> = ({
 
 export default SecurityDashboard;
 
+
+

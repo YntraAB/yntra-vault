@@ -185,3 +185,5 @@ function formatCount(count: number): string {
 
 export default BreachIndicator;
 
+
+

@@ -1,6 +1,6 @@
 //! Vault data types
 //!
-//! All types that get serialized into the .yntravault vault file.
+//! All types that get serialized into the .vdb vault file.
 //! Includes entry templates, password history, and audit metadata.
 
 use chrono::{DateTime, Utc};
@@ -257,3 +257,4 @@ pub enum IssueSeverity {
     Warning,
     Critical,
 }
+

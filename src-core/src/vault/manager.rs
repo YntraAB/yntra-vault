@@ -23,7 +23,7 @@ use zeroize::Zeroize;
 
 /// Active vault state — holds decrypted data + derived keys.
 pub struct VaultManager {
-    /// Path to the .yntravault file
+    /// Path to the .vdb file
     pub(crate) path: PathBuf,
     /// Decrypted vault contents
     pub(crate) data: VaultData,
@@ -155,7 +155,7 @@ impl VaultManager {
 
         // Write to disk atomically (write to temp file, then rename)
         let file_bytes = vault_file.to_bytes()?;
-        let temp_path = self.path.with_extension("yntravault.tmp");
+        let temp_path = self.path.with_extension("vdb.tmp");
         fs::write(&temp_path, &file_bytes)?;
         fs::rename(&temp_path, &self.path)?;
 
@@ -751,7 +751,7 @@ mod tests {
     impl TestVault {
         fn new() -> Self {
             let mut path = std::env::temp_dir();
-            path.push(format!("yntra_vault_test_{}.yntravault", Uuid::new_v4()));
+            path.push(format!("yntra_vault_test_{}.vdb", Uuid::new_v4()));
             TestVault { path }
         }
     }
@@ -851,4 +851,5 @@ mod tests {
         assert_eq!(restored_history[0].password, "passwordA-1");
     }
 }
+
 

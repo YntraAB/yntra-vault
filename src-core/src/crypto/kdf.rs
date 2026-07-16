@@ -149,3 +149,4 @@ mod tests {
         assert_eq!(sk1.hmac_key.bytes, sk2.hmac_key.bytes);
     }
 }
+

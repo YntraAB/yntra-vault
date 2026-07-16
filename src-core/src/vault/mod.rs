@@ -6,3 +6,4 @@ pub mod history;
 
 pub use types::*;
 pub use manager::VaultManager;
+

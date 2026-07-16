@@ -41,3 +41,4 @@ pub enum VaultError {
     #[error("Integrity check failed - vault may be corrupted or tampered with")]
     IntegrityError,
 }
+
