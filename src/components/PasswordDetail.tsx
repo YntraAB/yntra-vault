@@ -127,11 +127,8 @@ export default function PasswordDetail() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.1, ease: 'easeInOut' }}
-            className="flex h-[80vh] flex-col items-center justify-center gap-4"
+            className="flex h-[80vh] flex-col items-center justify-center"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-[3px] border border-[var(--border)] text-[var(--text-tertiary)]">
-              <Key size={24} />
-            </div>
             <div className="text-center">
               <p className="text-[16px] font-semibold text-[var(--text-tertiary)]">Select an entry</p>
               <p className="mt-1 text-[13px] text-[var(--text-tertiary)]">
