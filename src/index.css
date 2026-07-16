@@ -151,8 +151,8 @@
 
   /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
 
   ::-webkit-scrollbar-track {
@@ -160,12 +160,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: var(--border);
-    border-radius: 3px;
+    background-color: var(--border-focus);
+    border-radius: 2px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: var(--border-focus);
+    background-color: var(--text-secondary);
   }
 
   /* Selection */
