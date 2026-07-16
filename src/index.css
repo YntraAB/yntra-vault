@@ -168,21 +168,27 @@
   }
 }
 
-/* Global minimalistic scrollbar override (outside Tailwind layers for maximum specificity) */
-::-webkit-scrollbar {
+/* Global minimalistic scrollbar override for all elements (outside Tailwind layers for maximum specificity) */
+*::-webkit-scrollbar {
   width: 4px !important;
   height: 4px !important;
 }
 
-::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent !important;
 }
 
-::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
   background-color: var(--border-focus) !important;
   border-radius: 2px !important;
 }
 
-::-webkit-scrollbar-thumb:hover {
+*::-webkit-scrollbar-thumb:hover {
   background-color: var(--text-secondary) !important;
+}
+
+/* Firefox support */
+* {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--border-focus) transparent !important;
 }
