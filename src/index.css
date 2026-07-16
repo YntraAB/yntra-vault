@@ -170,8 +170,8 @@
 
 /* Global minimalistic scrollbar override for all elements (outside Tailwind layers for maximum specificity) */
 *::-webkit-scrollbar {
-  width: 4px !important;
-  height: 4px !important;
+  width: 8px !important;
+  height: 8px !important;
 }
 
 *::-webkit-scrollbar-track {
@@ -180,7 +180,7 @@
 
 *::-webkit-scrollbar-thumb {
   background-color: var(--border-focus) !important;
-  border-radius: 2px !important;
+  border-radius: 4px !important;
 }
 
 *::-webkit-scrollbar-thumb:hover {
