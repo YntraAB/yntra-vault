@@ -92,9 +92,9 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
     }
   }, [name]);
 
-  const validate = (): string | null => {
+  const validate = (checkPath: string): string | null => {
     if (name.trim().length < 2) return 'Vault name must be at least 2 characters';
-    if (!path.trim()) return 'Please choose a file location';
+    if (!checkPath.trim()) return 'Please choose a file location';
     if (password.length < 12) return 'Master password must be at least 12 characters';
     if (password !== confirmPassword) return 'Passwords do not match';
     return null;
@@ -104,7 +104,33 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
     e.preventDefault();
     setError(null);
 
-    const validationError = validate();
+    let targetPath = path.trim();
+
+    // If in Tauri and the path is relative or not explicitly modified by the user,
+    // force the browse dialog to open so they choose a real location.
+    if (isTauri() && (!pathModified || !targetPath || (!targetPath.includes('/') && !targetPath.includes('\\')))) {
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const selected = await save({
+          title: 'Choose vault location',
+          defaultPath: `${name || 'vault'}.vdb`,
+          filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
+        });
+        if (!selected) {
+          setError('You must choose a file location to create the vault');
+          return;
+        }
+        targetPath = selected;
+        setPath(selected);
+        setPathModified(true);
+      } catch (e) {
+        console.error('Browse failed:', e);
+        setError('Failed to select file location');
+        return;
+      }
+    }
+
+    const validationError = validate(targetPath);
     if (validationError) {
       setError(validationError);
       return;
@@ -115,21 +141,22 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
       if (isTauri()) {
         const { getBackend } = await import('@/lib/backend');
         const backend = await getBackend();
-        await backend.createVault(name.trim(), password, path.trim());
+        await backend.createVault(name.trim(), password, targetPath);
       }
 
       // Save to recent vaults
       const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
-      const newVault = { id: crypto.randomUUID(), name: name.trim(), path: path.trim() };
+      const newVault = { id: crypto.randomUUID(), name: name.trim(), path: targetPath };
       localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...recent.slice(0, 9)]));
 
-      onCreated(name.trim(), path.trim());
+      onCreated(name.trim(), targetPath);
       
       // Security: clear password from state
       setPassword('');
       setConfirmPassword('');
       setName('');
       setPath('');
+      setPathModified(false);
     } catch (err: any) {
       setError(err?.toString() || 'Failed to create vault');
     } finally {

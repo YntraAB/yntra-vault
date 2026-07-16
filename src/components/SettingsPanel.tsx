@@ -6,7 +6,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { SecurityDashboard } from './SecurityDashboard';
 import ChangeMasterPasswordModal from './ChangeMasterPasswordModal';
 import { useBackend } from '@/lib/useBackend';
-import type { TrashedEntryPreview } from '@/lib/backend';
+import { isTauri, type TrashedEntryPreview } from '@/lib/backend';
 
 type Tab = 'general' | 'appearance' | 'security' | 'backup' | 'trash';
 
@@ -35,7 +35,7 @@ const CLIPBOARD_OPTIONS = [
 ];
 
 export default function SettingsPanel() {
-  const { settingsOpen, setSettingsOpen, settings, updateSettings, refreshEntries, addToast } = useAppState();
+  const { settingsOpen, setSettingsOpen, settings, updateSettings, refreshEntries, addToast, currentVault } = useAppState();
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -159,6 +159,34 @@ export default function SettingsPanel() {
             >
               {activeTab === 'general' && (
                 <div className="flex flex-col gap-6">
+                  {currentVault && (
+                    <SettingSection label="Active Vault">
+                      <div className="flex flex-col gap-2.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Vault Name</span>
+                          <span className="text-[13px] font-medium text-[var(--text-primary)]">{currentVault.name}</span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">File Location</span>
+                          <span className="font-mono text-[11px] text-[var(--text-secondary)] break-all">{currentVault.path}</span>
+                        </div>
+                        {isTauri() && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              backend?.showInExplorer(currentVault.path).catch(err => {
+                                addToast({ message: `Failed to open explorer: ${err}`, type: 'error' });
+                              });
+                            }}
+                            className="mt-1 h-7 self-start rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                          >
+                            Show in Explorer
+                          </button>
+                        )}
+                      </div>
+                    </SettingSection>
+                  )}
+
                   <SettingSection label="Auto-Lock">
                     <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
                       Lock the vault after a period of inactivity

@@ -53,6 +53,7 @@ pub fn run() {
             commands::add_tag,
             commands::delete_tag,
             commands::check_vault_file_exists,
+            commands::show_in_explorer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Yntra Vault");

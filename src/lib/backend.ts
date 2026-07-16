@@ -256,6 +256,7 @@ export interface YntraVaultBackend {
 
   // Vault File Helper
   checkVaultFileExists(path: string): Promise<boolean>;
+  showInExplorer(path: string): Promise<void>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────

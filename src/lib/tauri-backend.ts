@@ -180,6 +180,10 @@ export class TauriBackend implements YntraVaultBackend {
   async checkVaultFileExists(path: string): Promise<boolean> {
     return invoke('check_vault_file_exists', { path });
   }
+
+  async showInExplorer(path: string): Promise<void> {
+    return invoke('show_in_explorer', { path });
+  }
 }
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────
