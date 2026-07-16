@@ -55,6 +55,30 @@ pub fn run() {
             commands::check_vault_file_exists,
             commands::show_in_explorer,
         ])
+        .setup(|app| {
+            use tauri::{Manager, Emitter};
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let state = app_handle.state::<AppState>();
+                    let mut vault = match state.vault.lock() {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    if let Some(ref manager) = *vault {
+                        let path_str = manager.info().path;
+                        let path = std::path::Path::new(&path_str);
+                        if !path.exists() {
+                            // Vault file was deleted or moved!
+                            *vault = None;
+                            let _ = app_handle.emit("vault-connection-lost", ());
+                        }
+                    }
+                }
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Yntra Vault");
 }
