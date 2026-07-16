@@ -34,6 +34,16 @@ interface DomainRule {
 
 const DOMAIN_RULES: DomainRule[] = [
   {
+    domains: ['google.com', 'gmail.com', 'youtube.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'Google Preset'
+  },
+  {
     domains: ['github.com'],
     length: 32,
     uppercase: true,
@@ -82,6 +92,66 @@ const DOMAIN_RULES: DomainRule[] = [
     symbols: true,
     excludeAmbiguous: true,
     displayName: 'PayPal Preset (max 20)'
+  },
+  {
+    domains: ['facebook.com', 'instagram.com', 'meta.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'Meta Preset'
+  },
+  {
+    domains: ['x.com', 'twitter.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'X / Twitter Preset'
+  },
+  {
+    domains: ['spotify.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'Spotify Preset'
+  },
+  {
+    domains: ['netflix.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'Netflix Preset'
+  },
+  {
+    domains: ['linkedin.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'LinkedIn Preset'
+  },
+  {
+    domains: ['reddit.com'],
+    length: 32,
+    uppercase: true,
+    lowercase: true,
+    digits: true,
+    symbols: true,
+    excludeAmbiguous: true,
+    displayName: 'Reddit Preset'
   },
   {
     domains: ['steamcommunity.com', 'steampowered.com'],
