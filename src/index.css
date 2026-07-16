@@ -173,6 +173,12 @@
     background-color: var(--text-primary);
     color: var(--bg-base);
   }
+
+  /* Hide native browser password reveal/clear buttons */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none !important;
+  }
 }
 
 @layer utilities {

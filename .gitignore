@@ -15,6 +15,10 @@ src-tauri/target/
 src-core/target/
 *.local
 
+# Database and temp files
+*.vdb
+*.db
+*.tmp
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
