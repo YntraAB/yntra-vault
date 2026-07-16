@@ -20,6 +20,7 @@ interface CreateVaultModalProps {
 export default function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalProps) {
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
+  const [pathModified, setPathModified] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -42,6 +43,9 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
       setConfirmPassword('');
       setError(null);
       setShowPassword(false);
+      setName('');
+      setPath('');
+      setPathModified(false);
     }
   }, [open]);
 
@@ -56,15 +60,19 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
 
   // Auto-generate path from name
   useEffect(() => {
-    if (name && !path) {
-      const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
-      if (isTauri()) {
-        setPath(`${safeName}.vdb`);
+    if (!pathModified) {
+      const safeName = name ? name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-') : '';
+      if (safeName) {
+        if (isTauri()) {
+          setPath(`${safeName}.vdb`);
+        } else {
+          setPath(`~/.yntra-vault/${safeName}.db`);
+        }
       } else {
-        setPath(`~/.yntra-vault/${safeName}.db`);
+        setPath('');
       }
     }
-  }, [name]);
+  }, [name, pathModified]);
 
   const handleBrowse = useCallback(async () => {
     if (!isTauri()) return;
@@ -75,7 +83,10 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
         defaultPath: `${name || 'vault'}.vdb`,
         filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
       });
-      if (selected) setPath(selected);
+      if (selected) {
+        setPath(selected);
+        setPathModified(true);
+      }
     } catch (e) {
       console.error('Browse failed:', e);
     }
@@ -180,8 +191,11 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                   <input
                     type="text"
                     value={path}
-                    onChange={(e) => setPath(e.target.value)}
-                    placeholder="vault.vdb"
+                    onChange={(e) => {
+                      setPath(e.target.value);
+                      setPathModified(true);
+                    }}
+                    placeholder="Click browse to choose folder..."
                     className="h-9 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
                   />
                   {isTauri() && (
