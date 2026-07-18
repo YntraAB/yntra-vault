@@ -294,20 +294,20 @@ export function useSecurityAudit() {
   const [audit, setAudit] = useState<SecurityAudit | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const runAudit = useCallback(async (disableSkeletonDelays = false) => {
+  const runAudit = useCallback(async (disableSkeletonDelays = false, silent = false) => {
     if (!backend) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     const startTime = Date.now();
     try {
       const result = await backend.securityAudit();
       const elapsed = Date.now() - startTime;
-      if (!disableSkeletonDelays && elapsed < 250) {
+      if (!disableSkeletonDelays && !silent && elapsed < 250) {
         await new Promise(resolve => setTimeout(resolve, 250 - elapsed));
       }
       setAudit(result);
       return result;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [backend]);
 

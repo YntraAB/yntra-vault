@@ -221,14 +221,43 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // Load entries from backend when vault is opened
   const refreshEntries = useCallback(async () => {
-    if (!backend) return;
+    if (!backend || !currentVault) return;
     try {
       const previews = await backend.listEntries();
-      setEntries(previews.map(p => entryPreviewToPasswordEntry(p)));
+      const entriesList = previews.map(p => entryPreviewToPasswordEntry(p));
+
+      // One-time migration to reset breach status for the bug fix (per-vault)
+      const resetKey = `yntra-vault-breach-reset-v1:${currentVault.path}`;
+      const resetDone = localStorage.getItem(resetKey);
+      if (!resetDone && entriesList.length > 0) {
+        // Update local status to Unknown immediately so checker starts
+        for (const entry of entriesList) {
+          if (entry.breachStatus && entry.breachStatus.type !== 'Unknown') {
+            entry.breachStatus = { type: 'Unknown' };
+          }
+        }
+        // Asynchronously update backend database sequentially to avoid concurrent write conflicts
+        (async () => {
+          for (const entry of previews) {
+            const status = entry.breach_status;
+            // Only update if it wasn't already Unknown
+            if (status && status.type !== 'Unknown') {
+              try {
+                await backend.updateEntry(entry.id, { breach_status: { type: 'Unknown' } });
+              } catch (err) {
+                console.error('Failed to reset breach status for entry', entry.title, err);
+              }
+            }
+          }
+        })();
+        localStorage.setItem(resetKey, 'true');
+      }
+
+      setEntries(entriesList);
     } catch (e) {
       console.error('Failed to load entries:', e);
     }
-  }, [backend]);
+  }, [backend, currentVault]);
 
   // Load tags from backend when vault is opened
   const refreshTags = useCallback(async () => {

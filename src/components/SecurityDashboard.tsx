@@ -24,12 +24,18 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
   onNavigateToEntry,
 }) => {
   const { audit, loading, runAudit } = useSecurityAudit();
-  const { settings } = useAppState();
+  const { settings, entries } = useAppState();
   const disableDelays = settings.disableSkeletonDelays;
 
   useEffect(() => {
     runAudit(disableDelays);
   }, [runAudit, disableDelays]);
+
+  // Silently refresh the audit data in real-time as background checks complete
+  useEffect(() => {
+    if (!audit) return;
+    runAudit(disableDelays, true);
+  }, [runAudit, disableDelays, entries]);
 
   const scoreColor = audit
     ? (audit.health_score >= 80 ? '#22c55e' : audit.health_score >= 50 ? '#f59e0b' : '#ef4444')

@@ -141,11 +141,11 @@ export class TauriBackend implements YntraVaultBackend {
   // ─── Breach Detection ──────────────────────────────────────────
 
   async checkPasswordBreach(password: string): Promise<BreachResult> {
-    const count = await invoke<number>('check_password_breach', { password });
+    const res = await invoke<any>('check_password_breach', { password });
     return {
-      is_breached: count > 0,
-      breach_count: count,
-      checked_at: new Date().toISOString(),
+      is_breached: res.is_breached,
+      breach_count: res.breach_count,
+      checked_at: res.checked_at,
     };
   }
 
