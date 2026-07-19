@@ -226,9 +226,25 @@ function ListItem({
         <span className="truncate text-[14px] font-medium leading-tight text-[var(--text-primary)]">
           {entry.title}
         </span>
-        <span className="truncate text-[12px] leading-tight text-[var(--text-secondary)]">
-          {entry.username || entry.email || ''}
-        </span>
+        {(() => {
+          const text = entry.username || entry.email || '';
+          const atIndex = text.lastIndexOf('@');
+          if (atIndex > 0) {
+            const local = text.slice(0, atIndex);
+            const domain = text.slice(atIndex);
+            return (
+              <span className="flex min-w-0 text-[12px] leading-tight text-[var(--text-secondary)]">
+                <span className="truncate">{local}</span>
+                <span className="shrink-0">{domain}</span>
+              </span>
+            );
+          }
+          return (
+            <span className="truncate text-[12px] leading-tight text-[var(--text-secondary)]">
+              {text}
+            </span>
+          );
+        })()}
       </div>
 
       {/* Indicators */}
