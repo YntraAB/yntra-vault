@@ -650,6 +650,21 @@ fn active_window_has_password_field(
             Err(_) => continue,
         };
 
+        // Skip elements that are hidden, offscreen or not keyboard-focusable
+        let is_offscreen = unsafe { el.CurrentIsOffscreen() }
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if is_offscreen {
+            continue;
+        }
+
+        let is_focusable = unsafe { el.CurrentIsKeyboardFocusable() }
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if !is_focusable {
+            continue;
+        }
+
         let is_pw = unsafe { el.CurrentIsPassword() }
             .map(|b| b.as_bool())
             .unwrap_or(false);
@@ -665,11 +680,14 @@ fn active_window_has_password_field(
             .map(|b| b.to_string().to_lowercase())
             .unwrap_or_default();
 
-        let is_password = name.contains("password")
+        let is_password = (name.contains("password")
             || name.contains("lösenord")
-            || name.contains("pass")
+            || name == "pass"
             || class_name.contains("password")
-            || class_name.contains("pass");
+            || class_name == "pass")
+            && !name.contains("code")
+            && !name.contains("token")
+            && !name.contains("otp");
 
         if is_password {
             return true;
@@ -861,16 +879,6 @@ pub fn run_smart_autotype_with_delays(
                         }
                     }
 
-                    // Check native accessibility property first, fallback to keywords
-                    let is_password_field = focused.CurrentIsPassword()
-                        .map(|b| b.as_bool())
-                        .unwrap_or(false)
-                        || name.contains("password")
-                        || name.contains("lösenord")
-                        || name.contains("pass")
-                        || class_name.contains("password")
-                        || class_name.contains("pass");
-
                     let is_totp_field = name.contains("code")
                         || name.contains("token")
                         || name.contains("totp")
@@ -884,6 +892,18 @@ pub fn run_smart_autotype_with_delays(
                         || class_name.contains("code")
                         || class_name.contains("totp")
                         || class_name.contains("otp");
+
+                    // Check native accessibility property first, fallback to keywords (overridden by is_totp_field)
+                    let is_password_field = !is_totp_field && (
+                        focused.CurrentIsPassword()
+                            .map(|b| b.as_bool())
+                            .unwrap_or(false)
+                        || name.contains("password")
+                        || name.contains("lösenord")
+                        || name == "pass"
+                        || class_name.contains("password")
+                        || class_name == "pass"
+                    );
 
                     // Language-independent criteria: username is any input that is neither password nor TOTP!
                     let is_username_field = !is_password_field && !is_totp_field;
