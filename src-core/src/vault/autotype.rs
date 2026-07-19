@@ -301,6 +301,32 @@ fn get_window_title(hwnd: windows::Win32::Foundation::HWND) -> String {
     }
 }
 
+// ─── Document Viewport Isolation Walker ─────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn get_document_ancestor(
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation,
+    element: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+) -> windows::Win32::UI::Accessibility::IUIAutomationElement {
+    use windows::Win32::UI::Accessibility::{TreeScope_Ancestors, UIA_DocumentControlTypeId};
+
+    let cond = match unsafe {
+        automation.CreatePropertyCondition(
+            windows::Win32::UI::Accessibility::UIA_ControlTypePropertyId,
+            &windows::core::VARIANT::from(UIA_DocumentControlTypeId.0),
+        )
+    } {
+        Ok(c) => c,
+        Err(_) => return element.clone(),
+    };
+
+    if let Ok(doc) = unsafe { element.FindFirst(TreeScope_Ancestors, &cond) } {
+        doc
+    } else {
+        element.clone()
+    }
+}
+
 // ─── Semantic Language-Independent Link & Text Parsers ─────────────────
 
 #[cfg(target_os = "windows")]
@@ -860,22 +886,16 @@ pub fn run_smart_autotype_with_delays(
                     || class_name.contains("renderwidgethostview");
 
                 if is_input {
-                    let hwnd = GetForegroundWindow();
+                    let doc_el = get_document_ancestor(&automation, &focused);
 
                     // Check if we are on a registration/signup page (only before credentials are typed to prevent infinite loops)
-                    let on_register = !filled_password && !hwnd.is_invalid() && if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
-                        is_on_register_page(&automation, &win_el)
-                    } else {
-                        false
-                    };
+                    let on_register = !filled_password && is_on_register_page(&automation, &doc_el);
 
                     if on_register {
-                        if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
-                            if try_click_login_link(&automation, &win_el) {
-                                std::thread::sleep(std::time::Duration::from_millis(1500));
-                                last_focused_element_id = None; // Reset focus to re-evaluate on redirected page
-                                continue;
-                            }
+                        if try_click_login_link(&automation, &doc_el) {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            last_focused_element_id = None; // Reset focus to re-evaluate on redirected page
+                            continue;
                         }
                     }
 
@@ -960,11 +980,7 @@ pub fn run_smart_autotype_with_delays(
                         std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
 
                         // Check if password field is visible in active window
-                        let has_password = !hwnd.is_invalid() && if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
-                            active_window_has_password_field(&automation, &win_el)
-                        } else {
-                            false
-                        };
+                        let has_password = active_window_has_password_field(&automation, &doc_el);
 
                         if has_password {
                             // Standard single-screen login form: Tab down and enter password
