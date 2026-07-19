@@ -54,6 +54,18 @@ pub fn run() {
             commands::delete_tag,
             commands::check_vault_file_exists,
             commands::show_in_explorer,
+            // Advanced features
+            commands::autotype,
+            commands::run_smart_autotype,
+            commands::enable_autostart,
+            commands::disable_autostart,
+            commands::is_autostart_enabled,
+            commands::webdav_upload,
+            commands::webdav_download,
+            commands::run_p2p_sync_listener,
+            commands::run_p2p_sync_client,
+            commands::split_master_password,
+            commands::reconstruct_master_password_hash,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};

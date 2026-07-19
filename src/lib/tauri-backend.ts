@@ -184,6 +184,51 @@ export class TauriBackend implements YntraVaultBackend {
   async showInExplorer(path: string): Promise<void> {
     return invoke('show_in_explorer', { path });
   }
+
+  // Advanced features
+  async autotype(text: string, charDelayMs: number): Promise<void> {
+    return invoke('autotype', { text, charDelayMs });
+  }
+
+  async runSmartAutotype(username: string, password: string, totpSecret: string, url: string, launchBrowser: boolean, charDelayMs: number, fieldDelayMs: number): Promise<void> {
+    return invoke('run_smart_autotype', { username, password, totpSecret, url, launchBrowser, charDelayMs, fieldDelayMs });
+  }
+
+  async enableAutostart(): Promise<void> {
+    return invoke('enable_autostart');
+  }
+
+  async disableAutostart(): Promise<void> {
+    return invoke('disable_autostart');
+  }
+
+  async isAutostartEnabled(): Promise<boolean> {
+    return invoke('is_autostart_enabled');
+  }
+
+  async webdavUpload(url: string, username: string, password: string | null, dbPath: string): Promise<void> {
+    return invoke('webdav_upload', { url, username, password, dbPath });
+  }
+
+  async webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void> {
+    return invoke('webdav_download', { url, username, password, destDbPath });
+  }
+
+  async runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void> {
+    return invoke('run_p2p_sync_listener', { listenAddr, dbPath });
+  }
+
+  async runP2pSyncClient(serverAddr: string, dbPath: string): Promise<void> {
+    return invoke('run_p2p_sync_client', { serverAddr, dbPath });
+  }
+
+  async splitMasterPassword(password: string): Promise<string[]> {
+    return invoke('split_master_password', { password });
+  }
+
+  async reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string> {
+    return invoke('reconstruct_master_password_hash', { shareA, shareB });
+  }
 }
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────

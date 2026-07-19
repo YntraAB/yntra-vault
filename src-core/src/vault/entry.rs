@@ -5,24 +5,6 @@ use crate::vault::types::*;
 use crate::vault::manager::VaultManager;
 
 impl VaultManager {
-    /// Search entries by query string (title, username, url, email, tags).
-    /// Returns matching entry previews without decrypting passwords.
-    pub fn search_entries(&self, query: &str) -> crate::Result<Vec<EntryPreview>> {
-        let all = self.list_entries()?;
-
-        if query.is_empty() {
-            return Ok(all);
-        }
-
-        let query_lower = query.to_lowercase();
-        Ok(all.into_iter().filter(|e| {
-            e.title.to_lowercase().contains(&query_lower)
-                || e.username.to_lowercase().contains(&query_lower)
-                || e.url.to_lowercase().contains(&query_lower)
-                || e.email.to_lowercase().contains(&query_lower)
-                || e.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
-        }).collect())
-    }
 
     /// Get entries filtered by tag name.
     pub fn entries_by_tag(&self, tag_name: &str) -> crate::Result<Vec<EntryPreview>> {

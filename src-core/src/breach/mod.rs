@@ -5,6 +5,7 @@
 //! - Background monitoring
 
 pub mod strength;
+pub mod bloom;
 
 use sha1::{Sha1, Digest};
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,16 @@ pub struct BreachResult {
 /// Only the first 5 characters of the SHA-1 hash are sent to HIBP.
 /// The rest is compared locally — HIBP never sees your password.
 pub async fn check_password_breach(password: &str) -> crate::Result<BreachResult> {
+    // 1. Local Bloom filter pre-check
+    if !bloom::is_breach_suspected(password) {
+        return Ok(BreachResult {
+            is_breached: false,
+            breach_count: 0,
+            checked_at: chrono::Utc::now(),
+        });
+    }
+
+    // 2. Fall back to online k-anonymity check
     // SHA-1 hash the password
     let mut hasher = Sha1::new();
     hasher.update(password.as_bytes());
@@ -159,6 +170,13 @@ mod tests {
         };
         let status = breach_result_to_status(&safe);
         assert!(matches!(status, BreachStatus::Safe { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_safe_password_bloom_short_circuit() {
+        let result = check_password_breach("highly_secure_non_existent_password_12345!").await.unwrap();
+        assert!(!result.is_breached);
+        assert_eq!(result.breach_count, 0);
     }
 }
 

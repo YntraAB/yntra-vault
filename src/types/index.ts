@@ -64,6 +64,9 @@ export interface AppSettings {
   disableSkeletonDelays: boolean;
   autoBreachCheck: boolean;
   showBreachInList: boolean;
+  autotypeCharDelayMs: number;
+  autotypeFieldDelayMs: number;
+  autotypeLaunchBrowser: boolean;
 }
 
 export interface TOTPState {

@@ -31,6 +31,8 @@ pub struct VaultManager {
     pub(crate) keys: Option<SubKeys>,
     /// Salt from the file header
     pub(crate) salt: [u8; 32],
+    /// In-memory Zero-Disclosure search index
+    pub(crate) search_index: std::collections::HashMap<[u8; 8], Vec<Uuid>>,
 }
 
 impl VaultManager {
@@ -64,7 +66,11 @@ impl VaultManager {
             data,
             keys: Some(subkeys),
             salt,
+            search_index: std::collections::HashMap::new(),
         };
+
+        // Rebuild index
+        manager.rebuild_search_index();
 
         // Save to disk
         manager.save()?;
@@ -104,12 +110,15 @@ impl VaultManager {
         let data: VaultData = bincode::deserialize(&decrypted)
             .map_err(|e| VaultError::SerializationError(format!("Vault deserialize: {}", e)))?;
 
-        Ok(VaultManager {
+        let mut manager = VaultManager {
             path: path.to_path_buf(),
             data,
             keys: Some(subkeys),
             salt: vault_file.header.salt,
-        })
+            search_index: std::collections::HashMap::new(),
+        };
+        manager.rebuild_search_index();
+        Ok(manager)
     }
 
     /// Save the vault to disk with full encryption.
@@ -162,12 +171,18 @@ impl VaultManager {
         Ok(())
     }
 
+    /// Retrieve the derived SubKeys if the vault is unlocked.
+    pub fn get_subkeys(&self) -> crate::Result<&crate::crypto::SubKeys> {
+        self.keys.as_ref().ok_or(VaultError::VaultLocked)
+    }
+
     /// Lock the vault — zeroes all keys from memory.
     pub fn lock(&mut self) {
         self.keys = None; // SubKeys implement ZeroizeOnDrop
         self.data.entries.clear();
         self.data.tags.clear();
         self.data.trash.clear();
+        self.search_index.clear();
     }
 
     /// Check if the vault is unlocked.
@@ -310,6 +325,7 @@ impl VaultManager {
             password_changed_at: now,
         };
 
+        self.add_entry_to_index(entry.id, &entry.title, &entry.username, &entry.url, &entry.email, &entry.tags);
         self.data.entries.push(entry);
         self.save()?;
 
@@ -318,69 +334,85 @@ impl VaultManager {
 
     /// Update an existing entry. Tracks password history.
     pub fn update_entry(&mut self, id: Uuid, update: UpdateEntry) -> crate::Result<()> {
-        let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
-
-        let entry = self.data.entries.iter_mut()
-            .find(|e| e.id == id)
-            .ok_or(VaultError::EntryNotFound(id.to_string()))?;
-
+        let entry_key_bytes = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.bytes;
+        let entry_key = crate::crypto::kdf::EntryKey { bytes: entry_key_bytes };
         let now = Utc::now();
 
-        // If password changed, save old one to history and reset breach status
-        if let Some(ref new_password) = update.password {
-            let old_password_bytes = crate::crypto::decrypt_entry(
-                &entry.encrypted_password,
-                &keys.entry_key,
-            )?;
-            let old_password = String::from_utf8(old_password_bytes)
-                .map_err(|e| crate::error::VaultError::DecryptionError(e.to_string()))?;
+        // 1. Perform modifications in a nested block to drop `entry` borrow
+        {
+            let entry = self.data.entries.iter_mut()
+                .find(|e| e.id == id)
+                .ok_or(VaultError::EntryNotFound(id.to_string()))?;
 
-            if &old_password != new_password {
-                // Save current password to history before overwriting
-                let history_item = PasswordHistoryItem {
-                    encrypted_password: entry.encrypted_password.clone(),
-                    changed_at: entry.password_changed_at,
-                };
-                entry.password_history.push(history_item);
-
-                // Keep only last N entries
-                if entry.password_history.len() > MAX_PASSWORD_HISTORY {
-                    entry.password_history.remove(0);
-                }
-
-                entry.encrypted_password = crate::crypto::encrypt_entry(
-                    new_password.as_bytes(),
-                    &keys.entry_key,
+            // If password changed, save old one to history and reset breach status
+            if let Some(ref new_password) = update.password {
+                let old_password_bytes = crate::crypto::decrypt_entry(
+                    &entry.encrypted_password,
+                    &entry_key,
                 )?;
-                entry.password_changed_at = now;
-                entry.breach_status = BreachStatus::Unknown; // Reset breach status
-                entry.strength_score = Some(crate::breach::strength::analyze_password(new_password)); // Recalculate
+                let old_password = String::from_utf8(old_password_bytes)
+                    .map_err(|e| crate::error::VaultError::DecryptionError(e.to_string()))?;
+
+                if &old_password != new_password {
+                    // Save current password to history before overwriting
+                    let history_item = PasswordHistoryItem {
+                        encrypted_password: entry.encrypted_password.clone(),
+                        changed_at: entry.password_changed_at,
+                    };
+                    entry.password_history.push(history_item);
+
+                    // Keep only last N entries
+                    if entry.password_history.len() > MAX_PASSWORD_HISTORY {
+                        entry.password_history.remove(0);
+                    }
+
+                    entry.encrypted_password = crate::crypto::encrypt_entry(
+                        new_password.as_bytes(),
+                        &entry_key,
+                    )?;
+                    entry.password_changed_at = now;
+                    entry.breach_status = BreachStatus::Unknown; // Reset breach status
+                    entry.strength_score = Some(crate::breach::strength::analyze_password(new_password)); // Recalculate
+                }
             }
+
+            if let Some(title) = update.title { entry.title = title; }
+            if let Some(username) = update.username { entry.username = username; }
+            if let Some(url) = update.url { entry.url = url; }
+            if let Some(email) = update.email { entry.email = email; }
+            if let Some(notes) = update.notes { entry.notes = notes; }
+            if let Some(tags) = update.tags { entry.tags = tags; }
+            if let Some(fav) = update.favorite { entry.favorite = fav; }
+            if let Some(pin) = update.pinned { entry.pinned = pin; }
+            if let Some(fields) = update.custom_fields { entry.custom_fields = fields; }
+            if let Some(breach) = update.breach_status { entry.breach_status = breach; }
+
+            // Update TOTP secret
+            if let Some(ref totp_secret) = update.totp_secret {
+                if totp_secret.is_empty() {
+                    entry.encrypted_totp_secret = None;
+                } else {
+                    entry.encrypted_totp_secret = Some(
+                        crate::crypto::encrypt_entry(totp_secret.as_bytes(), &entry_key)?
+                    );
+                }
+            }
+
+            entry.updated_at = now;
         }
 
-        if let Some(title) = update.title { entry.title = title; }
-        if let Some(username) = update.username { entry.username = username; }
-        if let Some(url) = update.url { entry.url = url; }
-        if let Some(email) = update.email { entry.email = email; }
-        if let Some(notes) = update.notes { entry.notes = notes; }
-        if let Some(tags) = update.tags { entry.tags = tags; }
-        if let Some(fav) = update.favorite { entry.favorite = fav; }
-        if let Some(pin) = update.pinned { entry.pinned = pin; }
-        if let Some(fields) = update.custom_fields { entry.custom_fields = fields; }
-        if let Some(breach) = update.breach_status { entry.breach_status = breach; }
+        // 2. Update search index and save
+        self.remove_entry_from_index(id);
 
-        // Update TOTP secret
-        if let Some(ref totp_secret) = update.totp_secret {
-            if totp_secret.is_empty() {
-                entry.encrypted_totp_secret = None;
-            } else {
-                entry.encrypted_totp_secret = Some(
-                    crate::crypto::encrypt_entry(totp_secret.as_bytes(), &keys.entry_key)?
-                );
-            }
-        }
+        let (title, username, url, email, tags) = {
+            let entry = self.data.entries.iter()
+                .find(|e| e.id == id)
+                .ok_or(VaultError::EntryNotFound(id.to_string()))?;
+            (entry.title.clone(), entry.username.clone(), entry.url.clone(), entry.email.clone(), entry.tags.clone())
+        };
 
-        entry.updated_at = now;
+        self.add_entry_to_index(id, &title, &username, &url, &email, &tags);
+
         self.save()?;
 
         Ok(())
@@ -396,6 +428,7 @@ impl VaultManager {
             .ok_or(VaultError::EntryNotFound(id.to_string()))?;
 
         let entry = self.data.entries.remove(pos);
+        self.remove_entry_from_index(id);
 
         // Move to trash instead of permanent delete
         self.data.trash.push(TrashedEntry {
@@ -420,6 +453,8 @@ impl VaultManager {
             .ok_or(VaultError::EntryNotFound(id.to_string()))?;
 
         let trashed = self.data.trash.remove(pos);
+        let e = &trashed.entry;
+        self.add_entry_to_index(e.id, &e.title, &e.username, &e.url, &e.email, &e.tags);
         self.data.entries.push(trashed.entry);
         self.save()?;
         Ok(())

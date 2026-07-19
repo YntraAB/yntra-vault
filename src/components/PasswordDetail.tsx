@@ -13,14 +13,16 @@ import {
   Pin,
   Eye,
   EyeOff,
+  Keyboard,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import CopyButton from './CopyButton';
+import AutotypeButton from './AutotypeButton';
 import PasswordInput from './PasswordInput';
 import { PasswordStrength } from './PasswordStrength';
 import { BreachIndicator } from './BreachIndicator';
 import type { BreachStatus } from '@/lib/backend';
-import { useTotp } from '@/lib/useBackend';
+import { useTotp, useBackend } from '@/lib/useBackend';
 import EntryModal from './EntryModal';
 import Favicon from './Favicon';
 import { formatDate, getFieldLayout } from '@/lib/utils';
@@ -30,7 +32,8 @@ import { Skeleton } from './ui/skeleton';
 
 
 export default function PasswordDetail() {
-  const { selectedEntry, setIsEditing, isEditing, deleteEntry, updateEntry, tags, togglePin, toggleFavorite, isLoadingDetail, addToast } = useAppState();
+  const { selectedEntry, setIsEditing, isEditing, deleteEntry, updateEntry, tags, togglePin, toggleFavorite, isLoadingDetail, addToast, settings } = useAppState();
+  const { backend } = useBackend();
   const [editData, setEditData] = useState(selectedEntry);
   const [showDelConfirm, setShowDelConfirm] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -252,6 +255,34 @@ export default function PasswordDetail() {
 
                     <div className="w-[1px] h-4 bg-[var(--border-subtle)] mx-1" />
 
+                     <button
+                       onClick={async () => {
+                         if (!backend) return;
+                         addToast({
+                           message: 'Smart Autotype active! Focus a username or password input in your browser.',
+                           type: 'info'
+                         });
+                         try {
+                           await backend.runSmartAutotype(
+                             data.username,
+                             data.password,
+                             data.totpSecret || '',
+                             data.url || '',
+                             settings.autotypeLaunchBrowser !== false,
+                             settings.autotypeCharDelayMs || 15,
+                             settings.autotypeFieldDelayMs || 300
+                           );
+                         } catch (err) {
+                           addToast({ message: `Smart Autotype failed: ${err}`, type: 'error' });
+                         }
+                       }}
+                       className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                       title="Start Smart Autotype"
+                     >
+                       <Keyboard size={14} />
+                       <span>Smart Autotype</span>
+                     </button>
+
                     <button
                       onClick={() => setShowEditModal(true)}
                       className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
@@ -306,7 +337,12 @@ export default function PasswordDetail() {
                             </div>
                           )}
                         </div>
-                        {!isEditing && <CopyButton value={data.username} />}
+                        {!isEditing && (
+                          <div className="flex items-center gap-1">
+                            <AutotypeButton value={data.username} />
+                            <CopyButton value={data.username} />
+                          </div>
+                        )}
                       </motion.div>
                     );
                   }
@@ -348,6 +384,7 @@ export default function PasswordDetail() {
                               >
                                 {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                               </button>
+                              <AutotypeButton value={data.password} />
                               <CopyButton value={data.password} />
                             </div>
                           )}
@@ -545,7 +582,12 @@ export default function PasswordDetail() {
                         </div>
                         <div className="truncate text-[13px] text-[var(--text-primary)]">{cf.value}</div>
                       </div>
-                      {!isEditing && <CopyButton value={cf.value} />}
+                      {!isEditing && (
+                        <div className="flex items-center gap-1">
+                          <AutotypeButton value={cf.value} />
+                          <CopyButton value={cf.value} />
+                        </div>
+                      )}
                     </motion.div>
                   );
                 }
@@ -693,7 +735,12 @@ function TOTPField({ secret, index }: { secret: string; index: number }) {
           )}
         </div>
       </div>
-      {code && <CopyButton value={code.code} />}
+      {code && (
+        <div className="flex items-center gap-1">
+          <AutotypeButton value={code.code} />
+          <CopyButton value={code.code} />
+        </div>
+      )}
     </motion.div>
   );
 }

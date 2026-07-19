@@ -336,3 +336,127 @@ pub fn show_in_explorer(path: String) -> Result<(), String> {
     }
 }
 
+// ─── Autotype Commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn autotype(text: String, char_delay_ms: u64) -> Result<(), String> {
+    yntra_vault_core::vault::autotype::autotype_text_with_delay(&text, char_delay_ms).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn run_smart_autotype(
+    username: String,
+    password: String,
+    totp_secret: String,
+    url: String,
+    launch_browser: bool,
+    char_delay_ms: u64,
+    field_delay_ms: u64,
+) -> Result<(), String> {
+    yntra_vault_core::vault::autotype::run_smart_autotype_with_delays(
+        username,
+        password,
+        totp_secret,
+        url,
+        launch_browser,
+        char_delay_ms,
+        field_delay_ms,
+    ).map_err(|e| e.to_string())
+}
+
+// ─── Autostart Commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn enable_autostart() -> Result<(), String> {
+    yntra_vault_core::vault::autostart::enable_autostart().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn disable_autostart() -> Result<(), String> {
+    yntra_vault_core::vault::autostart::disable_autostart().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn is_autostart_enabled() -> Result<bool, String> {
+    yntra_vault_core::vault::autostart::is_autostart_enabled().map_err(|e| e.to_string())
+}
+
+// ─── Sync Commands ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn webdav_upload(
+    url: String,
+    username: String,
+    password: Option<String>,
+    db_path: String,
+) -> Result<(), String> {
+    yntra_vault_core::vault::sync::webdav_upload(
+        &url,
+        &username,
+        password.as_deref(),
+        std::path::Path::new(&db_path),
+    ).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn webdav_download(
+    url: String,
+    username: String,
+    password: Option<String>,
+    dest_db_path: String,
+) -> Result<(), String> {
+    yntra_vault_core::vault::sync::webdav_download(
+        &url,
+        &username,
+        password.as_deref(),
+        std::path::Path::new(&dest_db_path),
+    ).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn run_p2p_sync_listener(
+    listen_addr: String,
+    db_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let subkeys = manager.get_subkeys().map_err(|e| e.to_string())?;
+
+    yntra_vault_core::vault::sync::run_p2p_sync_listener(
+        &listen_addr,
+        &subkeys.hmac_key,
+        std::path::Path::new(&db_path),
+    ).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn run_p2p_sync_client(
+    server_addr: String,
+    db_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let subkeys = manager.get_subkeys().map_err(|e| e.to_string())?;
+
+    yntra_vault_core::vault::sync::run_p2p_sync_client(
+        &server_addr,
+        &subkeys.hmac_key,
+        std::path::Path::new(&db_path),
+    ).map_err(|e| e.to_string())
+}
+
+// ─── Shamir Secret Sharing Recovery Commands ─────────────────────────────
+
+#[tauri::command]
+pub async fn split_master_password(password: String) -> Result<Vec<String>, String> {
+    yntra_vault_core::crypto::split_password(&password).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reconstruct_master_password_hash(share_a: String, share_b: String) -> Result<String, String> {
+    yntra_vault_core::crypto::reconstruct_password_to_hex(&share_a, &share_b).map_err(|e| e.to_string())
+}
+
+

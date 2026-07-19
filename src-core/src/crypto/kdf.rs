@@ -30,6 +30,7 @@ pub struct SubKeys {
     pub vault_key: VaultKey,
     pub entry_key: EntryKey,
     pub hmac_key: HmacKey,
+    pub search_key: SearchKey,
 }
 
 #[derive(Zeroize, ZeroizeOnDrop)]
@@ -45,6 +46,11 @@ pub struct EntryKey {
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct HmacKey {
     pub bytes: [u8; 64],
+}
+
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct SearchKey {
+    pub bytes: [u8; 32],
 }
 
 /// Generate a cryptographically secure random salt (32 bytes).
@@ -73,7 +79,7 @@ pub fn derive_master_key(password: &[u8], salt: &[u8; 32]) -> crate::Result<Mast
     Ok(MasterKey { bytes: output })
 }
 
-/// Derive 3 purpose-separated subkeys from the master key using HKDF-SHA512.
+/// Derive purpose-separated subkeys from the master key using HKDF-SHA512.
 pub fn derive_subkeys(master_key: &MasterKey) -> crate::Result<SubKeys> {
     let hk = Hkdf::<Sha512>::new(None, master_key.as_bytes());
 
@@ -89,10 +95,15 @@ pub fn derive_subkeys(master_key: &MasterKey) -> crate::Result<SubKeys> {
     hk.expand(b"yntra-vault-hmac-integrity-key-v1", &mut hmac_key_bytes)
         .map_err(|e| VaultError::KdfError(format!("HKDF expand (hmac): {}", e)))?;
 
+    let mut search_key_bytes = [0u8; 32];
+    hk.expand(b"yntra-vault-trigram-search-key-v1", &mut search_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (search): {}", e)))?;
+
     Ok(SubKeys {
         vault_key: VaultKey { bytes: vault_key_bytes },
         entry_key: EntryKey { bytes: entry_key_bytes },
         hmac_key: HmacKey { bytes: hmac_key_bytes },
+        search_key: SearchKey { bytes: search_key_bytes },
     })
 }
 

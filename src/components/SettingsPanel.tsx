@@ -40,9 +40,52 @@ export default function SettingsPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [showChangePassword, setShowChangePassword] = useState(false);
 
+  const [launchOnStartup, setLaunchOnStartup] = useState(false);
+
+  // WebDAV settings state
+  const [webdavUrl, setWebdavUrl] = useState('');
+  const [webdavUser, setWebdavUser] = useState('');
+  const [webdavPass, setWebdavPass] = useState('');
+
+  // P2P settings state
+  const [p2pAddr, setP2pAddr] = useState('127.0.0.1:5322');
+  const [isSyncingP2P, setIsSyncingP2P] = useState(false);
+
+  // Shamir settings state
+  const [shamirPass, setShamirPass] = useState('');
+  const [shares, setShares] = useState<string[]>([]);
+  const [shareA, setShareA] = useState('');
+  const [shareB, setShareB] = useState('');
+  const [reconstructedHash, setReconstructedHash] = useState('');
+
   const { backend } = useBackend();
   const [trashItems, setTrashItems] = useState<TrashedEntryPreview[]>([]);
   const [loadingTrash, setLoadingTrash] = useState(false);
+
+  // Query autostart status on panel load
+  useEffect(() => {
+    if (settingsOpen && backend) {
+      backend.isAutostartEnabled()
+        .then(setLaunchOnStartup)
+        .catch((err) => console.error('Failed to query autostart status:', err));
+    }
+  }, [settingsOpen, backend]);
+
+  const handleToggleLaunch = async (v: boolean) => {
+    if (!backend) return;
+    try {
+      if (v) {
+        await backend.enableAutostart();
+      } else {
+        await backend.disableAutostart();
+      }
+      setLaunchOnStartup(v);
+      updateSettings({ launchOnStartup: v });
+      addToast({ message: `Autostart ${v ? 'enabled' : 'disabled'}`, type: 'success' });
+    } catch (err) {
+      addToast({ message: `Autostart toggle failed: ${err}`, type: 'error' });
+    }
+  };
 
   const fetchTrash = useCallback(async () => {
     if (!backend) return;
@@ -223,6 +266,51 @@ export default function SettingsPanel() {
                     </select>
                   </SettingSection>
 
+                  <SettingSection label="Autotype Delays">
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[12px] text-[var(--text-secondary)]">Character Delay (Typing Speed)</span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">{(settings.autotypeCharDelayMs ?? 15)} ms</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={5}
+                          max={100}
+                          step={5}
+                          value={settings.autotypeCharDelayMs ?? 15}
+                          onChange={(e) => updateSettings({ autotypeCharDelayMs: Number(e.target.value) })}
+                          className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[12px] text-[var(--text-secondary)]">Field Transition Delay (Tab delay)</span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">{(settings.autotypeFieldDelayMs ?? 300)} ms</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={100}
+                          max={2000}
+                          step={100}
+                          value={settings.autotypeFieldDelayMs ?? 300}
+                          onChange={(e) => updateSettings({ autotypeFieldDelayMs: Number(e.target.value) })}
+                          className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                        />
+                      </div>
+                    </div>
+                  </SettingSection>
+
+                  <SettingRow
+                    label="Auto-open website on Smart Autotype"
+                    description="Launch default browser directly to the login page"
+                  >
+                    <Toggle
+                      checked={settings.autotypeLaunchBrowser !== false}
+                      onChange={(v) => updateSettings({ autotypeLaunchBrowser: v })}
+                    />
+                  </SettingRow>
+
                   <SettingRow
                     label="Minimize to system tray"
                     description="Keep running in background"
@@ -235,8 +323,8 @@ export default function SettingsPanel() {
 
                   <SettingRow label="Start on system login">
                     <Toggle
-                      checked={settings.launchOnStartup}
-                      onChange={(v) => updateSettings({ launchOnStartup: v })}
+                      checked={launchOnStartup}
+                      onChange={handleToggleLaunch}
                     />
                   </SettingRow>
 
@@ -351,6 +439,99 @@ export default function SettingsPanel() {
                     </button>
                   </SettingSection>
 
+                  <SettingSection label="Emergency Recovery (Shamir's SSSS)">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Generate 3 recovery shares (2-of-3 threshold). Any 2 shares can reconstruct your password hash.
+                    </p>
+                    <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          placeholder="Verify Master Password"
+                          value={shamirPass}
+                          onChange={(e) => setShamirPass(e.target.value)}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!backend || !shamirPass) return;
+                            try {
+                              const res = await backend.splitMasterPassword(shamirPass);
+                              setShares(res);
+                              addToast({ message: 'Recovery shares generated!', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Split failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Split
+                        </button>
+                      </div>
+
+                      {shares.length > 0 && (
+                        <div className="flex flex-col gap-1.5 mt-2 border-t border-[var(--border-subtle)] pt-2.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Your Recovery Shares:</span>
+                          {shares.map((s, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-2 rounded-[3px] bg-[var(--bg-base)] px-2 py-1">
+                              <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">{s}</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(s).catch(() => {});
+                                  addToast({ message: `Share ${idx + 1} copied`, type: 'success' });
+                                }}
+                                className="text-[10px] font-medium text-[var(--text-primary)] hover:underline"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 mt-3">
+                      <span className="text-[11px] font-medium text-[var(--text-primary)]">Reconstruct Password Hash</span>
+                      <div className="flex flex-col gap-2">
+                        <input
+                          type="text"
+                          placeholder="Enter Share 1 (SL-SHARE...)"
+                          value={shareA}
+                          onChange={(e) => setShareA(e.target.value)}
+                          className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Enter Share 2 (SL-SHARE...)"
+                          value={shareB}
+                          onChange={(e) => setShareB(e.target.value)}
+                          className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!backend || !shareA || !shareB) return;
+                            try {
+                              const res = await backend.reconstructMasterPasswordHash(shareA, shareB);
+                              setReconstructedHash(res);
+                              addToast({ message: 'Hash reconstructed successfully', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Reconstruction failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Reconstruct Hash
+                        </button>
+                        {reconstructedHash && (
+                          <div className="flex flex-col gap-0.5 mt-1 bg-[var(--bg-base)] p-2 rounded-[3px]">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Reconstructed SHA-256 Hash</span>
+                            <span className="font-mono text-[10px] text-green-500 break-all select-all">{reconstructedHash}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </SettingSection>
+
                   <SettingSection label="Security Audit">
                     <SecurityDashboard />
                   </SettingSection>
@@ -359,24 +540,130 @@ export default function SettingsPanel() {
 
               {activeTab === 'backup' && (
                 <div className="flex flex-col gap-6">
-                  <SettingSection label="Export">
+                  {/* WebDAV Cloud Sync */}
+                  <SettingSection label="Cloud Sync (WebDAV)">
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Export your vault to an encrypted file
+                      Synchronize your vault database with a remote WebDAV server.
                     </p>
-                    <button className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
-                      Export Vault...
-                    </button>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        placeholder="WebDAV Server URL"
+                        value={webdavUrl}
+                        onChange={(e) => setWebdavUrl(e.target.value)}
+                        className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Username"
+                          value={webdavUser}
+                          onChange={(e) => setWebdavUser(e.target.value)}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <input
+                          type="password"
+                          placeholder="Password"
+                          value={webdavPass}
+                          onChange={(e) => setWebdavPass(e.target.value)}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                      </div>
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            try {
+                              await backend.webdavUpload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
+                              addToast({ message: 'Backup uploaded successfully!', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Upload failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Upload Backup
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            try {
+                              await backend.webdavDownload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
+                              addToast({ message: 'Database restored from backup!', type: 'success' });
+                              await refreshEntries();
+                            } catch (err) {
+                              addToast({ message: `Download failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Download & Restore
+                        </button>
+                      </div>
+                    </div>
                   </SettingSection>
 
-                  <SettingSection label="Import">
+                  {/* Local Network P2P Sync */}
+                  <SettingSection label="Local Network P2P Sync">
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Import entries from a file
+                      Synchronize directly with another device running Yntra Vault on your local network.
                     </p>
-                    <p className="mb-3 text-[12px] text-[var(--destructive)]">
-                      This will merge with existing entries
-                    </p>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        placeholder="IP Address:Port (e.g. 192.168.1.50:5322)"
+                        value={p2pAddr}
+                        onChange={(e) => setP2pAddr(e.target.value)}
+                        className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                      />
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          disabled={isSyncingP2P}
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            setIsSyncingP2P(true);
+                            addToast({ message: `Listening for P2P connection on ${p2pAddr}...`, type: 'info' });
+                            try {
+                              await backend.runP2pSyncListener(p2pAddr, currentVault.path);
+                              addToast({ message: 'Received database update successfully!', type: 'success' });
+                              await refreshEntries();
+                            } catch (err) {
+                              addToast({ message: `Sync failed: ${err}`, type: 'error' });
+                            } finally {
+                              setIsSyncingP2P(false);
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                        >
+                          Listen (Server)
+                        </button>
+                        <button
+                          disabled={isSyncingP2P}
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            setIsSyncingP2P(true);
+                            addToast({ message: `Connecting to ${p2pAddr}...`, type: 'info' });
+                            try {
+                              await backend.runP2pSyncClient(p2pAddr, currentVault.path);
+                              addToast({ message: 'Database sync sent successfully!', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Connection failed: ${err}`, type: 'error' });
+                            } finally {
+                              setIsSyncingP2P(false);
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                        >
+                          Connect (Client)
+                        </button>
+                      </div>
+                    </div>
+                  </SettingSection>
+
+                  {/* Manual Export */}
+                  <SettingSection label="Manual Export">
                     <button className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
-                      Import from File...
+                      Export Vault File...
                     </button>
                   </SettingSection>
                 </div>

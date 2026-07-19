@@ -17,6 +17,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   disableSkeletonDelays: false,
   autoBreachCheck: true,
   showBreachInList: true,
+  autotypeCharDelayMs: 15,
+  autotypeFieldDelayMs: 300,
+  autotypeLaunchBrowser: true,
 };
 
 // ─── Conversion helpers (Rust types ↔ frontend types) ───────────────────

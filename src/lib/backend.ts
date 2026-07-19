@@ -257,6 +257,19 @@ export interface YntraVaultBackend {
   // Vault File Helper
   checkVaultFileExists(path: string): Promise<boolean>;
   showInExplorer(path: string): Promise<void>;
+
+  // Advanced features
+  autotype(text: string, charDelayMs: number): Promise<void>;
+  runSmartAutotype(username: string, password: string, totpSecret: string, url: string, launchBrowser: boolean, charDelayMs: number, fieldDelayMs: number): Promise<void>;
+  enableAutostart(): Promise<void>;
+  disableAutostart(): Promise<void>;
+  isAutostartEnabled(): Promise<boolean>;
+  webdavUpload(url: string, username: string, password: string | null, dbPath: string): Promise<void>;
+  webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
+  runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void>;
+  runP2pSyncClient(serverAddr: string, dbPath: string): Promise<void>;
+  splitMasterPassword(password: string): Promise<string[]>;
+  reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────
