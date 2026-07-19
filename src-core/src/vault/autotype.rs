@@ -398,6 +398,25 @@ fn is_likely_login_text(text: &str) -> bool {
         || t.starts_with("einloggen")
 }
 
+#[cfg(target_os = "windows")]
+fn is_search_or_chat_field(name: &str, class_name: &str, auto_id: &str) -> bool {
+    let n = name.to_lowercase();
+    let c = class_name.to_lowercase();
+    let i = auto_id.to_lowercase();
+    
+    let keywords = [
+        "search", "sök", "find", "chat", "message", "reply", "comment", 
+        "prompt", "filter", "query", "ask", "fråga", "gpt", "copilot"
+    ];
+    
+    for kw in keywords {
+        if n.contains(kw) || c.contains(kw) || i.contains(kw) {
+            return true;
+        }
+    }
+    false
+}
+
 // ─── Background URL Login-Link Resolver ─────────────────────────────────
 
 #[cfg(target_os = "windows")]
@@ -629,8 +648,12 @@ fn try_focus_username_field(
             .map(|b| b.to_string().to_lowercase())
             .unwrap_or_default();
 
-        // Skip search elements
-        if name.contains("search") || name.contains("sök") || name.contains("find") {
+        let auto_id = unsafe { el.CurrentAutomationId() }
+            .map(|id| id.to_string().to_lowercase())
+            .unwrap_or_default();
+
+        // Skip search or chat fields
+        if is_search_or_chat_field(&name, &class_name, &auto_id) {
             continue;
         }
 
@@ -959,6 +982,31 @@ pub fn run_smart_autotype_with_delays(
                     break;
                 }
 
+                // Check if we are in a valid login context
+                let title = get_window_title(hwnd).to_lowercase();
+                let is_login_context = if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
+                    active_window_has_password_field(&automation, &win_el)
+                        || title.contains("login")
+                        || title.contains("sign in")
+                        || title.contains("signin")
+                        || title.contains("log in")
+                        || title.contains("sign-in")
+                        || title.contains("log-in")
+                        || title.contains("auth")
+                        || title.contains("session")
+                        || title.contains("skapa konto")
+                        || title.contains("registrera")
+                        || title.contains("logga in")
+                        || title.contains("lösenord")
+                } else {
+                    false
+                };
+
+                if !is_login_context {
+                    // Not a login/sign-in context, keep waiting or abort if username/password are still pending
+                    continue;
+                }
+
                 let focused: IUIAutomationElement = match automation.GetFocusedElement() {
                     Ok(f) => f,
                     Err(_) => continue,
@@ -991,6 +1039,15 @@ pub fn run_smart_autotype_with_delays(
                     || control_type.contains("inmatningsfält")
                     || class_name.contains("chrome_render_widget_host_view")
                     || class_name.contains("renderwidgethostview");
+
+                let auto_id = focused.CurrentAutomationId()
+                    .map(|id| id.to_string().to_lowercase())
+                    .unwrap_or_default();
+
+                // Skip typing if focused element is a search or chat/prompt field
+                if is_input && is_search_or_chat_field(&name, &class_name, &auto_id) {
+                    continue;
+                }
 
                 if !is_input && !filled_username && focus_attempts < 15 {
                     // Try to auto-focus the username field once every 5 loops (1 second)
