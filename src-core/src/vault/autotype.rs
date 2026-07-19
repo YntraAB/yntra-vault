@@ -1,6 +1,23 @@
 //! Autotype Engine for simulated keyboard typing with configurable delays.
 
 #[cfg(target_os = "windows")]
+struct AutotypeGuard {
+    username: String,
+    password: String,
+    totp_secret: String,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for AutotypeGuard {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.username.zeroize();
+        self.password.zeroize();
+        self.totp_secret.zeroize();
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub fn autotype_text(text: &str) -> crate::Result<()> {
     autotype_text_with_delay(text, 15)
 }
@@ -820,6 +837,12 @@ pub fn run_smart_autotype_with_delays(
     };
 
     std::thread::spawn(move || {
+        let guard = AutotypeGuard {
+            username,
+            password,
+            totp_secret,
+        };
+
         // Resolve the login URL in the background
         let target_url = if !normalized_url.is_empty() && launch_browser {
             let url_clone = normalized_url.clone();
@@ -910,10 +933,11 @@ pub fn run_smart_autotype_with_delays(
             }
 
             let mut last_focused_element_id: Option<String> = None;
-            let mut filled_username = username.is_empty();
-            let mut filled_password = password.is_empty();
-            let mut filled_totp = totp_secret.is_empty();
+            let mut filled_username = guard.username.is_empty();
+            let mut filled_password = guard.password.is_empty();
+            let mut filled_totp = guard.totp_secret.is_empty();
             let mut focus_attempts = 0;
+            let mut target_hwnd = windows::Win32::Foundation::HWND::default();
 
             // Poll for up to 45 seconds (225 polls * 200ms) to allow multi-step transition/2FA
             for loop_counter in 0..225 {
@@ -922,6 +946,18 @@ pub fn run_smart_autotype_with_delays(
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(200));
+
+                let hwnd = GetForegroundWindow();
+                if hwnd.is_invalid() {
+                    continue;
+                }
+
+                if target_hwnd.is_invalid() {
+                    target_hwnd = hwnd;
+                } else if hwnd != target_hwnd {
+                    // Security: Active window switched, abort to prevent leaks!
+                    break;
+                }
 
                 let focused: IUIAutomationElement = match automation.GetFocusedElement() {
                     Ok(f) => f,
@@ -1021,7 +1057,7 @@ pub fn run_smart_autotype_with_delays(
                     if is_totp_field && !filled_totp {
                         last_focused_element_id = Some(element_key.clone());
                         let config = crate::totp::TotpConfig {
-                            secret: totp_secret.clone(),
+                            secret: guard.totp_secret.clone(),
                             ..Default::default()
                         };
                         if let Ok(totp_code) = crate::totp::generate_totp(&config) {
@@ -1046,7 +1082,7 @@ pub fn run_smart_autotype_with_delays(
                             if let Ok(new_focused) = automation.GetFocusedElement() {
                                 user_val = get_element_value(&new_focused);
                             }
-                            let _ = autotype_correct_text(&user_val, &username, char_delay_ms);
+                            let _ = autotype_correct_text(&user_val, &guard.username, char_delay_ms);
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
 
                             // Return to Password
@@ -1058,7 +1094,7 @@ pub fn run_smart_autotype_with_delays(
                         // Clear password and fill
                         let _ = send_ctrl_a_backspace();
                         std::thread::sleep(std::time::Duration::from_millis(100));
-                        let _ = autotype_text_with_delay(&password, char_delay_ms);
+                        let _ = autotype_text_with_delay(&guard.password, char_delay_ms);
                         std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                         let _ = send_enter();
                         filled_password = true;
@@ -1066,7 +1102,7 @@ pub fn run_smart_autotype_with_delays(
                         last_focused_element_id = Some(element_key.clone());
 
                         let current_val = get_element_value(&focused);
-                        let _ = autotype_correct_text(&current_val, &username, char_delay_ms);
+                        let _ = autotype_correct_text(&current_val, &guard.username, char_delay_ms);
                         std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
 
                         // Check if password field is visible in active window
@@ -1082,7 +1118,7 @@ pub fn run_smart_autotype_with_delays(
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                             let _ = send_ctrl_a_backspace();
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            let _ = autotype_text_with_delay(&password, char_delay_ms);
+                            let _ = autotype_text_with_delay(&guard.password, char_delay_ms);
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                             let _ = send_enter();
                             filled_username = true;
