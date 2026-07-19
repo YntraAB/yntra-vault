@@ -462,7 +462,12 @@ export default function PasswordDetail() {
                             </div>
                           )}
                         </div>
-                        {!isEditing && <CopyButton value={data.email} />}
+                        {!isEditing && (
+                          <div className="flex items-center gap-1">
+                            <AutotypeButton value={data.email} />
+                            <CopyButton value={data.email} />
+                          </div>
+                        )}
                       </motion.div>
                     );
                   }
