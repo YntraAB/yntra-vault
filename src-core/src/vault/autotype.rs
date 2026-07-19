@@ -537,6 +537,95 @@ fn try_click_login_link(
 }
 
 #[cfg(target_os = "windows")]
+fn try_focus_username_field(
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation,
+    window_el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+) -> bool {
+    use windows::Win32::UI::Accessibility::{IUIAutomationElementArray, TreeScope_Descendants, UIA_EditControlTypeId};
+
+    let true_cond = match unsafe { automation.CreateTrueCondition() } {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let elements: IUIAutomationElementArray = match unsafe {
+        window_el.FindAll(TreeScope_Descendants, &true_cond)
+    } {
+        Ok(el) => el,
+        Err(_) => return false,
+    };
+
+    let count = match unsafe { elements.Length() } {
+        Ok(c) => c,
+        Err(_) => 0,
+    };
+
+    for i in 0..count {
+        let el = match unsafe { elements.GetElement(i) } {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let control_id = unsafe { el.CurrentControlType() }
+            .map(|id| id.0)
+            .unwrap_or(0);
+
+        let class_name = unsafe { el.CurrentClassName() }
+            .map(|b| b.to_string().to_lowercase())
+            .unwrap_or_default();
+
+        let control_type = unsafe { el.CurrentLocalizedControlType() }
+            .map(|b| b.to_string().to_lowercase())
+            .unwrap_or_default();
+
+        let is_edit = control_id == UIA_EditControlTypeId.0
+            || class_name.contains("edit")
+            || control_type.contains("edit")
+            || control_type.contains("text box");
+
+        if !is_edit {
+            continue;
+        }
+
+        let is_pw = unsafe { el.CurrentIsPassword() }
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if is_pw {
+            continue;
+        }
+
+        let is_offscreen = unsafe { el.CurrentIsOffscreen() }
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if is_offscreen {
+            continue;
+        }
+
+        let is_focusable = unsafe { el.CurrentIsKeyboardFocusable() }
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if !is_focusable {
+            continue;
+        }
+
+        let name = unsafe { el.CurrentName() }
+            .map(|b| b.to_string().to_lowercase())
+            .unwrap_or_default();
+
+        // Skip search elements
+        if name.contains("search") || name.contains("sök") || name.contains("find") {
+            continue;
+        }
+
+        if unsafe { el.SetFocus() }.is_ok() {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(target_os = "windows")]
 fn is_on_register_page(
     automation: &windows::Win32::UI::Accessibility::IUIAutomation,
     window_el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
@@ -803,6 +892,13 @@ pub fn run_smart_autotype_with_delays(
                                 }
                             }
 
+                            // SOTA: Prevent clicking login links if we are already on a login page containing a password field
+                            if !already_on_login_form {
+                                if active_window_has_password_field(&automation, &window_el) {
+                                    already_on_login_form = true;
+                                }
+                            }
+
                             if !already_on_login_form {
                                 if try_click_login_link(&automation, &window_el) {
                                     std::thread::sleep(std::time::Duration::from_millis(1500));
@@ -817,9 +913,10 @@ pub fn run_smart_autotype_with_delays(
             let mut filled_username = username.is_empty();
             let mut filled_password = password.is_empty();
             let mut filled_totp = totp_secret.is_empty();
+            let mut focus_attempts = 0;
 
             // Poll for up to 45 seconds (225 polls * 200ms) to allow multi-step transition/2FA
-            for _ in 0..225 {
+            for loop_counter in 0..225 {
                 if filled_username && filled_password && filled_totp {
                     break;
                 }
@@ -858,6 +955,19 @@ pub fn run_smart_autotype_with_delays(
                     || control_type.contains("inmatningsfält")
                     || class_name.contains("chrome_render_widget_host_view")
                     || class_name.contains("renderwidgethostview");
+
+                if !is_input && !filled_username && focus_attempts < 15 {
+                    // Try to auto-focus the username field once every 5 loops (1 second)
+                    if loop_counter % 5 == 0 {
+                        focus_attempts += 1;
+                        let hwnd = GetForegroundWindow();
+                        if !hwnd.is_invalid() {
+                            if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
+                                let _ = try_focus_username_field(&automation, &win_el);
+                            }
+                        }
+                    }
+                }
 
                 if is_input {
                     let hwnd = GetForegroundWindow();
