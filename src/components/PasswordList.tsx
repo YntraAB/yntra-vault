@@ -227,7 +227,7 @@ function ListItem({
           {entry.title}
         </span>
         <span className="truncate text-[12px] leading-tight text-[var(--text-secondary)]">
-          {entry.username}
+          {entry.username || entry.email || ''}
         </span>
       </div>
 
