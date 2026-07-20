@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::VaultError;
 
 pub const MAGIC_BYTES: &[u8; 4] = b"YNTR";
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 
 /// KDF parameters stored in the file so we can always decrypt.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -37,6 +37,39 @@ impl Default for KdfParams {
             parallelism: 4,
             output_len: 64,
         }
+    }
+}
+
+impl KdfParams {
+    /// Minimum acceptable thresholds to prevent downgrade attacks via crafted .vdb files.
+    const MIN_MEMORY_KB: u32 = 65_536;   // 64 MB absolute minimum
+    const MIN_ITERATIONS: u32 = 2;
+    const MIN_PARALLELISM: u32 = 1;
+    const REQUIRED_OUTPUT_LEN: usize = 64;
+
+    /// Reject KDF params below security minimums.
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.memory_kb < Self::MIN_MEMORY_KB {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF memory_kb {} below minimum {}", self.memory_kb, Self::MIN_MEMORY_KB
+            )));
+        }
+        if self.iterations < Self::MIN_ITERATIONS {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF iterations {} below minimum {}", self.iterations, Self::MIN_ITERATIONS
+            )));
+        }
+        if self.parallelism < Self::MIN_PARALLELISM {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF parallelism {} below minimum {}", self.parallelism, Self::MIN_PARALLELISM
+            )));
+        }
+        if self.output_len != Self::REQUIRED_OUTPUT_LEN {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF output_len {} must be {}", self.output_len, Self::REQUIRED_OUTPUT_LEN
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -157,6 +190,9 @@ impl VaultFile {
             .map_err(|_| VaultError::InvalidFormat("Failed to read KDF params".into()))?;
         let kdf_params: KdfParams = bincode::deserialize(&kdf_bytes)
             .map_err(|e| VaultError::InvalidFormat(format!("Invalid KDF params: {}", e)))?;
+
+        // Reject weakened KDF parameters (prevents downgrade attacks)
+        kdf_params.validate()?;
 
         // Payload length
         let mut payload_len_bytes = [0u8; 8];

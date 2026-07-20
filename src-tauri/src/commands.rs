@@ -459,4 +459,88 @@ pub async fn reconstruct_master_password_hash(share_a: String, share_b: String) 
     yntra_vault_core::crypto::reconstruct_password_to_hex(&share_a, &share_b).map_err(|e| e.to_string())
 }
 
+// ─── Export Commands ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn export_vault(
+    dest_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let source = manager.info().path;
+    std::fs::copy(&source, &dest_path)
+        .map_err(|e| format!("Export failed: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_vault_path(state: State<'_, AppState>) -> Result<String, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    Ok(manager.info().path)
+}
+
+// ─── Browser Extension Setup Commands ────────────────────────────────────
+
+#[tauri::command]
+pub async fn install_browser_extension() -> Result<String, String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let host_name = "com.yntra.vault";
+
+    // Build native host manifest path alongside the main executable
+    let exe_dir = exe_path.parent().ok_or("No parent dir for exe")?;
+    let host_exe = exe_dir.join("yntra-vault-native-host.exe");
+
+    if !host_exe.exists() {
+        return Err(format!("Native host binary not found at: {}", host_exe.display()));
+    }
+
+    let manifest = serde_json::json!({
+        "name": host_name,
+        "description": "Yntra Vault native messaging host",
+        "path": host_exe.to_string_lossy(),
+        "type": "stdio",
+        "allowed_origins": [
+            "chrome-extension://yntra-vault-extension/"
+        ]
+    });
+
+    #[cfg(target_os = "windows")]
+    {
+        // Write manifest JSON next to the host binary
+        let manifest_path = exe_dir.join("com.yntra.vault.json");
+        std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap())
+            .map_err(|e| format!("Failed to write manifest: {}", e))?;
+
+        // Register in Windows Registry for Chrome
+        let reg_path = format!("SOFTWARE\\Google\\Chrome\\NativeMessagingHosts\\{}", host_name);
+        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+        let (key, _) = hkcu.create_subkey(&reg_path)
+            .map_err(|e| format!("Registry write failed: {}", e))?;
+        key.set_value("", &manifest_path.to_string_lossy().to_string())
+            .map_err(|e| format!("Registry value write failed: {}", e))?;
+
+        return Ok(format!("Installed for Chrome. Manifest: {}", manifest_path.display()));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // macOS/Linux: write manifest to well-known paths
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+
+        #[cfg(target_os = "macos")]
+        let chrome_dir = format!("{}/Library/Application Support/Google/Chrome/NativeMessagingHosts", home);
+        #[cfg(target_os = "linux")]
+        let chrome_dir = format!("{}/.config/google-chrome/NativeMessagingHosts", home);
+
+        std::fs::create_dir_all(&chrome_dir).ok();
+        let manifest_path = format!("{}/{}.json", chrome_dir, host_name);
+        std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap())
+            .map_err(|e| format!("Failed to write manifest: {}", e))?;
+
+        Ok(format!("Installed for Chrome. Manifest: {}", manifest_path))
+    }
+}
 

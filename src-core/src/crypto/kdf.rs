@@ -26,6 +26,7 @@ impl MasterKey {
     }
 }
 
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct SubKeys {
     pub vault_key: VaultKey,
     pub entry_key: EntryKey,

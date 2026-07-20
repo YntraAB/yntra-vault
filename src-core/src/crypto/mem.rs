@@ -46,19 +46,20 @@ impl ScrambledString {
 
     /// Decrypt the ScrambledString back into a Zeroizing<String> wrapper,
     /// which automatically zeroes out its contents when dropped.
-    pub fn decrypt(&self) -> Zeroizing<String> {
+    pub fn decrypt(&self) -> crate::Result<Zeroizing<String>> {
         let key = get_ephemeral_key();
-        let cipher = XChaCha20Poly1305::new_from_slice(key).unwrap();
+        let cipher = XChaCha20Poly1305::new_from_slice(key)
+            .map_err(|e| crate::error::VaultError::DecryptionError(format!("Ephemeral key init: {}", e)))?;
         let nonce = XNonce::from_slice(&self.nonce);
 
         let plaintext_bytes = cipher
             .decrypt(nonce, self.ciphertext.as_slice())
-            .expect("Decryption of scrambled heap string failed");
+            .map_err(|_| crate::error::VaultError::DecryptionError("Scrambled string decrypt failed".into()))?;
 
         let string = String::from_utf8(plaintext_bytes)
-            .expect("Scrambled string is not valid UTF-8");
+            .map_err(|_| crate::error::VaultError::DecryptionError("Scrambled string not valid UTF-8".into()))?;
 
-        Zeroizing::new(string)
+        Ok(Zeroizing::new(string))
     }
 }
 
@@ -139,6 +140,12 @@ pub fn prevent_core_dumps() {
             rlim_max: 0,
         };
         let _ = libc::setrlimit(libc::RLIMIT_CORE, &limit);
+
+        // Prevent ptrace attach (blocks debuggers from reading process memory)
+        #[cfg(target_os = "linux")]
+        {
+            let _ = libc::prctl(libc::PR_SET_DUMPABLE, 0);
+        }
     }
 }
 
@@ -152,7 +159,7 @@ mod tests {
         let scrambled = ScrambledString::new(secret);
         assert_ne!(secret.as_bytes(), scrambled.ciphertext.as_slice());
 
-        let decrypted = scrambled.decrypt();
+        let decrypted = scrambled.decrypt().unwrap();
         assert_eq!(*decrypted, secret);
     }
 

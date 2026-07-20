@@ -81,8 +81,40 @@ mod parent_validation {
 #[cfg(not(target_os = "windows"))]
 mod parent_validation {
     pub fn verify_parent_process() -> bool {
-        // Fallback to true for cross-platform portability.
-        true
+        let ppid = unsafe { libc::getppid() } as u32;
+
+        #[cfg(target_os = "linux")]
+        {
+            let exe_link = format!("/proc/{}/exe", ppid);
+            if let Ok(path) = std::fs::read_link(&exe_link) {
+                let path_str = path.to_string_lossy().to_lowercase();
+                let allowed = [
+                    "chrome", "firefox", "msedge", "brave", "vivaldi", "arc",
+                ];
+                return allowed.iter().any(|exe| path_str.contains(exe));
+            }
+            false
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let mut buf = vec![0u8; 4096];
+            let ret = unsafe {
+                libc::proc_pidpath(
+                    ppid as i32,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    buf.len() as u32,
+                )
+            };
+            if ret > 0 {
+                let path_str = String::from_utf8_lossy(&buf[..ret as usize]).to_lowercase();
+                let allowed = [
+                    "chrome", "firefox", "safari", "brave", "vivaldi", "arc",
+                ];
+                return allowed.iter().any(|exe| path_str.contains(exe));
+            }
+            false
+        }
     }
 }
 

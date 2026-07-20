@@ -15,6 +15,10 @@ export interface PasswordEntry {
   createdAt: string;
   updatedAt: string;
   breachStatus?: import('@/lib/backend').BreachStatus;
+  hasPasskey: boolean;
+  passkeyPublicKey?: number[];
+  generatePasskey?: boolean;
+  passkeyAction?: 'generate' | 'remove';
 }
 
 export interface CustomField {

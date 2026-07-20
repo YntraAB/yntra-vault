@@ -3,9 +3,10 @@
 use p256::ecdsa::{SigningKey, VerifyingKey, Signature};
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::elliptic_curve::rand_core::OsRng;
+use zeroize::Zeroizing;
 
 pub struct PasskeyPair {
-    pub private_key: Vec<u8>,
+    pub private_key: Zeroizing<Vec<u8>>,
     pub public_key: Vec<u8>,
 }
 
@@ -16,7 +17,7 @@ pub fn generate_passkey_pair() -> crate::Result<PasskeyPair> {
     let verifying_key = VerifyingKey::from(&signing_key);
 
     Ok(PasskeyPair {
-        private_key: signing_key.to_bytes().to_vec(),
+        private_key: Zeroizing::new(signing_key.to_bytes().to_vec()),
         public_key: verifying_key.to_sec1_bytes().to_vec(),
     })
 }

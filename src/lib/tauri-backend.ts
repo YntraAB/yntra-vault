@@ -229,6 +229,20 @@ export class TauriBackend implements YntraVaultBackend {
   async reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string> {
     return invoke('reconstruct_master_password_hash', { shareA, shareB });
   }
+
+  // Export
+  async exportVault(destPath: string): Promise<void> {
+    return invoke('export_vault', { destPath });
+  }
+
+  async getVaultPath(): Promise<string> {
+    return invoke('get_vault_path');
+  }
+
+  // Browser Extension
+  async installBrowserExtension(): Promise<string> {
+    return invoke('install_browser_extension');
+  }
 }
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────

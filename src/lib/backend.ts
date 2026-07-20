@@ -36,6 +36,7 @@ export interface EntryPreview {
   breach_status: BreachStatus;
   strength_score: StrengthScore | null;
   password_age_days: number;
+  has_passkey: boolean;
 }
 
 export interface DecryptedEntry {
@@ -58,6 +59,8 @@ export interface DecryptedEntry {
   breach_status: BreachStatus;
   strength_score: StrengthScore | null;
   password_history_count: number;
+  has_passkey: boolean;
+  passkey_public_key: number[] | null;
 }
 
 export interface NewEntry {
@@ -71,6 +74,7 @@ export interface NewEntry {
   totp_secret: string | null;
   custom_fields: CustomField[];
   entry_type: EntryType | null;
+  generate_passkey?: boolean;
 }
 
 export interface UpdateEntry {
@@ -86,6 +90,7 @@ export interface UpdateEntry {
   totp_secret?: string;
   custom_fields?: CustomField[];
   breach_status?: BreachStatus;
+  passkey_action?: 'generate' | 'remove';
 }
 
 export interface CustomField {
@@ -270,6 +275,13 @@ export interface YntraVaultBackend {
   runP2pSyncClient(serverAddr: string, dbPath: string): Promise<void>;
   splitMasterPassword(password: string): Promise<string[]>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
+
+  // Export
+  exportVault(destPath: string): Promise<void>;
+  getVaultPath(): Promise<string>;
+
+  // Browser Extension
+  installBrowserExtension(): Promise<string>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────

@@ -1,58 +1,85 @@
 # Yntra Vault
 
-An offline-first, zero-knowledge desktop password manager designed for high-security environments.
+An offline-first, zero-knowledge desktop password manager built with Rust, Tauri, and React.
 
-Yntra Vault operates fully locally and keeps your sensitive information private, utilizing standard cryptographic protocols to ensure security at every layer.
+All data stays fully local — no cloud, no telemetry, no third-party dependencies at runtime.
 
-## Key Features
+---
 
-- **Multi-Layer Encryption Pipeline**:
-  - **KDF**: Argon2id (256MB RAM, 4 passes) → HKDF-SHA512 → 3 subkeys (Vault, Entry, and HMAC Keys).
-  - **Vault Level**: XChaCha20-Poly1305.
-  - **Entry Level**: AES-256-GCM (each entry has its own unique, randomly generated key).
-  - **Integrity**: HMAC-SHA512.
-- **Zero-knowledge & Offline-first**: All data stays fully local on your device. There is no cloud storage, no trackers, and no unsolicited network requests.
-- **TOTP Authenticator**: Built-in compliant 2FA generator supporting SHA-1, SHA-256, and SHA-512 with automatic countdown indicators.
-- **Password History**: Roll back up to 10 previous passwords per entry.
-- **Security Audit**: In-memory scan for duplicate, weak, old, or breached passwords.
-- **Privacy-Friendly Breach Checks**: Real-time password check using the HIBP API with k-anonymity (transmits only the first 5 characters of the SHA-1 hash).
+## Features
+
+### Security
+- **Multi-layer encryption**: Argon2id → HKDF-SHA512 → XChaCha20-Poly1305 (vault) + AES-256-GCM (per-entry)
+- **HMAC-SHA512** integrity verification before decryption
+- **Zero-knowledge**: master password never leaves your device
+- **Memory safety**: all sensitive data zeroized on drop/lock (via `zeroize` crate)
+- **Passkey support**: ES256 (ECDSA P-256) keypair generation per entry
+
+### Password Management
+- **Entry types**: Login, Credit Card, Identity, Secure Note, SSH Key, API Key, Wi-Fi, Crypto Wallet
+- **Custom fields**: arbitrary key-value pairs per entry
+- **Password history**: rollback to previous passwords
+- **Tags & favorites**: organize and pin entries
+- **Soft delete**: 30-day trash with automatic cleanup
+
+### Tools
+- **TOTP Authenticator**: built-in 2FA (SHA-1, SHA-256, SHA-512) with countdown timer
+- **Password Generator**: random (configurable charset) + Diceware (word-based)
+- **Security Audit**: scan for weak, reused, old, and breached passwords
+- **Breach Check**: HIBP API with k-anonymity (only 5-char SHA-1 prefix sent)
+- **Autotype**: OS-level credential input with field classification and window lock
+- **Browser Integration**: Chrome/Firefox/Edge native messaging host
+- **Encrypted Search**: trigram-based fuzzy search over HMAC-hashed index
+
+### File Format
+- **`.vdb` vault file**: versioned binary format with automatic migration
+- **v2 payload**: MessagePack (self-describing) — future field additions never break old vaults
+- **Export**: copy vault file to custom location via file dialog
+
+---
 
 ## Tech Stack
 
-- **Backend**: Rust core (`yntra-vault-core`) + Tauri framework (`yntra-vault-app`)
-- **Frontend**: React + TypeScript + Vite
-- **Styling**: Tailwind CSS & Framer Motion for high-fidelity micro-interactions
+| Layer | Technology |
+|-------|-----------|
+| Core Engine | Rust (`yntra-vault-core`) |
+| Desktop Shell | Tauri 2 (`yntra-vault-app`) |
+| Frontend | React 19 + TypeScript + Vite |
+| Styling | Tailwind CSS + Framer Motion |
+| Fonts | Geist Sans + Geist Mono |
 
-## Development Setup
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Node.js / Bun](https://bun.sh)
+- [Rust](https://www.rust-lang.org/tools/install) (stable)
+- [Bun](https://bun.sh) (or Node.js)
 
-### Installation & Run
+### Install & Run
 
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd yntra-vault
-   ```
+```bash
+git clone <repository-url>
+cd yntra-vault
+bun install
+bun run tauri dev
+```
 
-2. Install dependencies:
-   ```bash
-   bun install
-   ```
+### Build Production Installer
 
-3. Launch the desktop application in development mode:
-   ```bash
-   bun run tauri dev
-   ```
+```bash
+bun run tauri build
+```
 
-4. Build production installers:
-   ```bash
-   bun run tauri build
-   ```
+### Run Tests
+
+```bash
+cargo test --lib --manifest-path src-core/Cargo.toml
+```
+
+---
 
 ## License
 
-This project is licensed under the MIT License.
+MIT

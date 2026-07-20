@@ -106,9 +106,30 @@ impl VaultManager {
 
         let decrypted = decrypt_vault(&encrypted_blob, &subkeys.vault_key)?;
 
-        // Deserialize vault data
-        let data: VaultData = bincode::deserialize(&decrypted)
-            .map_err(|e| VaultError::SerializationError(format!("Vault deserialize: {}", e)))?;
+        // Deserialize vault data based on file format version
+        let data: VaultData = match vault_file.header.version {
+            // v1: bincode payload (legacy format)
+            1 => {
+                match bincode::deserialize(&decrypted) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        // Pre-passkey bincode layout
+                        let legacy: LegacyVaultData = bincode::deserialize(&decrypted)
+                            .map_err(|e| VaultError::SerializationError(
+                                format!("Legacy vault deserialize: {}", e)
+                            ))?;
+                        legacy.into_current()
+                    }
+                }
+            }
+            // v2+: MessagePack payload (self-describing, future-proof)
+            _ => {
+                rmp_serde::from_slice(&decrypted)
+                    .map_err(|e| VaultError::SerializationError(
+                        format!("Vault deserialize: {}", e)
+                    ))?
+            }
+        };
 
         let mut manager = VaultManager {
             path: path.to_path_buf(),
@@ -133,8 +154,8 @@ impl VaultManager {
         let cutoff = Utc::now() - chrono::Duration::days(30);
         self.data.trash.retain(|t| t.deleted_at > cutoff);
 
-        // Serialize vault data
-        let serialized = bincode::serialize(&self.data)
+        // Serialize vault data as MessagePack (v2 format — self-describing)
+        let serialized = rmp_serde::to_vec(&self.data)
             .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {}", e)))?;
 
         // Encrypt (Layer 1: XChaCha20-Poly1305)
@@ -231,6 +252,7 @@ impl VaultManager {
                 breach_status: e.breach_status.clone(),
                 strength_score: e.strength_score.clone(),
                 password_age_days: age,
+                has_passkey: e.encrypted_passkey.is_some(),
             }
         }).collect())
     }
@@ -280,6 +302,8 @@ impl VaultManager {
             breach_status: entry.breach_status.clone(),
             strength_score: entry.strength_score.clone(),
             password_history_count: entry.password_history.len(),
+            has_passkey: entry.encrypted_passkey.is_some(),
+            passkey_public_key: entry.passkey_public_key.clone(),
         })
     }
 
@@ -303,7 +327,7 @@ impl VaultManager {
             None
         };
 
-        let entry = Entry {
+        let mut entry = Entry {
             id,
             title: new.title,
             username: new.username,
@@ -323,7 +347,18 @@ impl VaultManager {
             breach_status: BreachStatus::Unknown,
             strength_score: Some(crate::breach::strength::analyze_password(&new.password)),
             password_changed_at: now,
+            encrypted_passkey: None,
+            passkey_public_key: None,
         };
+
+        // Generate passkey if requested (single keypair for both fields)
+        if new.generate_passkey.unwrap_or(false) {
+            let pair = crate::crypto::passkey::generate_passkey_pair()?;
+            entry.encrypted_passkey = Some(
+                crate::crypto::encrypt_entry(&pair.private_key, &keys.entry_key)?
+            );
+            entry.passkey_public_key = Some(pair.public_key);
+        }
 
         self.add_entry_to_index(entry.id, &entry.title, &entry.username, &entry.url, &entry.email, &entry.tags);
         self.data.entries.push(entry);
@@ -395,6 +430,24 @@ impl VaultManager {
                     entry.encrypted_totp_secret = Some(
                         crate::crypto::encrypt_entry(totp_secret.as_bytes(), &entry_key)?
                     );
+                }
+            }
+
+            // Handle passkey: generate new, or remove existing
+            if let Some(ref action) = update.passkey_action {
+                match action.as_str() {
+                    "generate" => {
+                        let pair = crate::crypto::passkey::generate_passkey_pair()?;
+                        entry.encrypted_passkey = Some(
+                            crate::crypto::encrypt_entry(&pair.private_key, &entry_key)?
+                        );
+                        entry.passkey_public_key = Some(pair.public_key);
+                    }
+                    "remove" => {
+                        entry.encrypted_passkey = None;
+                        entry.passkey_public_key = None;
+                    }
+                    _ => {}
                 }
             }
 
@@ -730,6 +783,8 @@ pub struct NewEntry {
     pub totp_secret: Option<String>,
     pub custom_fields: Vec<CustomField>,
     pub entry_type: Option<EntryType>,
+    /// If true, auto-generate an ES256 passkey keypair for this entry
+    pub generate_passkey: Option<bool>,
 }
 
 /// Data for updating an existing entry (all fields optional).
@@ -747,6 +802,8 @@ pub struct UpdateEntry {
     pub totp_secret: Option<String>,
     pub custom_fields: Option<Vec<CustomField>>,
     pub breach_status: Option<BreachStatus>,
+    /// "generate" to create new passkey, "remove" to delete existing
+    pub passkey_action: Option<String>,
 }
 
 /// Fully decrypted entry for the detail view.
@@ -771,6 +828,92 @@ pub struct DecryptedEntry {
     pub breach_status: BreachStatus,
     pub strength_score: Option<StrengthScore>,
     pub password_history_count: usize,
+    pub has_passkey: bool,
+    pub passkey_public_key: Option<Vec<u8>>,
+}
+
+// ─── Legacy Migration Types ─────────────────────────────────────────────
+// Pre-passkey Entry layout for backwards-compatible deserialization.
+// Vaults saved before passkey support used this layout. On open, they
+// are migrated to the current format and re-saved on next write.
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct LegacyEntry {
+    pub id: Uuid,
+    pub title: String,
+    pub username: String,
+    pub encrypted_password: crate::crypto::cipher::EncryptedBlob,
+    pub url: String,
+    pub email: String,
+    pub notes: String,
+    pub tags: Vec<String>,
+    pub favorite: bool,
+    pub pinned: bool,
+    pub encrypted_totp_secret: Option<crate::crypto::cipher::EncryptedBlob>,
+    pub custom_fields: Vec<CustomField>,
+    pub entry_type: EntryType,
+    pub created_at: chrono::DateTime<Utc>,
+    pub updated_at: chrono::DateTime<Utc>,
+    pub password_history: Vec<PasswordHistoryItem>,
+    pub breach_status: BreachStatus,
+    pub strength_score: Option<StrengthScore>,
+    pub password_changed_at: chrono::DateTime<Utc>,
+}
+
+impl LegacyEntry {
+    fn into_current(self) -> Entry {
+        Entry {
+            id: self.id,
+            title: self.title,
+            username: self.username,
+            encrypted_password: self.encrypted_password,
+            url: self.url,
+            email: self.email,
+            notes: self.notes,
+            tags: self.tags,
+            favorite: self.favorite,
+            pinned: self.pinned,
+            encrypted_totp_secret: self.encrypted_totp_secret,
+            custom_fields: self.custom_fields,
+            entry_type: self.entry_type,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            password_history: self.password_history,
+            breach_status: self.breach_status,
+            strength_score: self.strength_score,
+            password_changed_at: self.password_changed_at,
+            encrypted_passkey: None,
+            passkey_public_key: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct LegacyTrashedEntry {
+    pub entry: LegacyEntry,
+    pub deleted_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct LegacyVaultData {
+    pub metadata: VaultMetadata,
+    pub entries: Vec<LegacyEntry>,
+    pub tags: Vec<Tag>,
+    pub trash: Vec<LegacyTrashedEntry>,
+}
+
+impl LegacyVaultData {
+    fn into_current(self) -> VaultData {
+        VaultData {
+            metadata: self.metadata,
+            entries: self.entries.into_iter().map(|e| e.into_current()).collect(),
+            tags: self.tags,
+            trash: self.trash.into_iter().map(|t| TrashedEntry {
+                entry: t.entry.into_current(),
+                deleted_at: t.deleted_at,
+            }).collect(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -819,6 +962,7 @@ mod tests {
             totp_secret: Some("JBSWY3DPEHPK3PXP".to_string()),
             custom_fields: Vec::new(),
             entry_type: Some(EntryType::Login),
+            generate_passkey: None,
         };
         
         let id1 = manager.add_entry(entry1).unwrap();
@@ -852,6 +996,7 @@ mod tests {
             totp_secret: None,
             custom_fields: Vec::new(),
             entry_type: Some(EntryType::Login),
+            generate_passkey: None,
         };
         let id2 = manager.add_entry(entry2).unwrap();
         

@@ -40,6 +40,12 @@ pub struct Entry {
     pub strength_score: Option<StrengthScore>,
     /// When the password was last changed
     pub password_changed_at: DateTime<Utc>,
+    /// Passkey private key — encrypted with per-entry AES-256-GCM
+    #[serde(default)]
+    pub encrypted_passkey: Option<EncryptedBlob>,
+    /// Passkey public key — SEC1 uncompressed format (65 bytes for P-256)
+    #[serde(default)]
+    pub passkey_public_key: Option<Vec<u8>>,
 }
 
 /// Lightweight entry preview for list views — no decryption needed.
@@ -59,6 +65,7 @@ pub struct EntryPreview {
     pub breach_status: BreachStatus,
     pub strength_score: Option<StrengthScore>,
     pub password_age_days: i64,
+    pub has_passkey: bool,
 }
 
 /// Pre-built entry templates for common account types.

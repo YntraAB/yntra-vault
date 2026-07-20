@@ -212,6 +212,7 @@ mod tests {
             totp_secret: None,
             custom_fields: Vec::new(),
             entry_type: None,
+            generate_passkey: None,
         };
 
         let entry2 = NewEntry {
@@ -225,6 +226,7 @@ mod tests {
             totp_secret: None,
             custom_fields: Vec::new(),
             entry_type: None,
+            generate_passkey: None,
         };
 
         let id1 = manager.add_entry(entry1).unwrap();

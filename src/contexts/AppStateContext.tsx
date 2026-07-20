@@ -41,6 +41,7 @@ function entryPreviewToPasswordEntry(preview: EntryPreview, password = '••�
     createdAt: preview.updated_at,
     updatedAt: preview.updated_at,
     breachStatus: preview.breach_status,
+    hasPasskey: preview.has_passkey || false,
   };
 }
 
@@ -78,6 +79,8 @@ function decryptedEntryToPasswordEntry(entry: DecryptedEntry): PasswordEntry {
     createdAt: entry.created_at,
     updatedAt: entry.updated_at,
     breachStatus: entry.breach_status,
+    hasPasskey: entry.has_passkey || false,
+    passkeyPublicKey: entry.passkey_public_key || undefined,
   };
 }
 
@@ -230,7 +233,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const entriesList = previews.map(p => entryPreviewToPasswordEntry(p));
 
       // One-time migration to reset breach status for the bug fix (per-vault)
-      const resetKey = `yntra-vault-breach-reset-v1:${currentVault.path}`;
+      const resetKey = `yntra-vault-breach-reset-v2:${currentVault.path}`;
       const resetDone = localStorage.getItem(resetKey);
       if (!resetDone && entriesList.length > 0) {
         // Update local status to Unknown immediately so checker starts
@@ -430,6 +433,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           updatePayload.totp_secret = entry.totpSecret;
         }
 
+        if (entry.passkeyAction) {
+          updatePayload.passkey_action = entry.passkeyAction;
+        }
+
         await backend.updateEntry(entry.id, updatePayload);
         setDecryptedCache((prev) => {
           const next = { ...prev };
@@ -478,6 +485,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           totp_secret: entry.totpSecret || null,
           custom_fields: customFieldsToSend,
           entry_type: null,
+          generate_passkey: entry.generatePasskey,
         });
         await refreshEntries();
         addToast({ message: 'Entry created', type: 'success' });

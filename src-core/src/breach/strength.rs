@@ -120,6 +120,9 @@ pub fn analyze_password(password: &str) -> StrengthScore {
     if !has_digit && len >= 8 { warnings.push("Add numbers".to_string()); }
     if !has_symbol && len >= 8 { warnings.push("Add special characters".to_string()); }
 
+    // Clamp entropy floor after all penalties
+    entropy = entropy.max(0.0);
+
     // Classify
     let level = match entropy as u32 {
         0..=24 => StrengthLevel::Critical,

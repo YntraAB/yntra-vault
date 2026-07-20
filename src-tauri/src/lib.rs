@@ -66,6 +66,11 @@ pub fn run() {
             commands::run_p2p_sync_client,
             commands::split_master_password,
             commands::reconstruct_master_password_hash,
+            // Export
+            commands::export_vault,
+            commands::get_vault_path,
+            // Browser Extension
+            commands::install_browser_extension,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};

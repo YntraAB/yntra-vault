@@ -8,6 +8,18 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::vault::manager::VaultManager;
 
+/// Constant-time byte comparison to prevent timing side-channel attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 // ─── Windows Named Pipe Server ──────────────────────────────────────────
 #[cfg(target_os = "windows")]
 pub fn start_ipc_server(manager_state: Arc<Mutex<Option<VaultManager>>>) {
@@ -103,10 +115,13 @@ fn process_ipc_request(req_bytes: &[u8], manager_state: &Arc<Mutex<Option<VaultM
         if let Some(action) = json.get("action").and_then(|v| v.as_str()) {
             if action == "get_credentials" {
                 if let Some(domain) = json.get("domain").and_then(|v| v.as_str()) {
-                    // Verify session token
+                    // Verify session token (constant-time comparison)
                     let incoming_token = json.get("session_token").and_then(|v| v.as_str()).unwrap_or("");
                     if let Ok(stored_token) = crate::crypto::read_session_token() {
-                        if incoming_token.is_empty() || incoming_token != stored_token {
+                        if incoming_token.is_empty()
+                            || incoming_token.len() != stored_token.len()
+                            || !constant_time_eq(incoming_token.as_bytes(), stored_token.as_bytes())
+                        {
                             return b"{\"error\": \"Invalid session token\"}".to_vec();
                         }
                     } else {
@@ -114,7 +129,10 @@ fn process_ipc_request(req_bytes: &[u8], manager_state: &Arc<Mutex<Option<VaultM
                     }
 
                     // Query credentials from vault
-                    let lock = manager_state.lock().unwrap();
+                    let lock = match manager_state.lock() {
+                        Ok(l) => l,
+                        Err(_) => return b"{\"error\": \"Internal state lock failed\"}".to_vec(),
+                    };
                     if let Some(ref manager) = *lock {
                         if let Ok(entries) = manager.search_entries(domain) {
                             for entry_preview in entries {

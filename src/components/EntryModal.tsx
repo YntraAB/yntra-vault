@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import {
   X, Plus, Eye, EyeOff, Wand2, GripVertical,
-  Globe, User, Mail, Key, FileText, ShieldCheck, Loader2,
+  Globe, User, Mail, Key, FileText, ShieldCheck, Loader2, Fingerprint,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { PasswordStrength } from './PasswordStrength';
@@ -44,9 +44,13 @@ const EMPTY_ENTRY: Omit<PasswordEntry, 'id' | 'createdAt' | 'updatedAt'> = {
   pinned: false,
   totpSecret: undefined,
   customFields: [],
+  hasPasskey: false,
+  passkeyPublicKey: undefined,
+  generatePasskey: undefined,
+  passkeyAction: undefined,
 };
 
-type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret';
+type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret' | 'passkey';
 
 const PRESETS = [
   { id: 'login-user', name: 'Login (Username)', fields: ['username', 'password', 'url'] as StandardFieldKey[] },
@@ -63,6 +67,7 @@ const FIELD_METADATA: { key: StandardFieldKey; label: string; icon: React.ReactN
   { key: 'url', label: 'Website (URL)', icon: <Globe size={13} /> },
   { key: 'totpSecret', label: 'Two-Factor Auth (TOTP)', icon: <ShieldCheck size={13} /> },
   { key: 'notes', label: 'Secure Note', icon: <FileText size={13} /> },
+  { key: 'passkey', label: 'Passkey (ES256)', icon: <Fingerprint size={13} /> },
 ];
 
 export default function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
@@ -79,7 +84,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
   const titleRef = useRef<HTMLInputElement>(null);
 
   const activeFields = fieldsOrder.filter((f): f is StandardFieldKey =>
-    ['username', 'password', 'email', 'url', 'notes', 'totpSecret'].includes(f)
+    ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey'].includes(f)
   );
 
   // Populate form on open
@@ -93,6 +98,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
         if (editEntry.email) standardActive.push('email');
         if (editEntry.notes) standardActive.push('notes');
         if (editEntry.totpSecret) standardActive.push('totpSecret');
+        if (editEntry.hasPasskey) standardActive.push('passkey');
         if (standardActive.length === 0) {
           standardActive.push('username', 'password', 'url');
         }
@@ -112,6 +118,10 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
           pinned: editEntry.pinned,
           totpSecret: editEntry.totpSecret,
           customFields: editEntry.customFields.map(f => ({ ...f })),
+          hasPasskey: editEntry.hasPasskey,
+          passkeyPublicKey: editEntry.passkeyPublicKey,
+          generatePasskey: undefined,
+          passkeyAction: undefined,
         });
       } else {
         setFieldsOrder(['username', 'password', 'url']);
@@ -213,6 +223,23 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
       if (!activeFields.includes('totpSecret')) {
         cleanedForm.totpSecret = undefined;
         cleanedForm.recoveryCodes = undefined;
+      }
+
+      // Passkey creation/destruction logic based on active fields list
+      if (isEdit && editEntry) {
+        if (activeFields.includes('passkey')) {
+          if (!editEntry.hasPasskey) {
+            cleanedForm.passkeyAction = 'generate';
+          }
+        } else {
+          if (editEntry.hasPasskey) {
+            cleanedForm.passkeyAction = 'remove';
+          }
+        }
+      } else {
+        if (activeFields.includes('passkey')) {
+          cleanedForm.generatePasskey = true;
+        }
       }
 
       // Save fields order as metadata
@@ -499,6 +526,24 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                               </motion.div>
                             )}
                           </AnimatePresence>
+                        </div>
+                      );
+                    } else if (id === 'passkey') {
+                      icon = <Fingerprint size={13} />;
+                      label = 'Passkey (ES256)';
+                      content = (
+                        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 text-[12px] text-[var(--text-secondary)]">
+                          {isEdit && form.hasPasskey ? (
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                              <span>Passkey is active. Removing this field will delete the passkey upon saving.</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                              <span>A new ES256 keypair will be generated and saved upon saving this entry.</span>
+                            </div>
+                          )}
                         </div>
                       );
                     }

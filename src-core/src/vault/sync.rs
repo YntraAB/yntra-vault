@@ -7,6 +7,10 @@ use std::path::Path;
 use rand::Rng;
 use crate::crypto::{compute_hmac, verify_hmac};
 use crate::crypto::kdf::HmacKey;
+use crate::vault::format::VaultFile;
+
+/// Maximum database size accepted during P2P sync (256 MB)
+const MAX_DB_SIZE: usize = 256 * 1024 * 1024;
 
 // ─── WebDAV Cloud Sync ──────────────────────────────────────────────────
 
@@ -124,19 +128,34 @@ pub fn run_p2p_sync_listener(
             return Err(crate::error::VaultError::DecryptionError("Peer verification failed".into()));
         }
 
-        // 2. Database Transfer Phase (Receive DB from client and merge/overwrite)
+        // 2. Database Transfer Phase (Receive DB from client and validate)
         let mut size_buf = [0u8; 8];
         stream.read_exact(&mut size_buf)
             .map_err(|e| crate::error::VaultError::DecryptionError(format!("Failed to read database size: {}", e)))?;
         let db_size = u64::from_be_bytes(size_buf) as usize;
 
+        if db_size > MAX_DB_SIZE {
+            let _ = stream.write_all(b"SIZE_REJECTED");
+            return Err(crate::error::VaultError::InvalidFormat(
+                format!("Received DB size {} exceeds maximum {} bytes", db_size, MAX_DB_SIZE)
+            ));
+        }
+
         let mut db_data = vec![0u8; db_size];
         stream.read_exact(&mut db_data)
             .map_err(|e| crate::error::VaultError::DecryptionError(format!("Failed to read database data: {}", e)))?;
 
-        // Save incoming DB to local filepath
-        fs::write(db_filepath, &db_data)
-            .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to save merged database: {}", e)))?;
+        // Validate received data is a valid .vdb file before writing
+        VaultFile::from_bytes(&db_data).map_err(|e| {
+            crate::error::VaultError::InvalidFormat(format!("Received invalid vault file: {}", e))
+        })?;
+
+        // Atomic write: temp file then rename
+        let tmp_path = db_filepath.with_extension("vdb.sync.tmp");
+        fs::write(&tmp_path, &db_data)
+            .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to write temp sync file: {}", e)))?;
+        fs::rename(&tmp_path, db_filepath)
+            .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to rename sync file: {}", e)))?;
     }
 
     Ok(())
@@ -201,13 +220,25 @@ mod tests {
 
     #[test]
     fn test_p2p_handshake_and_sync() {
+        use crate::vault::format::{VaultFile, FileHeader, KdfParams, FORMAT_VERSION};
+
         let temp_dir = tempdir().unwrap();
         let server_db_path = temp_dir.path().join("server.vdb");
         let client_db_path = temp_dir.path().join("client.vdb");
 
-        // Write dummy data to client DB
-        let client_data = b"yntra-vault-client-encrypted-database-content-12345";
-        fs::write(&client_db_path, client_data).unwrap();
+        // Build a valid .vdb file for the client to send
+        let vault_file = VaultFile {
+            header: FileHeader {
+                version: FORMAT_VERSION,
+                flags: 0,
+                salt: [42u8; 32],
+                kdf_params: KdfParams::default(),
+            },
+            hmac: [0xAB; 64],
+            encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        let client_data = vault_file.to_bytes().unwrap();
+        fs::write(&client_db_path, &client_data).unwrap();
 
         // Write empty file for server DB
         File::create(&server_db_path).unwrap();
@@ -231,7 +262,7 @@ mod tests {
         // Join thread and assert success
         handle.join().unwrap().unwrap();
 
-        // Check if server database has been updated with client's data
+        // Verify server received a valid .vdb file
         let server_data = fs::read(&server_db_path).unwrap();
         assert_eq!(server_data, client_data);
     }

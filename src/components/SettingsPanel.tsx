@@ -266,7 +266,7 @@ export default function SettingsPanel() {
                     </select>
                   </SettingSection>
 
-                  <SettingSection label="Autotype Delays">
+                  <SettingSection label="Smart Login Delays">
                     <div className="flex flex-col gap-4">
                       <div>
                         <div className="flex justify-between items-center mb-1">
@@ -302,7 +302,7 @@ export default function SettingsPanel() {
                   </SettingSection>
 
                   <SettingRow
-                    label="Auto-open website on Smart Autotype"
+                    label="Auto-open website on Smart Login"
                     description="Launch default browser directly to the login page"
                   >
                     <Toggle
@@ -662,8 +662,49 @@ export default function SettingsPanel() {
 
                   {/* Manual Export */}
                   <SettingSection label="Manual Export">
-                    <button className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Save a copy of your encrypted vault file to another location.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!backend || !currentVault) return;
+                        try {
+                          const { save } = await import('@tauri-apps/plugin-dialog');
+                          const destPath = await save({
+                            defaultPath: `${currentVault.name}-backup.vdb`,
+                            filters: [{ name: 'Yntra Vault Database', extensions: ['vdb'] }],
+                          });
+                          if (!destPath) return;
+                          await backend.exportVault(destPath);
+                          addToast({ message: 'Vault exported successfully!', type: 'success' });
+                        } catch (err) {
+                          addToast({ message: `Export failed: ${err}`, type: 'error' });
+                        }
+                      }}
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
                       Export Vault File...
+                    </button>
+                  </SettingSection>
+
+                  {/* Browser Extension */}
+                  <SettingSection label="Browser Extension">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Register the native messaging host so the Yntra Vault browser extension can communicate with the desktop app.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!backend) return;
+                        try {
+                          const result = await backend.installBrowserExtension();
+                          addToast({ message: result, type: 'success' });
+                        } catch (err) {
+                          addToast({ message: `Setup failed: ${err}`, type: 'error' });
+                        }
+                      }}
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      Install Browser Integration
                     </button>
                   </SettingSection>
                 </div>

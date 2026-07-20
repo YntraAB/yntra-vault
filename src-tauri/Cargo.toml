@@ -27,6 +27,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Our core library
 yntra-vault-core = { path = "../src-core" }
 
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
 [profile.dev.package."*"]
 opt-level = 3
-

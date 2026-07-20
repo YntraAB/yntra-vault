@@ -135,6 +135,13 @@ pub mod macos_autostart {
             crate::error::VaultError::EncryptionError(format!("Get current exe: {}", e))
         })?;
 
+        let exe_path = current_exe.to_string_lossy()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;");
+
         let plist_content = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -150,7 +157,7 @@ pub mod macos_autostart {
     <true/>
 </dict>
 </plist>"#,
-            current_exe.to_string_lossy()
+            exe_path
         );
 
         if let Some(parent) = path.parent() {
@@ -201,7 +208,7 @@ Type=Application
 Version=1.0
 Name=Yntra Vault
 Comment=Yntra Vault Password Manager
-Exec={}
+Exec="{}"
 StartupNotify=false
 Terminal=false
 "#,

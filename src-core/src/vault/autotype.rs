@@ -1,20 +1,13 @@
 //! Autotype Engine for simulated keyboard typing with configurable delays.
+//!
+//! Callers must wrap sensitive strings (username, password) in
+//! `zeroize::Zeroizing<String>` to ensure they are wiped from memory after use.
 
 #[cfg(target_os = "windows")]
 struct AutotypeGuard {
-    username: String,
-    password: String,
-    totp_secret: String,
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for AutotypeGuard {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.username.zeroize();
-        self.password.zeroize();
-        self.totp_secret.zeroize();
-    }
+    username: zeroize::Zeroizing<String>,
+    password: zeroize::Zeroizing<String>,
+    totp_secret: zeroize::Zeroizing<String>,
 }
 
 #[cfg(target_os = "windows")]
@@ -861,9 +854,9 @@ pub fn run_smart_autotype_with_delays(
 
     std::thread::spawn(move || {
         let guard = AutotypeGuard {
-            username,
-            password,
-            totp_secret,
+            username: zeroize::Zeroizing::new(username),
+            password: zeroize::Zeroizing::new(password),
+            totp_secret: zeroize::Zeroizing::new(totp_secret),
         };
 
         // Resolve the login URL in the background
@@ -1114,7 +1107,7 @@ pub fn run_smart_autotype_with_delays(
                     if is_totp_field && !filled_totp {
                         last_focused_element_id = Some(element_key.clone());
                         let config = crate::totp::TotpConfig {
-                            secret: guard.totp_secret.clone(),
+                            secret: guard.totp_secret.to_string(),
                             ..Default::default()
                         };
                         if let Ok(totp_code) = crate::totp::generate_totp(&config) {

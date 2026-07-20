@@ -5,6 +5,13 @@ use sha2::{Sha256, Digest};
 const BLOOM_DATA: &[u8; 65536] = include_bytes!("bloom.bin");
 const TOTAL_BITS: u64 = 524288;
 
+/// Verify Bloom filter has been populated (not all zeros).
+/// If this returns false, breach pre-checking is disabled and all passwords
+/// will bypass the local filter, falling through to the HIBP API.
+pub fn is_bloom_populated() -> bool {
+    BLOOM_DATA.iter().any(|&b| b != 0)
+}
+
 /// Evaluates if a password might be breached by testing the local 64KB Bloom filter.
 /// Returns true if a breach is suspected, and false if it is guaranteed safe.
 pub fn is_breach_suspected(password: &str) -> bool {
@@ -77,6 +84,6 @@ mod tests {
             }
         }
 
-        fs::write("src/breach/bloom.bin", &data).unwrap();
+        fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/breach/bloom.bin"), &data).unwrap();
     }
 }

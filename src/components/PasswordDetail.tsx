@@ -14,6 +14,8 @@ import {
   Eye,
   EyeOff,
   Keyboard,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import CopyButton from './CopyButton';
@@ -32,7 +34,7 @@ import { Skeleton } from './ui/skeleton';
 
 
 export default function PasswordDetail() {
-  const { selectedEntry, setIsEditing, isEditing, deleteEntry, updateEntry, tags, togglePin, toggleFavorite, isLoadingDetail, addToast, settings } = useAppState();
+  const { selectedEntry, setIsEditing, isEditing, deleteEntry, updateEntry, tags, togglePin, toggleFavorite, isLoadingDetail, addToast, settings, refreshEntries, selectEntry } = useAppState();
   const { backend } = useBackend();
   const [editData, setEditData] = useState(selectedEntry);
   const [showDelConfirm, setShowDelConfirm] = useState(false);
@@ -40,6 +42,33 @@ export default function PasswordDetail() {
   const [showRecovery, setShowRecovery] = useState(false);
   const [showTemporaryStats, setShowTemporaryStats] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showWarningModal, setShowWarningModal] = useState(false);
+  const [warningTimer, setWarningTimer] = useState(0);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  useEffect(() => {
+    let intervalId: any = null;
+    if (showWarningModal && warningTimer > 0) {
+      intervalId = setInterval(() => {
+        setWarningTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [showWarningModal, warningTimer]);
+
+  useEffect(() => {
+    if (!showWarningModal && !showDelConfirm) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowWarningModal(false);
+        setShowDelConfirm(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showWarningModal, showDelConfirm]);
 
   useEffect(() => {
     if (selectedEntry) {
@@ -67,6 +96,38 @@ export default function PasswordDetail() {
       setIsEditing(false);
     }
   }, [editData, setIsEditing, updateEntry]);
+
+  const runSmartLoginAction = useCallback(async () => {
+    if (!backend || !selectedEntry) return;
+    addToast({
+      message: 'Smart Login active! Focus a username or password input in your browser.',
+      type: 'info'
+    });
+    try {
+      await backend.runSmartAutotype(
+        selectedEntry.username,
+        selectedEntry.password,
+        selectedEntry.totpSecret || '',
+        selectedEntry.url || '',
+        settings.autotypeLaunchBrowser !== false,
+        settings.autotypeCharDelayMs || 15,
+        settings.autotypeFieldDelayMs || 300
+      );
+    } catch (err) {
+      addToast({ message: `Smart Login failed: ${err}`, type: 'error' });
+    }
+  }, [backend, selectedEntry, settings.autotypeLaunchBrowser, settings.autotypeCharDelayMs, settings.autotypeFieldDelayMs, addToast]);
+
+  const handleSmartLoginClick = useCallback(() => {
+    const skipWarning = localStorage.getItem('yntra-vault-skip-smart-login-warning') === 'true';
+    if (skipWarning) {
+      runSmartLoginAction();
+    } else {
+      setDontShowAgain(false);
+      setWarningTimer(3);
+      setShowWarningModal(true);
+    }
+  }, [runSmartLoginAction]);
 
   const data = isEditing && editData ? editData : selectedEntry;
   const entryTags = data
@@ -255,33 +316,13 @@ export default function PasswordDetail() {
 
                     <div className="w-[1px] h-4 bg-[var(--border-subtle)] mx-1" />
 
-                     <button
-                       onClick={async () => {
-                         if (!backend) return;
-                         addToast({
-                           message: 'Smart Autotype active! Focus a username or password input in your browser.',
-                           type: 'info'
-                         });
-                         try {
-                           await backend.runSmartAutotype(
-                             data.username,
-                             data.password,
-                             data.totpSecret || '',
-                             data.url || '',
-                             settings.autotypeLaunchBrowser !== false,
-                             settings.autotypeCharDelayMs || 15,
-                             settings.autotypeFieldDelayMs || 300
-                           );
-                         } catch (err) {
-                           addToast({ message: `Smart Autotype failed: ${err}`, type: 'error' });
-                         }
-                       }}
-                       className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                       title="Start Smart Autotype"
-                     >
-                       <Keyboard size={14} />
-                       <span>Smart Autotype</span>
-                     </button>
+                      <button
+                        onClick={handleSmartLoginClick}
+                        className="inline-flex h-8 items-center rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        title="Start Smart Login"
+                      >
+                        <span>Smart Login</span>
+                      </button>
 
                     <button
                       onClick={() => setShowEditModal(true)}
@@ -392,6 +433,7 @@ export default function PasswordDetail() {
                         {data.password && !isEditing && (
                           <PasswordSafetySection
                             password={data.password}
+                            status={data.breachStatus}
                             showTemporaryStats={showTemporaryStats}
                           />
                         )}
@@ -599,6 +641,44 @@ export default function PasswordDetail() {
               })}
             </div>
 
+            {/* Passkey — only shown when active */}
+            {data.hasPasskey && (
+              <div className="px-4 py-3 border-t border-[var(--border-subtle)]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={14} className="text-green-500" />
+                    <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                      Passkey (ES256)
+                    </span>
+                    {data.passkeyPublicKey && (
+                      <span className="text-[10px] font-mono text-[var(--text-tertiary)] truncate max-w-[140px]">
+                        {data.passkeyPublicKey.slice(0, 8).map((b: number) => b.toString(16).padStart(2, '0')).join('')}…
+                      </span>
+                    )}
+                  </div>
+                  {!isEditing && (
+                    <button
+                      onClick={async () => {
+                        if (!backend || !selectedEntry) return;
+                        if (!window.confirm('Remove the passkey from this entry?')) return;
+                        try {
+                          await backend.updateEntry(selectedEntry.id, { passkey_action: 'remove' } as any);
+                          await refreshEntries();
+                          await selectEntry(selectedEntry.id);
+                          addToast({ message: 'Passkey removed', type: 'success' });
+                        } catch (err) {
+                          addToast({ message: `Failed to remove passkey: ${err}`, type: 'error' });
+                        }
+                      }}
+                      className="text-[11px] font-medium text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Footer */}
             <div className="mt-auto flex gap-6 border-t border-[var(--border-subtle)] px-4 py-3">
               <span className="text-[12px] text-[var(--text-tertiary)]">
@@ -654,6 +734,103 @@ export default function PasswordDetail() {
                 >
                   Delete
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Smart Login Warning Modal */}
+      <AnimatePresence>
+        {showWarningModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowWarningModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="relative w-[420px] rounded-[4px] border border-[var(--border)] bg-[var(--bg-base)] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setShowWarningModal(false)}
+                className="absolute top-4 right-4 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-1 rounded-[3px] hover:bg-[var(--bg-hover)]"
+                aria-label="Close dialog"
+              >
+                <X size={15} />
+              </button>
+
+              <div className="flex flex-col">
+                <h3 className="text-[16px] font-semibold text-[var(--text-primary)]">
+                  Smart Login Information
+                </h3>
+                <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
+                  Smart Login uses OS-level automated typing to fill your credentials directly into the active screen fields.
+                </p>
+                
+                <div className="mt-3.5 space-y-2 rounded-[3px] bg-[var(--bg-elevated)] p-3 text-[11.5px] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+                  <div className="flex gap-2">
+                    <span className="text-[var(--text-tertiary)] font-bold">•</span>
+                    <span><strong>Active Page:</strong> Keep the target login window or browser tab active on your screen. The fields will be located and filled automatically.</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-[var(--text-tertiary)] font-bold">•</span>
+                    <span><strong>Safety Guard:</strong> Typing will immediately cancel if you switch active windows to prevent credentials leaking.</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="dont-show-again"
+                    checked={dontShowAgain}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setDontShowAgain(checked);
+                      if (checked) {
+                        setWarningTimer(0);
+                      }
+                    }}
+                    className="accent-[var(--accent)] h-3.5 w-3.5 rounded-[3px] border-[var(--border)] cursor-pointer"
+                  />
+                  <label htmlFor="dont-show-again" className="text-[11.5px] text-[var(--text-secondary)] cursor-pointer select-none">
+                    Don't show this warning again
+                  </label>
+                </div>
+
+                <div className="mt-5 flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowWarningModal(false)}
+                    className="h-9 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-[0.98]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={warningTimer > 0}
+                    onClick={() => {
+                      if (dontShowAgain) {
+                        localStorage.setItem('yntra-vault-skip-smart-login-warning', 'true');
+                      }
+                      setShowWarningModal(false);
+                      runSmartLoginAction();
+                    }}
+                    className={`h-9 rounded-[3px] px-5 text-[13px] font-medium transition-all ${
+                      warningTimer > 0
+                        ? 'bg-[var(--border)] text-[var(--text-tertiary)] cursor-not-allowed'
+                        : 'bg-[var(--accent)] text-[var(--bg-base)] hover:opacity-90 active:scale-[0.98]'
+                    }`}
+                  >
+                    {warningTimer > 0 ? `I Understand (${warningTimer}s)` : 'I Understand'}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -788,9 +965,18 @@ const CountdownRing: React.FC<{
 
 const PasswordSafetySection: React.FC<{
   password?: string;
+  status?: BreachStatus;
   showTemporaryStats: boolean;
-}> = ({ password, showTemporaryStats }) => {
-  const [breachStatus, setBreachStatus] = useState<BreachStatus | null>(null);
+}> = ({ password, status, showTemporaryStats }) => {
+  const [breachStatus, setBreachStatus] = useState<BreachStatus | null>(status || null);
+  const { selectedEntry, refreshEntries } = useAppState();
+  const { backend } = useBackend();
+
+  useEffect(() => {
+    if (status) {
+      setBreachStatus(status);
+    }
+  }, [status]);
 
   if (!password) return null;
 
@@ -809,7 +995,18 @@ const PasswordSafetySection: React.FC<{
       {showTemporaryStats && <PasswordStrength password={password} />}
       <BreachIndicator
         password={password}
-        onStatusChange={(status) => setBreachStatus(status)}
+        status={status}
+        onStatusChange={async (newStatus) => {
+          setBreachStatus(newStatus);
+          if (selectedEntry && backend) {
+            try {
+              await backend.updateEntry(selectedEntry.id, { breach_status: newStatus } as any);
+              await refreshEntries();
+            } catch (err) {
+              console.error('Failed to save manual breach status check:', err);
+            }
+          }
+        }}
         hideIfSafe={!showTemporaryStats}
       />
     </motion.div>

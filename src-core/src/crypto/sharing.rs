@@ -16,12 +16,14 @@ fn get_tables() -> &'static ([u8; 256], [u8; 256]) {
             exp[i] = val;
             log[val as usize] = i as u8;
 
-            // Multiply by 3 in GF(256): (val << 1) ^ val
-            let mut next = (val << 1) ^ val;
-            if (val & 0x80) != 0 {
-                next ^= 0x1b; // Reduce by primitive polynomial 0x11b
-            }
-            val = next;
+            // xtime: multiply by 2 in GF(256), reducing by 0x11b if overflow
+            let doubled = if (val & 0x80) != 0 {
+                (val << 1) ^ 0x1b
+            } else {
+                val << 1
+            };
+            // Multiply by 3: val*3 = val*2 + val (addition is XOR in GF(256))
+            val = doubled ^ val;
         }
         exp[255] = exp[0];
         (exp, log)
@@ -49,15 +51,17 @@ pub fn gf_mul(a: u8, b: u8) -> u8 {
 }
 
 /// Division in GF(256) using log/exp tables.
-pub fn gf_div(a: u8, b: u8) -> u8 {
-    assert!(b != 0, "Division by zero in GF(256)");
+pub fn gf_div(a: u8, b: u8) -> crate::Result<u8> {
+    if b == 0 {
+        return Err(crate::error::VaultError::EncryptionError("Division by zero in GF(256)".into()));
+    }
     if a == 0 {
-        return 0;
+        return Ok(0);
     }
     let (exp, log) = get_tables();
     let log_diff = (log[a as usize] as i16) - (log[b as usize] as i16);
     let index = if log_diff < 0 { log_diff + 255 } else { log_diff };
-    exp[index as usize]
+    Ok(exp[index as usize])
 }
 
 /// Split a secret key (expected to be 32 bytes) into 3 shares using a 2-of-3 threshold.
@@ -170,7 +174,7 @@ pub fn reconstruct_secret(share_a: &str, share_b: &str) -> crate::Result<Vec<u8>
         // s = (x2 * y1 ^ x1 * y2) / (x1 ^ x2)
         let num = gf_add(gf_mul(x2, y1), gf_mul(x1, y2));
         let den = gf_add(x1, x2);
-        let s = gf_div(num, den);
+        let s = gf_div(num, den)?;
 
         secret.push(s);
     }
@@ -178,7 +182,11 @@ pub fn reconstruct_secret(share_a: &str, share_b: &str) -> crate::Result<Vec<u8>
     Ok(secret)
 }
 
-/// Helper function to split a string password by hashing it to 32 bytes first.
+/// Split a password by hashing it to 32 bytes first.
+///
+/// NOTE: This is a one-way operation. Reconstruction recovers the SHA-256
+/// hash of the password, NOT the original password. Use `reconstruct_password_to_hex`
+/// to verify identity by comparing hashes, not to recover the plaintext.
 pub fn split_password(password: &str) -> crate::Result<Vec<String>> {
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
@@ -187,7 +195,8 @@ pub fn split_password(password: &str) -> crate::Result<Vec<String>> {
     split_secret(&hash)
 }
 
-/// Helper function to reconstruct a password hash and return it as a hex string.
+/// Reconstruct the SHA-256 hash from shares and return it as hex.
+/// Compare with `SHA-256(password)` to verify identity — does NOT recover plaintext.
 pub fn reconstruct_password_to_hex(share_a: &str, share_b: &str) -> crate::Result<String> {
     let secret = reconstruct_secret(share_a, share_b)?;
     Ok(data_encoding::HEXLOWER.encode(&secret))
@@ -210,16 +219,17 @@ mod tests {
         assert_eq!(gf_mul(1, 10), 10);
 
         // Division identities
-        assert_eq!(gf_div(0, 5), 0);
-        assert_eq!(gf_div(10, 1), 10);
-        assert_eq!(gf_div(5, 5), 1);
+        assert_eq!(gf_div(0, 5).unwrap(), 0);
+        assert_eq!(gf_div(10, 1).unwrap(), 10);
+        assert_eq!(gf_div(5, 5).unwrap(), 1);
+        assert!(gf_div(5, 0).is_err());
 
         // Multiplication & Division compatibility
         let a = 42;
         let b = 137;
         let c = gf_mul(a, b);
-        assert_eq!(gf_div(c, b), a);
-        assert_eq!(gf_div(c, a), b);
+        assert_eq!(gf_div(c, b).unwrap(), a);
+        assert_eq!(gf_div(c, a).unwrap(), b);
     }
 
     #[test]
