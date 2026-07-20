@@ -608,25 +608,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [backend, refreshTags, addToast]);
 
   const updateTag = useCallback(async (id: string, updates: Partial<Tag>) => {
-    let updatedTag: Tag | undefined;
-    setRawTags((prev) => {
-      const oldTag = prev.find((t) => t.id === id);
-      if (!oldTag) return prev;
-      const nextTag = { ...oldTag, ...updates };
-      updatedTag = nextTag;
-      return prev.map((t) => (t.id === id ? nextTag : t));
-    });
+    const oldTag = rawTags.find((t) => t.id === id);
+    if (!oldTag) return;
 
-    if (backend && updatedTag) {
+    const nextTag = { ...oldTag, ...updates };
+    setRawTags((prev) => prev.map((t) => (t.id === id ? nextTag : t)));
+
+    if (backend) {
       try {
-        await backend.updateTag(id, updatedTag.name, updatedTag.color, updatedTag.icon);
+        await backend.updateTag(id, nextTag.name, nextTag.color, nextTag.icon);
         await refreshTags();
         await refreshEntries();
       } catch (e) {
         addToast({ message: `Failed to update tag in database: ${e}`, type: 'error' });
       }
     }
-  }, [backend, refreshTags, refreshEntries, addToast]);
+  }, [backend, rawTags, refreshTags, refreshEntries, addToast]);
 
   const removeTag = useCallback(async (id: string) => {
     if (backend) {
