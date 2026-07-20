@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showBreachInList: true,
   autotypeCharDelayMs: 15,
   autotypeFieldDelayMs: 300,
+  autotypeSettleDelayMs: 3000,
   autotypeLaunchBrowser: true,
 };
 

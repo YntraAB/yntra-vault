@@ -264,7 +264,7 @@ export interface YntraVaultBackend {
   showInExplorer(path: string): Promise<void>;
 
   // Advanced features
-  autotype(text: string, charDelayMs: number): Promise<void>;
+  autotype(text: string, charDelayMs: number, settleDelayMs: number): Promise<void>;
   runSmartAutotype(username: string, password: string, totpSecret: string, url: string, launchBrowser: boolean, charDelayMs: number, fieldDelayMs: number): Promise<void>;
   enableAutostart(): Promise<void>;
   disableAutostart(): Promise<void>;

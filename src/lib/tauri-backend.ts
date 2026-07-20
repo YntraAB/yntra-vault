@@ -186,8 +186,8 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   // Advanced features
-  async autotype(text: string, charDelayMs: number): Promise<void> {
-    return invoke('autotype', { text, charDelayMs });
+  async autotype(text: string, charDelayMs: number, settleDelayMs: number): Promise<void> {
+    return invoke('autotype', { text, charDelayMs, settleDelayMs });
   }
 
   async runSmartAutotype(username: string, password: string, totpSecret: string, url: string, launchBrowser: boolean, charDelayMs: number, fieldDelayMs: number): Promise<void> {

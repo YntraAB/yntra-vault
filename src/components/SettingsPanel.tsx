@@ -266,7 +266,7 @@ export default function SettingsPanel() {
                     </select>
                   </SettingSection>
 
-                  <SettingSection label="Smart Login Delays">
+                  <SettingSection label="Autotype & Smart Login Delays">
                     <div className="flex flex-col gap-4">
                       <div>
                         <div className="flex justify-between items-center mb-1">
@@ -295,6 +295,21 @@ export default function SettingsPanel() {
                           step={100}
                           value={settings.autotypeFieldDelayMs ?? 300}
                           onChange={(e) => updateSettings({ autotypeFieldDelayMs: Number(e.target.value) })}
+                          className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[12px] text-[var(--text-secondary)]">Focus Settle Delay (Autotype)</span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">{((settings.autotypeSettleDelayMs ?? 3000) / 1000).toFixed(1)} s</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={500}
+                          max={5000}
+                          step={500}
+                          value={settings.autotypeSettleDelayMs ?? 3000}
+                          onChange={(e) => updateSettings({ autotypeSettleDelayMs: Number(e.target.value) })}
                           className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
                         />
                       </div>

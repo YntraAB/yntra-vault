@@ -12,37 +12,39 @@ struct AutotypeGuard {
 
 #[cfg(target_os = "windows")]
 pub fn autotype_text(text: &str) -> crate::Result<()> {
-    autotype_text_with_delay(text, 15)
+    autotype_text_with_delay(text, 15, 0)
 }
 
 #[cfg(target_os = "windows")]
-pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64) -> crate::Result<()> {
+pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64, settle_delay_ms: u64) -> crate::Result<()> {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
-    unsafe {
-        let start_hwnd = GetForegroundWindow();
-        if !start_hwnd.is_invalid() {
-            let mut start_pid = 0u32;
-            GetWindowThreadProcessId(start_hwnd, Some(&mut start_pid));
+    if settle_delay_ms > 0 {
+        unsafe {
+            let start_hwnd = GetForegroundWindow();
+            if !start_hwnd.is_invalid() {
+                let mut start_pid = 0u32;
+                GetWindowThreadProcessId(start_hwnd, Some(&mut start_pid));
 
-            // If the active window belongs to Yntra Vault (our process),
-            // wait until the user switches to a different process window.
-            if start_pid == std::process::id() {
-                let mut elapsed = 0;
-                // Poll every 100ms for up to 15 seconds (150 polls)
-                while elapsed < 150 {
-                    let current_hwnd = GetForegroundWindow();
-                    let mut current_pid = 0u32;
-                    GetWindowThreadProcessId(current_hwnd, Some(&mut current_pid));
-                    
-                    if current_pid != start_pid && !current_hwnd.is_invalid() {
-                        break;
+                // If the active window belongs to Yntra Vault (our process),
+                // wait until the user switches to a different process window.
+                if start_pid == std::process::id() {
+                    let mut elapsed = 0;
+                    // Poll every 100ms for up to 15 seconds (150 polls)
+                    while elapsed < 150 {
+                        let current_hwnd = GetForegroundWindow();
+                        let mut current_pid = 0u32;
+                        GetWindowThreadProcessId(current_hwnd, Some(&mut current_pid));
+                        
+                        if current_pid != start_pid && !current_hwnd.is_invalid() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        elapsed += 1;
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    elapsed += 1;
+                    // Settle delay: wait so the user has time to select/focus the input field
+                    std::thread::sleep(std::time::Duration::from_millis(settle_delay_ms));
                 }
-                // Settle delay: wait 3000ms so the user has time to select/focus the input field
-                std::thread::sleep(std::time::Duration::from_millis(3000));
             }
         }
     }
@@ -293,14 +295,14 @@ fn common_prefix_len(s1: &str, s2: &str) -> usize {
 #[cfg(target_os = "windows")]
 fn autotype_correct_text(current: &str, target: &str, char_delay_ms: u64) -> crate::Result<()> {
     if current.is_empty() {
-        return autotype_text_with_delay(target, char_delay_ms);
+        return autotype_text_with_delay(target, char_delay_ms, 0);
     }
 
     let prefix_len = common_prefix_len(current, target);
     if prefix_len == 0 {
         send_ctrl_a_backspace()?;
         std::thread::sleep(std::time::Duration::from_millis(100));
-        autotype_text_with_delay(target, char_delay_ms)
+        autotype_text_with_delay(target, char_delay_ms, 0)
     } else {
         let backspaces_needed = current.chars().count() - prefix_len;
         if backspaces_needed > 0 {
@@ -308,7 +310,7 @@ fn autotype_correct_text(current: &str, target: &str, char_delay_ms: u64) -> cra
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let remainder: String = target.chars().skip(prefix_len).collect();
-        autotype_text_with_delay(&remainder, char_delay_ms)
+        autotype_text_with_delay(&remainder, char_delay_ms, 0)
     }
 }
 
@@ -1143,7 +1145,7 @@ pub fn run_smart_autotype_with_delays(
                         if let Ok(totp_code) = crate::totp::generate_totp(&config) {
                             let _ = send_ctrl_a_backspace();
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            let _ = autotype_text_with_delay(&totp_code.code, char_delay_ms);
+                            let _ = autotype_text_with_delay(&totp_code.code, char_delay_ms, 0);
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                             let _ = send_enter();
                         }
@@ -1166,7 +1168,7 @@ pub fn run_smart_autotype_with_delays(
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
 
                             // Return to Password
-                            let _ = autotype_text_with_delay("\t", char_delay_ms);
+                            let _ = autotype_text_with_delay("\t", char_delay_ms, 0);
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                             filled_username = true;
                         }
@@ -1174,7 +1176,7 @@ pub fn run_smart_autotype_with_delays(
                         // Clear password and fill
                         let _ = send_ctrl_a_backspace();
                         std::thread::sleep(std::time::Duration::from_millis(100));
-                        let _ = autotype_text_with_delay(&guard.password, char_delay_ms);
+                        let _ = autotype_text_with_delay(&guard.password, char_delay_ms, 0);
                         std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                         let _ = send_enter();
                         filled_password = true;
@@ -1194,11 +1196,11 @@ pub fn run_smart_autotype_with_delays(
 
                         if has_password {
                             // Standard single-screen login form: Tab down and enter password
-                            let _ = autotype_text_with_delay("\t", char_delay_ms);
+                            let _ = autotype_text_with_delay("\t", char_delay_ms, 0);
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                             let _ = send_ctrl_a_backspace();
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            let _ = autotype_text_with_delay(&guard.password, char_delay_ms);
+                            let _ = autotype_text_with_delay(&guard.password, char_delay_ms, 0);
                             std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
                             let _ = send_enter();
                             filled_username = true;
@@ -1221,11 +1223,11 @@ pub fn run_smart_autotype_with_delays(
 
 #[cfg(not(target_os = "windows"))]
 pub fn autotype_text(text: &str) -> crate::Result<()> {
-    autotype_text_with_delay(text, 15)
+    autotype_text_with_delay(text, 15, 0)
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn autotype_text_with_delay(text: &str, _char_delay_ms: u64) -> crate::Result<()> {
+pub fn autotype_text_with_delay(text: &str, _char_delay_ms: u64, _settle_delay_ms: u64) -> crate::Result<()> {
     println!("Autotype (fallback stub): {}", text);
     Ok(())
 }

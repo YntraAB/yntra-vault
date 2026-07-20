@@ -70,6 +70,7 @@ export interface AppSettings {
   showBreachInList: boolean;
   autotypeCharDelayMs: number;
   autotypeFieldDelayMs: number;
+  autotypeSettleDelayMs: number;
   autotypeLaunchBrowser: boolean;
 }
 

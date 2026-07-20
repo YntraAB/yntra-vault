@@ -339,8 +339,8 @@ pub fn show_in_explorer(path: String) -> Result<(), String> {
 // ─── Autotype Commands ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn autotype(text: String, char_delay_ms: u64) -> Result<(), String> {
-    yntra_vault_core::vault::autotype::autotype_text_with_delay(&text, char_delay_ms).map_err(|e| e.to_string())
+pub async fn autotype(text: String, char_delay_ms: u64, settle_delay_ms: u64) -> Result<(), String> {
+    yntra_vault_core::vault::autotype::autotype_text_with_delay(&text, char_delay_ms, settle_delay_ms).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

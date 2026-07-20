@@ -19,11 +19,12 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
       e.stopPropagation();
       if (!backend || autotyping) return;
       setAutotyping(true);
-      addToast({ message: 'Autotype pending... Focus target window. You will have 3 seconds to select the input field.', type: 'info' });
+      const settleSeconds = Math.round((settings.autotypeSettleDelayMs || 3000) / 1000);
+      addToast({ message: `Autotype pending... Focus target window. You will have ${settleSeconds} seconds to select the input field.`, type: 'info' });
 
       (async () => {
         try {
-          await backend.autotype(value, settings.autotypeCharDelayMs || 15);
+          await backend.autotype(value, settings.autotypeCharDelayMs || 15, settings.autotypeSettleDelayMs || 3000);
           addToast({ message: 'Autotyped successfully', type: 'success' });
         } catch (err) {
           addToast({ message: `Autotype failed: ${err}`, type: 'error' });
@@ -32,7 +33,7 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
         }
       })();
     },
-    [backend, autotyping, value, addToast, settings.autotypeCharDelayMs]
+    [backend, autotyping, value, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs]
   );
 
   return (
