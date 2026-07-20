@@ -19,9 +19,9 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
       e.stopPropagation();
       if (!backend || autotyping) return;
       setAutotyping(true);
-      addToast({ message: 'Autotyping in 3 seconds... Please focus target field!', type: 'info' });
+      addToast({ message: 'Autotype pending... Focus another window to start typing.', type: 'info' });
 
-      setTimeout(async () => {
+      (async () => {
         try {
           await backend.autotype(value, settings.autotypeCharDelayMs || 15);
           addToast({ message: 'Autotyped successfully', type: 'success' });
@@ -30,7 +30,7 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
         } finally {
           setAutotyping(false);
         }
-      }, 3000);
+      })();
     },
     [backend, autotyping, value, addToast, settings.autotypeCharDelayMs]
   );

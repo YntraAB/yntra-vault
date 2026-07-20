@@ -17,6 +17,36 @@ pub fn autotype_text(text: &str) -> crate::Result<()> {
 
 #[cfg(target_os = "windows")]
 pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64) -> crate::Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+    unsafe {
+        let start_hwnd = GetForegroundWindow();
+        if !start_hwnd.is_invalid() {
+            let mut start_pid = 0u32;
+            GetWindowThreadProcessId(start_hwnd, Some(&mut start_pid));
+
+            // If the active window belongs to Yntra Vault (our process),
+            // wait until the user switches to a different process window.
+            if start_pid == std::process::id() {
+                let mut elapsed = 0;
+                // Poll every 100ms for up to 15 seconds (150 polls)
+                while elapsed < 150 {
+                    let current_hwnd = GetForegroundWindow();
+                    let mut current_pid = 0u32;
+                    GetWindowThreadProcessId(current_hwnd, Some(&mut current_pid));
+                    
+                    if current_pid != start_pid && !current_hwnd.is_invalid() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    elapsed += 1;
+                }
+                // Settle delay: wait 300ms so the target input field has time to capture focus
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+        }
+    }
+
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_TAB
     };
