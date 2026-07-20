@@ -195,6 +195,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Sync minimizeToTray setting to backend
+  useEffect(() => {
+    if (backend) {
+      backend.setMinimizeToTray(settings.minimizeToTray !== false).catch(err => {
+        console.error('Failed to sync minimizeToTray setting:', err);
+      });
+    }
+  }, [backend, settings.minimizeToTray]);
+
   // Listen for vault-connection-lost event in Tauri
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;

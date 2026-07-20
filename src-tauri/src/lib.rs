@@ -2,6 +2,9 @@ mod commands;
 
 use commands::AppState;
 use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -13,6 +16,17 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
             vault: Mutex::new(None),
+            minimize_to_tray: std::sync::atomic::AtomicBool::new(true),
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let state = app.state::<AppState>();
+                if state.minimize_to_tray.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             // Vault
@@ -60,6 +74,7 @@ pub fn run() {
             commands::enable_autostart,
             commands::disable_autostart,
             commands::is_autostart_enabled,
+            commands::set_minimize_to_tray,
             commands::webdav_upload,
             commands::webdav_download,
             commands::run_p2p_sync_listener,
@@ -74,6 +89,52 @@ pub fn run() {
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
+
+            // Setup System Tray Menu & Icon
+            let quit_i = MenuItem::with_id(app, "quit", "Close", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Conditionally show main window based on launch argument
+            let is_minimized = std::env::args().any(|arg| arg == "--minimized");
+            if !is_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
+
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 loop {

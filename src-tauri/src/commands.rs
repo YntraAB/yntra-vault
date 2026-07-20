@@ -16,9 +16,12 @@ use yntra_vault_core::generator::{self, GeneratorOptions};
 use yntra_vault_core::breach;
 use yntra_vault_core::breach::strength;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// Shared vault state across all commands.
 pub struct AppState {
     pub vault: Mutex<Option<VaultManager>>,
+    pub minimize_to_tray: AtomicBool,
 }
 
 // ─── Vault Commands ─────────────────────────────────────────────────────
@@ -341,6 +344,11 @@ pub fn show_in_explorer(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn autotype(text: String, char_delay_ms: u64, settle_delay_ms: u64) -> Result<(), String> {
     yntra_vault_core::vault::autotype::autotype_text_with_delay(&text, char_delay_ms, settle_delay_ms).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_minimize_to_tray(enabled: bool, state: State<'_, AppState>) {
+    state.minimize_to_tray.store(enabled, Ordering::Relaxed);
 }
 
 #[tauri::command]

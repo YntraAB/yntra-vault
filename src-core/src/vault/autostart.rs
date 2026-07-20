@@ -17,11 +17,10 @@ pub mod windows_autostart {
         let subkey_u16: Vec<u16> = SUBKEY.encode_utf16().collect();
         let value_name_u16: Vec<u16> = VALUE_NAME.encode_utf16().collect();
 
-        // Get path of current executable
         let current_exe = std::env::current_exe().map_err(|e| {
             crate::error::VaultError::EncryptionError(format!("Get current exe: {}", e))
         })?;
-        let current_exe_str = current_exe.to_string_lossy().into_owned() + "\0";
+        let current_exe_str = format!("\"{}\" --minimized\0", current_exe.to_string_lossy());
         let value_data: Vec<u16> = current_exe_str.encode_utf16().collect();
 
         unsafe {
@@ -152,6 +151,7 @@ pub mod macos_autostart {
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
+        <string>--minimized</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -208,7 +208,7 @@ Type=Application
 Version=1.0
 Name=Yntra Vault
 Comment=Yntra Vault Password Manager
-Exec="{}"
+Exec="{}" --minimized
 StartupNotify=false
 Terminal=false
 "#,

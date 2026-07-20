@@ -206,6 +206,10 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('is_autostart_enabled');
   }
 
+  async setMinimizeToTray(enabled: boolean): Promise<void> {
+    return invoke('set_minimize_to_tray', { enabled });
+  }
+
   async webdavUpload(url: string, username: string, password: string | null, dbPath: string): Promise<void> {
     return invoke('webdav_upload', { url, username, password, dbPath });
   }

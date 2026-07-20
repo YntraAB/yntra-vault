@@ -269,6 +269,7 @@ export interface YntraVaultBackend {
   enableAutostart(): Promise<void>;
   disableAutostart(): Promise<void>;
   isAutostartEnabled(): Promise<boolean>;
+  setMinimizeToTray(enabled: boolean): Promise<void>;
   webdavUpload(url: string, username: string, password: string | null, dbPath: string): Promise<void>;
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
   runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void>;
