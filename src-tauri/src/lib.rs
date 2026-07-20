@@ -4,7 +4,7 @@ use commands::AppState;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +25,15 @@ pub fn run() {
                 if state.minimize_to_tray.load(std::sync::atomic::Ordering::Relaxed) {
                     let _ = window.hide();
                     api.prevent_close();
+
+                    // Lock the vault on close-to-tray
+                    if let Ok(mut vault) = state.vault.lock() {
+                        if let Some(ref mut manager) = *vault {
+                            manager.lock();
+                        }
+                        *vault = None;
+                    }
+                    let _ = window.emit("vault-locked", ());
                 }
             }
         })

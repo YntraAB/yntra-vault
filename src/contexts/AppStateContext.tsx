@@ -204,15 +204,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
   }, [backend, settings.minimizeToTray]);
 
-  // Listen for vault-connection-lost event in Tauri
+  // Listen for vault events in Tauri
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
+    let unsubLost: (() => void) | null = null;
+    let unsubLocked: (() => void) | null = null;
 
     if (isTauri()) {
       const initListen = async () => {
         try {
           const { listen } = await import('@tauri-apps/api/event');
-          unsubscribe = await listen('vault-connection-lost', () => {
+          unsubLost = await listen('vault-connection-lost', () => {
             setIsLocked(true);
             setCurrentVault(null);
             setSettingsOpen(false);
@@ -220,6 +221,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
               message: '⚠️ ERROR: Vault database file was deleted, moved, or disconnected! Locked immediately.',
               type: 'error'
             });
+          });
+
+          unsubLocked = await listen('vault-locked', () => {
+            setIsLocked(true);
+            setSettingsOpen(false);
           });
         } catch (e) {
           console.error('Failed to listen to tauri events:', e);
@@ -229,9 +235,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      if (unsubLost) unsubLost();
+      if (unsubLocked) unsubLocked();
     };
   }, [addToast]);
 
