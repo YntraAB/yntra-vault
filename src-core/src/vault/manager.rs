@@ -532,8 +532,39 @@ impl VaultManager {
     }
 
     pub fn delete_tag(&mut self, id: Uuid) -> crate::Result<()> {
-        self.data.tags.retain(|t| t.id != id);
-        self.save()?;
+        let tag_name = self.data.tags.iter()
+            .find(|t| t.id == id)
+            .map(|t| t.name.clone());
+
+        if let Some(name) = tag_name {
+            self.data.tags.retain(|t| t.id != id);
+            for entry in &mut self.data.entries {
+                entry.tags.retain(|t| t != &name);
+            }
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    pub fn update_tag(&mut self, id: Uuid, name: &str, color: &str, icon: &str) -> crate::Result<()> {
+        if let Some(tag) = self.data.tags.iter_mut().find(|t| t.id == id) {
+            let old_name = tag.name.clone();
+            tag.name = name.to_string();
+            tag.color = color.to_string();
+            tag.icon = icon.to_string();
+
+            // Update all entries referencing this tag if the name changed
+            if old_name != tag.name {
+                for entry in &mut self.data.entries {
+                    for t in &mut entry.tags {
+                        if *t == old_name {
+                            *t = tag.name.clone();
+                        }
+                    }
+                }
+            }
+            self.save()?;
+        }
         Ok(())
     }
 

@@ -607,29 +607,33 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
   }, [backend, refreshTags, addToast]);
 
-  const updateTag = useCallback((id: string, updates: Partial<Tag>) => {
+  const updateTag = useCallback(async (id: string, updates: Partial<Tag>) => {
+    let updatedTag: Tag | undefined;
     setRawTags((prev) => {
       const oldTag = prev.find((t) => t.id === id);
-      // If name changed, update all entries that reference the old name
-      if (oldTag && updates.name && oldTag.name !== updates.name) {
-        const oldName = oldTag.name;
-        const newName = updates.name;
-        setEntries((entries) =>
-          entries.map((e) => ({
-            ...e,
-            tags: e.tags.map((t) => (t === oldName ? newName : t)),
-          }))
-        );
-      }
-      return prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
+      if (!oldTag) return prev;
+      const nextTag = { ...oldTag, ...updates };
+      updatedTag = nextTag;
+      return prev.map((t) => (t.id === id ? nextTag : t));
     });
-  }, []);
+
+    if (backend && updatedTag) {
+      try {
+        await backend.updateTag(id, updatedTag.name, updatedTag.color, updatedTag.icon);
+        await refreshTags();
+        await refreshEntries();
+      } catch (e) {
+        addToast({ message: `Failed to update tag in database: ${e}`, type: 'error' });
+      }
+    }
+  }, [backend, refreshTags, refreshEntries, addToast]);
 
   const removeTag = useCallback(async (id: string) => {
     if (backend) {
       try {
         await backend.deleteTag(id);
         await refreshTags();
+        await refreshEntries();
       } catch (e) {
         addToast({ message: `Failed to delete tag: ${e}`, type: 'error' });
       }
@@ -648,7 +652,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         return prev.filter((t) => t.id !== id);
       });
     }
-  }, [backend, refreshTags, addToast]);
+  }, [backend, refreshTags, refreshEntries, addToast]);
 
   // ─── Vault CRUD ─────────────────────────────────────────────────
 

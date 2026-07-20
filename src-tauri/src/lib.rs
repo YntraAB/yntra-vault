@@ -75,6 +75,7 @@ pub fn run() {
             commands::get_tags,
             commands::add_tag,
             commands::delete_tag,
+            commands::update_tag,
             commands::check_vault_file_exists,
             commands::show_in_explorer,
             // Advanced features

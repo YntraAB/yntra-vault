@@ -299,6 +299,20 @@ pub async fn delete_tag(id: String, state: State<'_, AppState>) -> Result<(), St
 }
 
 #[tauri::command]
+pub async fn update_tag(
+    id: String,
+    name: String,
+    color: String,
+    icon: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    let uuid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    manager.update_tag(uuid, &name, &color, &icon).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn check_vault_file_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
