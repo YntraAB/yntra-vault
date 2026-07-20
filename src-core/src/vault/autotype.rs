@@ -41,8 +41,8 @@ pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64) -> crate::Result
                     std::thread::sleep(std::time::Duration::from_millis(100));
                     elapsed += 1;
                 }
-                // Settle delay: wait 300ms so the target input field has time to capture focus
-                std::thread::sleep(std::time::Duration::from_millis(300));
+                // Settle delay: wait 3000ms so the user has time to select/focus the input field
+                std::thread::sleep(std::time::Duration::from_millis(3000));
             }
         }
     }

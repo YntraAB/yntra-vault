@@ -19,7 +19,7 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
       e.stopPropagation();
       if (!backend || autotyping) return;
       setAutotyping(true);
-      addToast({ message: 'Autotype pending... Focus another window to start typing.', type: 'info' });
+      addToast({ message: 'Autotype pending... Focus target window. You will have 3 seconds to select the input field.', type: 'info' });
 
       (async () => {
         try {
