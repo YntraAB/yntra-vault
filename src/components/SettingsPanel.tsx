@@ -1,0 +1,863 @@
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Monitor, Sun, Moon, Palette, Database, Shield, Trash2, RotateCcw, Trash } from 'lucide-react';
+import { useAppState } from '@/contexts/AppStateContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { SecurityDashboard } from './SecurityDashboard';
+import ChangeMasterPasswordModal from './ChangeMasterPasswordModal';
+import { useBackend } from '@/lib/useBackend';
+import { isTauri, type TrashedEntryPreview } from '@/lib/backend';
+import { ActionTooltip } from './ui/tooltip';
+
+type Tab = 'general' | 'appearance' | 'security' | 'backup' | 'trash';
+
+const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: 'general', label: 'General', icon: <Monitor size={14} /> },
+  { id: 'appearance', label: 'Appearance', icon: <Palette size={14} /> },
+  { id: 'security', label: 'Security', icon: <Shield size={14} /> },
+  { id: 'backup', label: 'Backup', icon: <Database size={14} /> },
+  { id: 'trash', label: 'Trash', icon: <Trash2 size={14} /> },
+];
+
+const AUTO_LOCK_OPTIONS = [
+  { value: 1, label: '1 minute' },
+  { value: 5, label: '5 minutes' },
+  { value: 15, label: '15 minutes' },
+  { value: 30, label: '30 minutes' },
+  { value: 0, label: 'Never' },
+];
+
+const CLIPBOARD_OPTIONS = [
+  { value: 10, label: '10 seconds' },
+  { value: 30, label: '30 seconds' },
+  { value: 60, label: '1 minute' },
+  { value: 300, label: '5 minutes' },
+  { value: 0, label: 'Never' },
+];
+
+export default function SettingsPanel() {
+  const { settingsOpen, setSettingsOpen, settings, updateSettings, refreshEntries, addToast, currentVault } = useAppState();
+  const { theme, setTheme } = useTheme();
+  const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [showChangePassword, setShowChangePassword] = useState(false);
+
+  const [launchOnStartup, setLaunchOnStartup] = useState(false);
+
+  // WebDAV settings state
+  const [webdavUrl, setWebdavUrl] = useState('');
+  const [webdavUser, setWebdavUser] = useState('');
+  const [webdavPass, setWebdavPass] = useState('');
+
+  // P2P settings state
+  const [p2pAddr, setP2pAddr] = useState('127.0.0.1:5322');
+  const [isSyncingP2P, setIsSyncingP2P] = useState(false);
+
+  // Shamir settings state
+  const [shamirPass, setShamirPass] = useState('');
+  const [shares, setShares] = useState<string[]>([]);
+  const [shareA, setShareA] = useState('');
+  const [shareB, setShareB] = useState('');
+  const [reconstructedHash, setReconstructedHash] = useState('');
+
+  const { backend } = useBackend();
+  const [trashItems, setTrashItems] = useState<TrashedEntryPreview[]>([]);
+  const [loadingTrash, setLoadingTrash] = useState(false);
+
+  // Query autostart status on panel load
+  useEffect(() => {
+    if (settingsOpen && backend) {
+      backend.isAutostartEnabled()
+        .then(setLaunchOnStartup)
+        .catch((err) => console.error('Failed to query autostart status:', err));
+    }
+  }, [settingsOpen, backend]);
+
+  const handleToggleLaunch = async (v: boolean) => {
+    if (!backend) return;
+    try {
+      if (v) {
+        await backend.enableAutostart();
+      } else {
+        await backend.disableAutostart();
+      }
+      setLaunchOnStartup(v);
+      updateSettings({ launchOnStartup: v });
+      addToast({ message: `Autostart ${v ? 'enabled' : 'disabled'}`, type: 'success' });
+    } catch (err) {
+      addToast({ message: `Autostart toggle failed: ${err}`, type: 'error' });
+    }
+  };
+
+  const fetchTrash = useCallback(async () => {
+    if (!backend) return;
+    setLoadingTrash(true);
+    try {
+      const items = await backend.listTrash();
+      setTrashItems(items);
+    } catch (e) {
+      console.error('Failed to fetch trash:', e);
+    } finally {
+      setLoadingTrash(false);
+    }
+  }, [backend]);
+
+  useEffect(() => {
+    if (activeTab === 'trash' && settingsOpen) {
+      fetchTrash();
+    }
+  }, [activeTab, settingsOpen, fetchTrash]);
+
+  const handleRestore = async (id: string) => {
+    if (!backend) return;
+    try {
+      await backend.restoreFromTrash(id);
+      addToast({ message: 'Entry restored', type: 'success' });
+      await fetchTrash();
+      await refreshEntries();
+    } catch (e) {
+      addToast({ message: `Failed to restore: ${e}`, type: 'error' });
+    }
+  };
+
+  const handlePermanentDelete = async (id: string) => {
+    if (!backend) return;
+    try {
+      await backend.permanentDelete(id);
+      addToast({ message: 'Entry permanently deleted', type: 'info' });
+      await fetchTrash();
+    } catch (e) {
+      addToast({ message: `Failed to delete permanently: ${e}`, type: 'error' });
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    if (!backend || trashItems.length === 0) return;
+    if (!confirm('Are you sure you want to permanently delete all items in trash? This cannot be undone.')) return;
+    try {
+      await Promise.all(trashItems.map(item => backend.permanentDelete(item.id)));
+      addToast({ message: 'Trash emptied', type: 'info' });
+      await fetchTrash();
+    } catch (e) {
+      addToast({ message: `Failed to empty trash: ${e}`, type: 'error' });
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {settingsOpen && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-40 bg-black/30"
+            onClick={() => setSettingsOpen(false)}
+          />
+
+          {/* Panel */}
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed right-0 top-0 z-50 flex h-full w-[480px] flex-col border-l border-[var(--border)] bg-[var(--bg-base)]"
+          >
+            {/* Header */}
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4">
+              <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Settings</h2>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex h-10 shrink-0 items-center gap-0 border-b border-[var(--border-subtle)] px-4">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex h-full items-center gap-1.5 px-3 text-[12px] font-medium transition-colors ${
+                    activeTab === tab.id
+                      ? 'border-b-2 border-[var(--text-primary)] text-[var(--text-primary)]'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Content */}
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.15, delay: 0.1 }}
+              className="flex-1 overflow-y-auto p-4"
+            >
+              {activeTab === 'general' && (
+                <div className="flex flex-col gap-6">
+                  {currentVault && (
+                    <SettingSection label="Active Vault">
+                      <div className="flex flex-col gap-2.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Vault Name</span>
+                          <span className="text-[13px] font-medium text-[var(--text-primary)]">{currentVault.name}</span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">File Location</span>
+                          <span className="font-mono text-[11px] text-[var(--text-secondary)] break-all">{currentVault.path}</span>
+                        </div>
+                        {isTauri() && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              backend?.showInExplorer(currentVault.path).catch(err => {
+                                addToast({ message: `Failed to open explorer: ${err}`, type: 'error' });
+                              });
+                            }}
+                            className="mt-1 h-7 self-start rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                          >
+                            Show in Explorer
+                          </button>
+                        )}
+                      </div>
+                    </SettingSection>
+                  )}
+
+                  <SettingSection label="Auto-Lock">
+                    <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
+                      Lock the vault after a period of inactivity
+                    </p>
+                    <select
+                      value={settings.autoLockMinutes}
+                      onChange={(e) => updateSettings({ autoLockMinutes: Number(e.target.value) })}
+                      className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                    >
+                      {AUTO_LOCK_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </SettingSection>
+
+                  <SettingSection label="Clipboard">
+                    <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
+                      Clear copied passwords from clipboard after
+                    </p>
+                    <select
+                      value={settings.clipboardClearSeconds}
+                      onChange={(e) =>
+                        updateSettings({ clipboardClearSeconds: Number(e.target.value) })
+                      }
+                      className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                    >
+                      {CLIPBOARD_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </SettingSection>
+
+                  <SettingSection label="Autotype & Smart Login Delays">
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[12px] text-[var(--text-secondary)]">Character Delay (Typing Speed)</span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">{(settings.autotypeCharDelayMs ?? 15)} ms</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={5}
+                          max={100}
+                          step={5}
+                          value={settings.autotypeCharDelayMs ?? 15}
+                          onChange={(e) => updateSettings({ autotypeCharDelayMs: Number(e.target.value) })}
+                          className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[12px] text-[var(--text-secondary)]">Field Transition Delay (Tab delay)</span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">{(settings.autotypeFieldDelayMs ?? 300)} ms</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={100}
+                          max={2000}
+                          step={100}
+                          value={settings.autotypeFieldDelayMs ?? 300}
+                          onChange={(e) => updateSettings({ autotypeFieldDelayMs: Number(e.target.value) })}
+                          className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[12px] text-[var(--text-secondary)]">Focus Settle Delay (Autotype)</span>
+                          <span className="text-[11px] font-mono text-[var(--text-primary)]">{((settings.autotypeSettleDelayMs ?? 3000) / 1000).toFixed(1)} s</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={500}
+                          max={5000}
+                          step={500}
+                          value={settings.autotypeSettleDelayMs ?? 3000}
+                          onChange={(e) => updateSettings({ autotypeSettleDelayMs: Number(e.target.value) })}
+                          className="h-1 w-full appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                        />
+                      </div>
+                    </div>
+                  </SettingSection>
+
+                  <SettingRow
+                    label="Auto-open website on Smart Login"
+                    description="Launch default browser directly to the login page"
+                  >
+                    <Toggle
+                      checked={settings.autotypeLaunchBrowser !== false}
+                      onChange={(v) => updateSettings({ autotypeLaunchBrowser: v })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="Minimize to system tray"
+                    description="Keep running in background"
+                  >
+                    <Toggle
+                      checked={settings.minimizeToTray}
+                      onChange={(v) => updateSettings({ minimizeToTray: v })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow label="Start on system login">
+                    <Toggle
+                      checked={launchOnStartup}
+                      onChange={handleToggleLaunch}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="Disable loading delay"
+                    description="Instantly render data without minimum skeleton display time"
+                  >
+                    <Toggle
+                      checked={settings.disableSkeletonDelays}
+                      onChange={(v) => updateSettings({ disableSkeletonDelays: v })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="Auto-check password breaches"
+                    description="Automatically verify password safety on the web check database"
+                  >
+                    <Toggle
+                      checked={settings.autoBreachCheck}
+                      onChange={(v) => updateSettings({ autoBreachCheck: v })}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="Show breach alerts in list"
+                    description="Display warning badges next to compromised items in the sidebar list"
+                  >
+                    <Toggle
+                      checked={settings.showBreachInList}
+                      onChange={(v) => updateSettings({ showBreachInList: v })}
+                    />
+                  </SettingRow>
+                </div>
+              )}
+
+              {activeTab === 'appearance' && (
+                <div className="flex flex-col gap-6">
+                  <SettingSection label="Theme">
+                    <div className="flex gap-2">
+                      {([
+                        { value: 'light' as const, label: 'Light', icon: <Sun size={20} /> },
+                        { value: 'dark' as const, label: 'Dark', icon: <Moon size={20} /> },
+                        { value: 'system' as const, label: 'System', icon: <Monitor size={20} /> },
+                      ]).map((t) => (
+                        <button
+                          key={t.value}
+                          onClick={() => setTheme(t.value)}
+                          className={`flex h-[72px] w-[100px] flex-col items-center justify-center gap-1.5 rounded-[3px] border text-[12px] font-medium transition-colors ${
+                            theme === t.value
+                              ? 'border-[var(--text-primary)] text-[var(--text-primary)]'
+                              : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-focus)]'
+                          }`}
+                        >
+                          {t.icon}
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </SettingSection>
+
+                  <SettingSection label="Font Size">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="range"
+                        min={12}
+                        max={16}
+                        step={1}
+                        value={settings.fontSize}
+                        onChange={(e) => updateSettings({ fontSize: Number(e.target.value) })}
+                        className="h-1 flex-1 appearance-none rounded-full bg-[var(--border)] outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--text-primary)]"
+                      />
+                      <span className="w-10 text-right text-[12px] text-[var(--text-secondary)]">
+                        {settings.fontSize}px
+                      </span>
+                    </div>
+                  </SettingSection>
+
+                  <SettingSection label="Density">
+                    <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
+                      Control the spacing between elements
+                    </p>
+                    <div className="flex rounded-[3px] border border-[var(--border)]">
+                      {(['compact', 'normal', 'comfortable'] as const).map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => updateSettings({ density: d })}
+                          className={`flex-1 py-1.5 text-[12px] font-medium capitalize transition-colors ${
+                            settings.density === d
+                              ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </SettingSection>
+                </div>
+              )}
+
+              {activeTab === 'security' && (
+                <div className="flex flex-col gap-6">
+                  <SettingSection label="Master Password">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Change your vault master password
+                    </p>
+                    <button
+                      onClick={() => setShowChangePassword(true)}
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      Change Password...
+                    </button>
+                  </SettingSection>
+
+                  <SettingSection label="Emergency Recovery (Shamir's SSSS)">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Generate 3 recovery shares (2-of-3 threshold). Any 2 shares can reconstruct your password hash.
+                    </p>
+                    <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          placeholder="Verify Master Password"
+                          value={shamirPass}
+                          onChange={(e) => setShamirPass(e.target.value)}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!backend || !shamirPass) return;
+                            try {
+                              const res = await backend.splitMasterPassword(shamirPass);
+                              setShares(res);
+                              addToast({ message: 'Recovery shares generated!', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Split failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Split
+                        </button>
+                      </div>
+
+                      {shares.length > 0 && (
+                        <div className="flex flex-col gap-1.5 mt-2 border-t border-[var(--border-subtle)] pt-2.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Your Recovery Shares:</span>
+                          {shares.map((s, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-2 rounded-[3px] bg-[var(--bg-base)] px-2 py-1">
+                              <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">{s}</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(s).catch(() => {});
+                                  addToast({ message: `Share ${idx + 1} copied`, type: 'success' });
+                                }}
+                                className="text-[10px] font-medium text-[var(--text-primary)] hover:underline"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 mt-3">
+                      <span className="text-[11px] font-medium text-[var(--text-primary)]">Reconstruct Password Hash</span>
+                      <div className="flex flex-col gap-2">
+                        <input
+                          type="text"
+                          placeholder="Enter Share 1 (SL-SHARE...)"
+                          value={shareA}
+                          onChange={(e) => setShareA(e.target.value)}
+                          className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Enter Share 2 (SL-SHARE...)"
+                          value={shareB}
+                          onChange={(e) => setShareB(e.target.value)}
+                          className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!backend || !shareA || !shareB) return;
+                            try {
+                              const res = await backend.reconstructMasterPasswordHash(shareA, shareB);
+                              setReconstructedHash(res);
+                              addToast({ message: 'Hash reconstructed successfully', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Reconstruction failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Reconstruct Hash
+                        </button>
+                        {reconstructedHash && (
+                          <div className="flex flex-col gap-0.5 mt-1 bg-[var(--bg-base)] p-2 rounded-[3px]">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Reconstructed SHA-256 Hash</span>
+                            <span className="font-mono text-[10px] text-green-500 break-all select-all">{reconstructedHash}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </SettingSection>
+
+                  <SettingSection label="Security Audit">
+                    <SecurityDashboard />
+                  </SettingSection>
+                </div>
+              )}
+
+              {activeTab === 'backup' && (
+                <div className="flex flex-col gap-6">
+                  {/* WebDAV Cloud Sync */}
+                  <SettingSection label="Cloud Sync (WebDAV)">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Synchronize your vault database with a remote WebDAV server.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        placeholder="WebDAV Server URL"
+                        value={webdavUrl}
+                        onChange={(e) => setWebdavUrl(e.target.value)}
+                        className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Username"
+                          value={webdavUser}
+                          onChange={(e) => setWebdavUser(e.target.value)}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                        <input
+                          type="password"
+                          placeholder="Password"
+                          value={webdavPass}
+                          onChange={(e) => setWebdavPass(e.target.value)}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        />
+                      </div>
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            try {
+                              await backend.webdavUpload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
+                              addToast({ message: 'Backup uploaded successfully!', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Upload failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Upload Backup
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            try {
+                              await backend.webdavDownload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
+                              addToast({ message: 'Database restored from backup!', type: 'success' });
+                              await refreshEntries();
+                            } catch (err) {
+                              addToast({ message: `Download failed: ${err}`, type: 'error' });
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          Download & Restore
+                        </button>
+                      </div>
+                    </div>
+                  </SettingSection>
+
+                  {/* Local Network P2P Sync */}
+                  <SettingSection label="Local Network P2P Sync">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Synchronize directly with another device running Yntra Vault on your local network.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        placeholder="IP Address:Port (e.g. 192.168.1.50:5322)"
+                        value={p2pAddr}
+                        onChange={(e) => setP2pAddr(e.target.value)}
+                        className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                      />
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          disabled={isSyncingP2P}
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            setIsSyncingP2P(true);
+                            addToast({ message: `Listening for P2P connection on ${p2pAddr}...`, type: 'info' });
+                            try {
+                              await backend.runP2pSyncListener(p2pAddr, currentVault.path);
+                              addToast({ message: 'Received database update successfully!', type: 'success' });
+                              await refreshEntries();
+                            } catch (err) {
+                              addToast({ message: `Sync failed: ${err}`, type: 'error' });
+                            } finally {
+                              setIsSyncingP2P(false);
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                        >
+                          Listen (Server)
+                        </button>
+                        <button
+                          disabled={isSyncingP2P}
+                          onClick={async () => {
+                            if (!backend || !currentVault) return;
+                            setIsSyncingP2P(true);
+                            addToast({ message: `Connecting to ${p2pAddr}...`, type: 'info' });
+                            try {
+                              await backend.runP2pSyncClient(p2pAddr, currentVault.path);
+                              addToast({ message: 'Database sync sent successfully!', type: 'success' });
+                            } catch (err) {
+                              addToast({ message: `Connection failed: ${err}`, type: 'error' });
+                            } finally {
+                              setIsSyncingP2P(false);
+                            }
+                          }}
+                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                        >
+                          Connect (Client)
+                        </button>
+                      </div>
+                    </div>
+                  </SettingSection>
+
+                  {/* Manual Export */}
+                  <SettingSection label="Manual Export">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Save a copy of your encrypted vault file to another location.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!backend || !currentVault) return;
+                        try {
+                          const { save } = await import('@tauri-apps/plugin-dialog');
+                          const destPath = await save({
+                            defaultPath: `${currentVault.name}-backup.vdb`,
+                            filters: [{ name: 'Yntra Vault Database', extensions: ['vdb'] }],
+                          });
+                          if (!destPath) return;
+                          await backend.exportVault(destPath);
+                          addToast({ message: 'Vault exported successfully!', type: 'success' });
+                        } catch (err) {
+                          addToast({ message: `Export failed: ${err}`, type: 'error' });
+                        }
+                      }}
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      Export Vault File...
+                    </button>
+                  </SettingSection>
+
+                  {/* Browser Extension */}
+                  <SettingSection label="Browser Extension">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Register the native messaging host so the Yntra Vault browser extension can communicate with the desktop app.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!backend) return;
+                        try {
+                          const result = await backend.installBrowserExtension();
+                          addToast({ message: result, type: 'success' });
+                        } catch (err) {
+                          addToast({ message: `Setup failed: ${err}`, type: 'error' });
+                        }
+                      }}
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      Install Browser Integration
+                    </button>
+                  </SettingSection>
+                </div>
+              )}
+
+              {activeTab === 'trash' && (
+                <div className="flex flex-col gap-6">
+                  <SettingSection label="Trash Management">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      View items moved to the trash. Trashed items are automatically deleted permanently after 30 days.
+                    </p>
+                    {trashItems.length > 0 && (
+                      <button
+                        onClick={handleEmptyTrash}
+                        className="mb-4 flex items-center gap-1.5 rounded-[3px] border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-500 hover:text-white"
+                      >
+                        <Trash size={13} />
+                        Empty Trash
+                      </button>
+                    )}
+
+                    {loadingTrash ? (
+                      <p className="text-[12px] text-[var(--text-tertiary)] py-4">Loading trash...</p>
+                    ) : trashItems.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-8 rounded-[3px] border border-dashed border-[var(--border-subtle)]">
+                        <Trash2 size={20} className="text-[var(--text-tertiary)]" />
+                        <p className="text-[12px] text-[var(--text-tertiary)]">Trash is empty</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-[2px] rounded-[3px] border border-[var(--border-subtle)] overflow-hidden">
+                        {trashItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between bg-[var(--bg-elevated)] p-3 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                          >
+                            <div className="flex flex-col gap-1 min-w-0">
+                              <span className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                                {item.title}
+                              </span>
+                              <span className="text-[10px] text-[var(--text-secondary)]">
+                                Deleted: {new Date(item.deleted_at).toLocaleDateString()} • {item.days_until_permanent} days remaining
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <ActionTooltip content="Restore entry to active vault">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestore(item.id)}
+                                  className="inline-flex h-7 items-center gap-1 rounded-[3px] px-2 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-active)] hover:text-[var(--text-primary)]"
+                                >
+                                  <RotateCcw size={12} />
+                                  Restore
+                                </button>
+                              </ActionTooltip>
+                              <ActionTooltip content="Permanently delete entry from vault">
+                                <button
+                                  type="button"
+                                  onClick={() => handlePermanentDelete(item.id)}
+                                  className="inline-flex h-7 items-center gap-1 rounded-[3px] px-2 text-[11px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/10"
+                                >
+                                  <Trash2 size={12} />
+                                  Delete
+                                </button>
+                              </ActionTooltip>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SettingSection>
+                </div>
+              )}
+            </motion.div>
+
+            <ChangeMasterPasswordModal
+              open={showChangePassword}
+              onClose={() => setShowChangePassword(false)}
+            />
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function SettingSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="border-b border-[var(--border-subtle)] pb-5">
+      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
+        {label}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+function SettingRow({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] py-3">
+      <div>
+        <div className="text-[13px] text-[var(--text-primary)]">{label}</div>
+        {description && (
+          <div className="mt-0.5 text-[12px] text-[var(--text-secondary)]">{description}</div>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!checked)}
+      role="switch"
+      aria-checked={checked}
+      className={`relative h-5 w-9 rounded-full transition-colors ${
+        checked ? 'bg-[var(--text-primary)]' : 'bg-[var(--border)]'
+      }`}
+    >
+      <div
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+          checked ? 'translate-x-4.5' : 'translate-x-0.5'
+        }`}
+        style={{ transform: checked ? 'translateX(18px)' : 'translateX(2px)' }}
+      />
+    </button>
+  );
+}
+
+
+

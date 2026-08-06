@@ -1,0 +1,83 @@
+[package]
+name = "yntra-vault-core"
+version = "0.1.0"
+edition = "2024"
+description = "Yntra Vault - Core cryptographic engine"
+license = "MIT"
+
+[lib]
+name = "yntra_vault_core"
+path = "src/lib.rs"
+
+[dependencies]
+# KDF - Argon2id (memory-hard, GPU-resistant)
+argon2 = { version = "0.5", features = ["std"] }
+
+# Encryption - Multi-layer
+chacha20poly1305 = "0.10"   # XChaCha20-Poly1305 AEAD (Layer 1 - vault)
+aes-gcm = "0.10"            # AES-256-GCM AEAD (Layer 2 - per-entry)
+
+# Key derivation
+hkdf = "0.12"
+sha2 = "0.10"
+sha1 = "0.10"               # For HIBP SHA-1 hashing
+hmac = "0.12"
+
+# TOTP (RFC 6238)
+data-encoding = "2.6"       # Base32 decode for TOTP secrets
+
+# Security
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.9"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+rmp-serde = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+
+# HTTP client for HIBP breach checking
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+tokio = { version = "1", features = ["rt", "macros"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_Security_Cryptography",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com",
+    "Win32_UI_Accessibility",
+]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[target.'cfg(not(windows))'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
+tempfile = "3"
+
+[[bin]]
+name = "yntra-vault-native-host"
+path = "src/bin/yntra-vault-native-host.rs"
+
+[features]
+default = []
+wasm = []  # Feature flag for WASM compilation
+
