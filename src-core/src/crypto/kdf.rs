@@ -4,7 +4,7 @@
 
 use argon2::{Argon2, Algorithm, Version, Params};
 use hkdf::Hkdf;
-use sha2::{Sha256, Sha512, Digest};
+use sha2::Sha512;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use rand::Rng;
 use crate::error::VaultError;
@@ -81,6 +81,8 @@ pub fn derive_master_key(password: &[u8], salt: &[u8; 32]) -> crate::Result<Mast
 }
 
 /// Derive the master key from password + optional key file bytes + salt using Argon2id.
+/// When a keyfile is provided, BLAKE3 domain-separated key derivation (context: `yntra-vault-keyfile-prehash-v1`)
+/// with length-prefixed encoding is used to derive a 32-byte pre-mix seed for Argon2id.
 pub fn derive_master_key_with_keyfile(
     password: &[u8],
     key_file_bytes: Option<&[u8]>,
@@ -88,11 +90,13 @@ pub fn derive_master_key_with_keyfile(
 ) -> crate::Result<MasterKey> {
     match key_file_bytes {
         Some(kf) if !kf.is_empty() => {
-            let mut hasher = Sha256::new();
+            let mut hasher = blake3::Hasher::new_derive_key("yntra-vault-keyfile-prehash-v1");
+            hasher.update(&(password.len() as u64).to_le_bytes());
             hasher.update(password);
+            hasher.update(&(kf.len() as u64).to_le_bytes());
             hasher.update(kf);
-            let combined = hasher.finalize();
-            derive_master_key(&combined, salt)
+            let combined = zeroize::Zeroizing::new(*hasher.finalize().as_bytes());
+            derive_master_key(&*combined, salt)
         }
         _ => derive_master_key(password, salt),
     }
@@ -223,6 +227,17 @@ mod tests {
         assert_ne!(ek1.bytes, ek2.bytes);
         assert_ne!(ek1.bytes, subkeys.entry_key.bytes);
         assert_eq!(ek1.bytes, ek1_repeat.bytes);
+    }
+
+    #[test]
+    fn test_keyfile_domain_separation_framing() {
+        let salt = [42u8; 32];
+        let mk1 = derive_master_key_with_keyfile(b"abc", Some(b"def"), &salt).unwrap();
+        let mk2 = derive_master_key_with_keyfile(b"abcdef", None, &salt).unwrap();
+        let mk3 = derive_master_key_with_keyfile(b"abcd", Some(b"ef"), &salt).unwrap();
+
+        assert_ne!(mk1.as_bytes(), mk2.as_bytes());
+        assert_ne!(mk1.as_bytes(), mk3.as_bytes());
     }
 }
 

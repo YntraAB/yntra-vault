@@ -35,6 +35,29 @@ pub struct VaultManager {
     pub(crate) search_index: std::collections::HashMap<[u8; 8], Vec<Uuid>>,
 }
 
+/// Maximum allowed key file size (32 MB) to prevent out-of-memory DoS attacks.
+const MAX_KEY_FILE_SIZE: u64 = 32 * 1024 * 1024;
+
+/// Safely reads keyfile bytes into a hardware page-locked RAM buffer (`LockedBuffer`)
+/// protected by VirtualLock/mlock and canary guard pages, enforcing a 32MB maximum size limit.
+fn read_key_file_safely(path: &Path) -> crate::Result<crate::crypto::LockedBuffer> {
+    let meta = fs::metadata(path).map_err(|e| {
+        VaultError::VaultNotFound(format!("Key file error ({}): {}", path.display(), e))
+    })?;
+    if meta.len() > MAX_KEY_FILE_SIZE {
+        return Err(VaultError::InvalidFormat(format!(
+            "Key file ({}) size ({} bytes) exceeds maximum allowed limit of 32 MB",
+            path.display(),
+            meta.len()
+        )));
+    }
+    let raw_bytes = Zeroizing::new(fs::read(path).map_err(|e| {
+        VaultError::VaultNotFound(format!("Key file error ({}): {}", path.display(), e))
+    })?);
+    let locked = crate::crypto::LockedBuffer::new(&raw_bytes);
+    Ok(locked)
+}
+
 impl VaultManager {
     /// Create a brand new vault with the given master password.
     pub fn create(name: &str, password: &str, path: &Path) -> crate::Result<Self> {
@@ -50,14 +73,16 @@ impl VaultManager {
         let salt = generate_salt();
 
         let key_file_bytes = match key_file_path {
-            Some(kf_path) => Some(fs::read(kf_path).map_err(|e| {
-                VaultError::VaultNotFound(format!("Key file error ({}): {}", kf_path.display(), e))
-            })?),
+            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
             None => None,
         };
 
         // Derive keys from master password + optional key file
-        let master_key = derive_master_key_with_keyfile(password.as_bytes(), key_file_bytes.as_deref(), &salt)?;
+        let master_key = derive_master_key_with_keyfile(
+            password.as_bytes(),
+            key_file_bytes.as_ref().map(|b| b.as_slice()),
+            &salt,
+        )?;
         let subkeys = derive_subkeys(&master_key)?;
 
         let now = Utc::now();
@@ -113,16 +138,14 @@ impl VaultManager {
         let vault_file = VaultFile::from_bytes(&file_bytes)?;
 
         let key_file_bytes = match key_file_path {
-            Some(kf_path) => Some(fs::read(kf_path).map_err(|e| {
-                VaultError::VaultNotFound(format!("Key file error ({}): {}", kf_path.display(), e))
-            })?),
+            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
             None => None,
         };
 
         // Derive keys from password + optional key file + stored salt
         let master_key = derive_master_key_with_keyfile(
             password.as_bytes(),
-            key_file_bytes.as_deref(),
+            key_file_bytes.as_ref().map(|b| b.as_slice()),
             &vault_file.header.salt,
         )?;
         let subkeys = derive_subkeys(&master_key)?;
@@ -875,7 +898,6 @@ impl VaultManager {
         Ok(())
     }
 
-    /// Change the master password — re-derives keys and re-encrypts everything.
     pub fn change_master_password(&mut self, current: &str, new_password: &str) -> crate::Result<()> {
         self.change_master_password_with_keyfiles(current, None, new_password, None)
     }
@@ -889,14 +911,16 @@ impl VaultManager {
         new_key_file: Option<&Path>,
     ) -> crate::Result<()> {
         let cur_kf_bytes = match current_key_file {
-            Some(kf_path) => Some(fs::read(kf_path).map_err(|e| {
-                VaultError::VaultNotFound(format!("Key file error ({}): {}", kf_path.display(), e))
-            })?),
+            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
             None => None,
         };
 
         // Verify current password by trying to derive same keys
-        let current_mk = derive_master_key_with_keyfile(current.as_bytes(), cur_kf_bytes.as_deref(), &self.salt)?;
+        let current_mk = derive_master_key_with_keyfile(
+            current.as_bytes(),
+            cur_kf_bytes.as_ref().map(|b| b.as_slice()),
+            &self.salt,
+        )?;
         let current_keys = derive_subkeys(&current_mk)?;
 
         // Quick check: try decrypting first entry's password (or first trashed entry if entries is empty)
@@ -909,15 +933,17 @@ impl VaultManager {
         }
 
         let new_kf_bytes = match new_key_file {
-            Some(kf_path) => Some(fs::read(kf_path).map_err(|e| {
-                VaultError::VaultNotFound(format!("Key file error ({}): {}", kf_path.display(), e))
-            })?),
+            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
             None => None,
         };
 
         // Generate new salt
         let new_salt = generate_salt();
-        let new_mk = derive_master_key_with_keyfile(new_password.as_bytes(), new_kf_bytes.as_deref(), &new_salt)?;
+        let new_mk = derive_master_key_with_keyfile(
+            new_password.as_bytes(),
+            new_kf_bytes.as_ref().map(|b| b.as_slice()),
+            &new_salt,
+        )?;
         let new_keys = derive_subkeys(&new_mk)?;
 
         // Re-encrypt every entry's password and TOTP with new keys
@@ -1257,6 +1283,7 @@ mod tests {
         let reopened = VaultManager::open(&test_vault.path, new_password).unwrap();
         assert!(reopened.is_unlocked());
         
+
         // Check active entry
         let dec2 = reopened.get_entry(id2).unwrap();
         assert_eq!(dec2.password, "passwordB-1");
@@ -1345,5 +1372,20 @@ mod tests {
         // Decrypting active entry MUST fail because history blob uses "history" AAD scope, not "password" AAD scope!
         let decrypted_res = manager.get_entry(id);
         assert!(decrypted_res.is_err(), "Substitution attack must fail AEAD tag check due to AAD scope isolation");
+    }
+
+    #[test]
+    fn test_key_file_safely_size_limit_and_zeroization() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let kf_path = temp_dir.path().join("test.key");
+
+        // Test normal 32-byte keyfile
+        VaultManager::generate_key_file(&kf_path).unwrap();
+        let bytes = read_key_file_safely(&kf_path).unwrap();
+        assert_eq!(bytes.as_slice().len(), 32);
+
+        // Test non-existent file
+        let missing_path = temp_dir.path().join("missing.key");
+        assert!(read_key_file_safely(&missing_path).is_err());
     }
 }

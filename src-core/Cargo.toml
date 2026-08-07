@@ -21,6 +21,7 @@ aes-gcm = "0.10"            # AES-256-GCM AEAD (Legacy per-entry fallback)
 hkdf = "0.12"
 sha2 = "0.10"
 sha1 = "0.10"               # For HIBP SHA-1 hashing
+blake3 = "1.5"              # Domain-separated keyfile pre-hashing
 hmac = "0.12"
 
 # TOTP (RFC 6238)
