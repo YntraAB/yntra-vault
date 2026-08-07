@@ -23,6 +23,9 @@ import type {
   Tag,
   BreachStatus,
   MergeStats,
+  ParsedImportEntry,
+  ImportPreviewResult,
+  BiometricInfo,
 } from './backend';
 
 export class TauriBackend implements YntraVaultBackend {
@@ -261,13 +264,55 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('reconstruct_master_password_hash', { shareA, shareB });
   }
 
-  // Export
+  // Export & Import
   async exportVault(destPath: string): Promise<void> {
     return invoke('export_vault', { destPath });
   }
 
+  async exportVaultCsv(destPath: string): Promise<void> {
+    return invoke('export_vault_csv', { destPath });
+  }
+
+  async exportVaultJson(destPath: string): Promise<void> {
+    return invoke('export_vault_json', { destPath });
+  }
+
   async getVaultPath(): Promise<string> {
     return invoke('get_vault_path');
+  }
+
+  async parseImportFile(filePath: string, format?: string): Promise<ImportPreviewResult> {
+    return invoke('parse_import_file', { filePath, format });
+  }
+
+  async parseImportContent(content: string, format?: string): Promise<ImportPreviewResult> {
+    return invoke('parse_import_content', { content, format });
+  }
+
+  async importEntries(entries: ParsedImportEntry[], duplicateStrategy: 'skip' | 'overwrite' | 'keep_both'): Promise<number> {
+    return invoke('import_entries', { entries, duplicateStrategy });
+  }
+
+  // ─── Biometrics ──────────────────────────────────────────────
+
+  async checkBiometricAvailable(): Promise<BiometricInfo> {
+    return invoke('check_biometric_available');
+  }
+
+  async isBiometricEnabled(path: string): Promise<boolean> {
+    return invoke('is_biometric_enabled', { path });
+  }
+
+  async unlockVaultBiometric(path: string): Promise<VaultInfo> {
+    return invoke('unlock_vault_biometric', { path });
+  }
+
+  async enableBiometric(): Promise<void> {
+    return invoke('enable_biometric');
+  }
+
+  async disableBiometric(): Promise<void> {
+    return invoke('disable_biometric');
   }
 }
 

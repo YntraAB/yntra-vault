@@ -31,6 +31,8 @@ pub struct VaultManager {
     pub(crate) keys: Option<SubKeys>,
     /// Salt from the file header
     pub(crate) salt: [u8; 32],
+    /// Embedded biometric container block
+    pub(crate) biometric: Option<crate::vault::format::EmbeddedBiometricHeader>,
     /// In-memory Zero-Disclosure search index
     pub(crate) search_index: std::collections::HashMap<[u8; 8], Vec<Uuid>>,
 }
@@ -108,6 +110,7 @@ impl VaultManager {
             data,
             keys: Some(subkeys),
             salt,
+            biometric: None,
             search_index: std::collections::HashMap::new(),
         };
 
@@ -215,13 +218,98 @@ impl VaultManager {
             data,
             keys: Some(subkeys),
             salt: vault_file.header.salt,
+            biometric: vault_file.biometric,
             search_index: std::collections::HashMap::new(),
         };
         manager.rebuild_search_index();
         Ok(manager)
     }
 
-    /// Save the vault to disk with full encryption.
+    /// Open an existing vault using enrolled Biometric Unlock (Windows Hello, Touch ID, PAM).
+    pub fn open_with_biometric(path: &Path) -> crate::Result<Self> {
+        let file_bytes = fs::read(path)
+            .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", path.display(), e)))?;
+
+        let vault_file = VaultFile::from_bytes(&file_bytes)?;
+        let subkeys = crate::crypto::biometric::unlock_from_vault_file(&vault_file)?;
+
+        if vault_file.encrypted_payload.len() < 24 {
+            return Err(VaultError::InvalidFormat(
+                "Encrypted payload too short (must be at least 24 bytes for XChaCha20 nonce)".into(),
+            ));
+        }
+
+        let encrypted_blob = crate::crypto::cipher::EncryptedBlob {
+            nonce: vault_file.encrypted_payload[..24].to_vec(),
+            ciphertext: vault_file.encrypted_payload[24..].to_vec(),
+        };
+
+        let decrypted = if vault_file.header.version >= 3 {
+            let aad = vault_file.header.aad_bytes()?;
+            decrypt_vault_with_aad(&encrypted_blob, &subkeys.vault_key, &aad)?
+        } else {
+            decrypt_vault(&encrypted_blob, &subkeys.vault_key)?
+        };
+
+        let data: VaultData = match vault_file.header.version {
+            1 => {
+                match bincode::deserialize(&decrypted) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        let legacy: LegacyVaultData = bincode::deserialize(&decrypted)
+                            .map_err(|e| VaultError::SerializationError(
+                                format!("Legacy vault deserialize: {}", e)
+                            ))?;
+                        legacy.into_current()
+                    }
+                }
+            }
+            _ => {
+                rmp_serde::from_slice(&decrypted)
+                    .map_err(|e| VaultError::SerializationError(
+                        format!("Vault deserialize: {}", e)
+                    ))?
+            }
+        };
+
+        let mut manager = VaultManager {
+            path: path.to_path_buf(),
+            data,
+            keys: Some(subkeys),
+            salt: vault_file.header.salt,
+            biometric: vault_file.biometric,
+            search_index: std::collections::HashMap::new(),
+        };
+        manager.rebuild_search_index();
+        Ok(manager)
+    }
+
+    /// Enroll biometrics for the current open vault (Embedded in single .vdb file).
+    pub fn enable_biometric(&mut self) -> crate::Result<()> {
+        let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        let temp_header = FileHeader {
+            version: FORMAT_VERSION,
+            flags: crate::vault::format::FLAG_HAS_BIOMETRIC,
+            salt: self.salt,
+            kdf_params: KdfParams::default(),
+        };
+        let bio_header = crate::crypto::biometric::create_embedded_biometric_header(keys, &temp_header)?;
+        self.biometric = Some(bio_header);
+        self.save()
+    }
+
+    /// Disable biometrics for the current vault (Embedded in single .vdb file).
+    pub fn disable_biometric(&mut self) -> crate::Result<()> {
+        self.biometric = None;
+        self.save()
+    }
+
+    /// Check if biometric is enabled for the current vault.
+    pub fn is_biometric_enabled(&self) -> bool {
+        self.biometric.is_some()
+    }
+
+    /// Save the vault to disk with full encryption (Single-File .vdb Architecture).
     pub fn save(&mut self) -> crate::Result<()> {
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
 
@@ -239,7 +327,7 @@ impl VaultManager {
 
         let header = FileHeader {
             version: FORMAT_VERSION,
-            flags: 0,
+            flags: if self.biometric.is_some() { crate::vault::format::FLAG_HAS_BIOMETRIC } else { 0 },
             salt: self.salt,
             kdf_params: KdfParams::default(),
         };
@@ -253,10 +341,11 @@ impl VaultManager {
         payload.extend_from_slice(&encrypted.nonce);
         payload.extend_from_slice(&encrypted.ciphertext);
 
-        // Build vault file (v3 has no outer HMAC)
+        // Build single-file vault structure (v4)
         let vault_file = VaultFile {
             header,
             hmac: None,
+            biometric: self.biometric.clone(),
             encrypted_payload: payload,
         };
 
@@ -265,6 +354,12 @@ impl VaultManager {
         let temp_path = self.path.with_extension("vdb.tmp");
         fs::write(&temp_path, &file_bytes)?;
         fs::rename(&temp_path, &self.path)?;
+
+        // Clean up any legacy sidecar files if present
+        let old_bio = self.path.with_extension("vdb.bio");
+        let old_kek = self.path.with_extension("vdb.bio_kek");
+        if old_bio.exists() { let _ = fs::remove_file(old_bio); }
+        if old_kek.exists() { let _ = fs::remove_file(old_kek); }
 
         Ok(())
     }
@@ -553,6 +648,200 @@ impl VaultManager {
         self.save()?;
 
         Ok(id)
+    }
+
+    /// Checks an array of ParsedImportEntry against current vault entries for duplicates.
+    pub fn check_import_duplicates(&self, entries: &mut [crate::vault::importer::ParsedImportEntry]) -> usize {
+        let mut dup_count = 0;
+        for item in entries.iter_mut() {
+            let t_lower = item.title.trim().to_lowercase();
+            let u_lower = item.username.trim().to_lowercase();
+
+            let match_found = self.data.entries.iter().any(|e| {
+                let e_t = e.title.trim().to_lowercase();
+                let e_u = e.username.trim().to_lowercase();
+                let title_matches = !t_lower.is_empty() && e_t == t_lower;
+                let user_matches = e_u == u_lower || u_lower.is_empty() || e_u.is_empty();
+                title_matches && user_matches
+            });
+
+            if match_found {
+                item.is_duplicate = true;
+                item.duplicate_reason = Some(format!("An entry titled '{}' already exists.", item.title));
+                dup_count += 1;
+            }
+        }
+        dup_count
+    }
+
+    /// Bulk imports parsed entries into the vault using the chosen DuplicateStrategy.
+    pub fn bulk_import_entries(
+        &mut self,
+        entries: Vec<crate::vault::importer::ParsedImportEntry>,
+        strategy: crate::vault::importer::DuplicateStrategy,
+    ) -> crate::Result<usize> {
+        let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        let entry_key = keys.entry_key.clone();
+        let mut count = 0;
+
+        let tag_colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899", "#06b6d4"];
+        let mut color_idx = 0;
+
+        for item in entries {
+            let t_lower = item.title.trim().to_lowercase();
+            let u_lower = item.username.trim().to_lowercase();
+
+            let existing_id = self.data.entries.iter().find(|e| {
+                let e_t = e.title.trim().to_lowercase();
+                let e_u = e.username.trim().to_lowercase();
+                let title_matches = !t_lower.is_empty() && e_t == t_lower;
+                let user_matches = e_u == u_lower || u_lower.is_empty() || e_u.is_empty();
+                title_matches && user_matches
+            }).map(|e| e.id);
+
+            if let Some(target_id) = existing_id {
+                match strategy {
+                    crate::vault::importer::DuplicateStrategy::Skip => continue,
+                    crate::vault::importer::DuplicateStrategy::Overwrite => {
+                        let update = UpdateEntry {
+                            title: Some(item.title),
+                            username: Some(item.username),
+                            password: if !item.password.is_empty() { Some(item.password) } else { None },
+                            url: if !item.url.is_empty() { Some(item.url) } else { None },
+                            email: if !item.email.is_empty() { Some(item.email) } else { None },
+                            notes: if !item.notes.is_empty() { Some(item.notes) } else { None },
+                            totp_secret: item.totp_secret,
+                            tags: if !item.tags.is_empty() { Some(item.tags) } else { None },
+                            custom_fields: if !item.custom_fields.is_empty() { Some(item.custom_fields.clone()) } else { None },
+                            ..Default::default()
+                        };
+                        self.update_entry(target_id, update)?;
+                        count += 1;
+                        continue;
+                    }
+                    crate::vault::importer::DuplicateStrategy::KeepBoth => {
+                        // Fallthrough to add as new entry
+                    }
+                }
+            }
+
+            // Ensure all tags attached to item exist in vault's global tag list
+            for tag_name in &item.tags {
+                let tag_trimmed = tag_name.trim();
+                if !tag_trimmed.is_empty()
+                    && !self.data.tags.iter().any(|t| t.name.eq_ignore_ascii_case(tag_trimmed))
+                {
+                    self.data.tags.push(Tag {
+                        id: Uuid::new_v4(),
+                        name: tag_trimmed.to_string(),
+                        color: tag_colors[color_idx % tag_colors.len()].to_string(),
+                        icon: "tag".to_string(),
+                    });
+                    color_idx += 1;
+                }
+            }
+
+            let new_entry = NewEntry {
+                title: item.title,
+                username: item.username,
+                password: item.password,
+                url: item.url,
+                email: item.email,
+                notes: item.notes,
+                tags: item.tags,
+                totp_secret: item.totp_secret,
+                custom_fields: item.custom_fields,
+                entry_type: Some(item.entry_type.clone()),
+                generate_passkey: None,
+            };
+
+            let now = Utc::now();
+            let id = Uuid::new_v4();
+
+            let encrypted_password = Self::encrypt_entry_field(
+                new_entry.password.as_bytes(),
+                &entry_key,
+                &id,
+                FieldScope::Password,
+            )?;
+
+            let encrypted_totp = if let Some(ref secret) = new_entry.totp_secret {
+                Some(Self::encrypt_entry_field(secret.as_bytes(), &entry_key, &id, FieldScope::Totp)?)
+            } else {
+                None
+            };
+
+            let entry = Entry {
+                id,
+                title: new_entry.title.clone(),
+                username: new_entry.username.clone(),
+                encrypted_password,
+                url: new_entry.url.clone(),
+                email: new_entry.email.clone(),
+                notes: new_entry.notes.clone(),
+                tags: new_entry.tags.clone(),
+                favorite: false,
+                pinned: false,
+                encrypted_totp_secret: encrypted_totp,
+                custom_fields: new_entry.custom_fields,
+                entry_type: item.entry_type,
+                created_at: now,
+                updated_at: now,
+                password_history: Vec::new(),
+                breach_status: BreachStatus::Unknown,
+                strength_score: Some(crate::breach::strength::analyze_password(&new_entry.password)),
+                password_changed_at: now,
+                encrypted_passkey: None,
+                passkey_public_key: None,
+            };
+
+            self.data.entries.push(entry);
+            count += 1;
+        }
+
+        self.rebuild_search_index();
+        self.save()?;
+        Ok(count)
+    }
+
+    /// Exports decrypted vault entries to a CSV file.
+    pub fn export_csv(&self, dest_path: &Path) -> crate::Result<()> {
+        let mut csv = String::from("Title,Username,Email,Password,URL,Notes,TOTP,Tags\n");
+        for entry in self.list_entries()? {
+            if let Ok(dec) = self.get_entry(entry.id) {
+                let esc = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+                let totp = dec.totp_secret.as_deref().unwrap_or("");
+                let tags = dec.tags.join(";");
+
+                csv.push_str(&format!(
+                    "{},{},{},{},{},{},{},{}\n",
+                    esc(&dec.title),
+                    esc(&dec.username),
+                    esc(&dec.email),
+                    esc(&dec.password),
+                    esc(&dec.url),
+                    esc(&dec.notes),
+                    esc(totp),
+                    esc(&tags),
+                ));
+            }
+        }
+        std::fs::write(dest_path, csv)
+            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write CSV: {}", e)))
+    }
+
+    /// Exports decrypted vault entries to a JSON file.
+    pub fn export_json(&self, dest_path: &Path) -> crate::Result<()> {
+        let mut items = Vec::new();
+        for entry in self.list_entries()? {
+            if let Ok(dec) = self.get_entry(entry.id) {
+                items.push(dec);
+            }
+        }
+        let json = serde_json::to_string_pretty(&items)
+            .map_err(|e| VaultError::SerializationError(format!("Failed to format JSON: {}", e)))?;
+        std::fs::write(dest_path, json)
+            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write JSON: {}", e)))
     }
 
     /// Update an existing entry. Tracks password history.
@@ -1018,9 +1307,21 @@ impl VaultManager {
 
         // Update salt and keys
         self.salt = new_salt;
-        self.keys = Some(new_keys);
-        self.save()?;
+        self.keys = Some(new_keys.clone());
 
+        if self.biometric.is_some() {
+            let temp_header = FileHeader {
+                version: FORMAT_VERSION,
+                flags: crate::vault::format::FLAG_HAS_BIOMETRIC,
+                salt: self.salt,
+                kdf_params: KdfParams::default(),
+            };
+            if let Ok(new_bio) = crate::crypto::biometric::create_embedded_biometric_header(&new_keys, &temp_header) {
+                self.biometric = Some(new_bio);
+            }
+        }
+
+        self.save()?;
         Ok(())
     }
 
@@ -1332,6 +1633,7 @@ mod tests {
         let file = VaultFile {
             header,
             hmac: None,
+            biometric: None,
             encrypted_payload: vec![1, 2, 3], // Payload < 24 bytes
         };
         let corrupted_bytes = file.to_bytes().unwrap();

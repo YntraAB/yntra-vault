@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Monitor, Sun, Moon, Palette, Database, Shield, Trash2, RotateCcw, Trash } from 'lucide-react';
+import { X, Monitor, Sun, Moon, Palette, Database, Shield, Trash2, RotateCcw, Trash, FolderInput, FileSpreadsheet, FileCode, AlertTriangle, Fingerprint } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { LanguageCombobox } from './ui/LanguageCombobox';
 import { SecurityDashboard } from './SecurityDashboard';
 import ChangeMasterPasswordModal from './ChangeMasterPasswordModal';
-import { useBackend } from '@/lib/useBackend';
+import ImportModal from './ImportModal';
+import { useBackend, useBiometric } from '@/lib/useBackend';
 import { isTauri, type TrashedEntryPreview } from '@/lib/backend';
 import { ActionTooltip } from './ui/tooltip';
 
@@ -43,6 +44,7 @@ export default function SettingsPanel() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
 
@@ -67,6 +69,33 @@ export default function SettingsPanel() {
   const [reconstructedHash, setReconstructedHash] = useState('');
 
   const { backend } = useBackend();
+  const { info: bioInfo, checkAvailability: checkBioAvailable, isEnabled: isBioEnabled, enable: enableBio, disable: disableBio } = useBiometric();
+  const [bioActive, setBioActive] = useState(false);
+
+  useEffect(() => {
+    if (settingsOpen && currentVault?.path) {
+      isBioEnabled(currentVault.path).then(setBioActive);
+      checkBioAvailable();
+    }
+  }, [settingsOpen, currentVault, isBioEnabled, checkBioAvailable]);
+
+  const handleToggleBiometric = async () => {
+    if (!currentVault?.path) return;
+    try {
+      if (bioActive) {
+        await disableBio();
+        setBioActive(false);
+        addToast({ message: 'Biometric unlock disabled', type: 'info' });
+      } else {
+        await enableBio();
+        setBioActive(true);
+        addToast({ message: `Biometric unlock enabled (${bioInfo?.biometric_type || 'Biometrics'})`, type: 'success' });
+      }
+    } catch (err: any) {
+      addToast({ message: `Biometric toggle error: ${err}`, type: 'error' });
+    }
+  };
+
   const tabsRef = useRef<HTMLDivElement>(null);
 
   const handleTabsWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
@@ -484,6 +513,35 @@ export default function SettingsPanel() {
 
               {activeTab === 'security' && (
                 <div className="flex flex-col gap-6">
+                  <SettingSection label="Biometric Unlock">
+                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+                      Unlock Yntra Vault using hardware biometrics ({bioInfo?.biometric_type || 'Windows Hello / Touch ID'}).
+                    </p>
+                    <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+                      <div className="flex items-center gap-3">
+                        <Fingerprint className="text-[var(--accent)]" size={20} />
+                        <div className="flex flex-col">
+                          <span className="text-[13px] font-medium text-[var(--text-primary)]">
+                            {bioInfo?.biometric_type || 'Hardware Biometrics'}
+                          </span>
+                          <span className="text-[11px] text-[var(--text-tertiary)]">
+                            {bioActive ? 'Enrolled for this vault' : 'Disabled'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleToggleBiometric}
+                        className={`h-8 rounded-[3px] px-3 text-[12px] font-medium transition-colors ${
+                          bioActive
+                            ? 'border border-[var(--destructive)] bg-transparent text-[var(--destructive)] hover:bg-[var(--destructive)]/10'
+                            : 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+                        }`}
+                      >
+                        {bioActive ? 'Disable' : 'Enable'}
+                      </button>
+                    </div>
+                  </SettingSection>
+
                   <SettingSection label={t('settings.master_password')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
                       {t('security.master_password')}
@@ -797,31 +855,98 @@ export default function SettingsPanel() {
                     </div>
                   </SettingSection>
 
-                  {/* Manual Export */}
-                  <SettingSection label={t('settings.manual_export')}>
+                  {/* Competitor Importer */}
+                  <SettingSection label="Competitor Password Importer">
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      {t('settings.manual_export_desc')}
+                      Import passwords and logins from Bitwarden, 1Password, KeePass, Chrome, LastPass, Dashlane, Proton Pass, or generic CSV.
                     </p>
                     <button
-                      onClick={async () => {
-                        if (!backend || !currentVault) return;
-                        try {
-                          const { save } = await import('@tauri-apps/plugin-dialog');
-                          const destPath = await save({
-                            defaultPath: `${currentVault.name}-backup.vdb`,
-                            filters: [{ name: 'Yntra Vault Database', extensions: ['vdb'] }],
-                          });
-                          if (!destPath) return;
-                          await backend.exportVault(destPath);
-                          addToast({ message: 'Vault exported successfully!', type: 'success' });
-                        } catch (err) {
-                          addToast({ message: `Export failed: ${err}`, type: 'error' });
-                        }
-                      }}
-                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                      onClick={() => setShowImportModal(true)}
+                      className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 cursor-pointer"
                     >
-                      {t('settings.export_file')}
+                      <FolderInput size={14} />
+                      <span>Import Passwords</span>
                     </button>
+                  </SettingSection>
+
+                  {/* Manual Export */}
+                  <SettingSection label={t('settings.manual_export')}>
+                    <p className="mb-2.5 text-[12px] text-[var(--text-secondary)]">
+                      {t('settings.manual_export_desc')}
+                    </p>
+                    <div className="mb-3 flex items-center gap-2 rounded-[3px] border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-500 font-medium">
+                      <AlertTriangle size={14} className="shrink-0" />
+                      <span>Warning: CSV and JSON exports contain unencrypted credentials. Keep exported files secure and delete them after migration.</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Encrypted Backup */}
+                      <button
+                        onClick={async () => {
+                          if (!backend || !currentVault) return;
+                          try {
+                            const { save } = await import('@tauri-apps/plugin-dialog');
+                            const destPath = await save({
+                              defaultPath: `${currentVault.name}-backup.vdb`,
+                              filters: [{ name: 'Yntra Vault Database', extensions: ['vdb'] }],
+                            });
+                            if (!destPath) return;
+                            await backend.exportVault(destPath);
+                            addToast({ message: 'Encrypted vault exported successfully!', type: 'success' });
+                          } catch (err) {
+                            addToast({ message: `Export failed: ${err}`, type: 'error' });
+                          }
+                        }}
+                        className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
+                      >
+                        {t('settings.export_file')} (.vdb)
+                      </button>
+
+                      {/* CSV Export */}
+                      <button
+                        onClick={async () => {
+                          if (!backend || !currentVault) return;
+                          try {
+                            const { save } = await import('@tauri-apps/plugin-dialog');
+                            const destPath = await save({
+                              defaultPath: `${currentVault.name}-passwords.csv`,
+                              filters: [{ name: 'CSV File', extensions: ['csv'] }],
+                            });
+                            if (!destPath) return;
+                            await backend.exportVaultCsv(destPath);
+                            addToast({ message: 'Decrypted CSV exported successfully!', type: 'success' });
+                          } catch (err) {
+                            addToast({ message: `Export failed: ${err}`, type: 'error' });
+                          }
+                        }}
+                        className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
+                      >
+                        <FileSpreadsheet size={13} />
+                        <span>Export CSV</span>
+                      </button>
+
+                      {/* JSON Export */}
+                      <button
+                        onClick={async () => {
+                          if (!backend || !currentVault) return;
+                          try {
+                            const { save } = await import('@tauri-apps/plugin-dialog');
+                            const destPath = await save({
+                              defaultPath: `${currentVault.name}-passwords.json`,
+                              filters: [{ name: 'JSON File', extensions: ['json'] }],
+                            });
+                            if (!destPath) return;
+                            await backend.exportVaultJson(destPath);
+                            addToast({ message: 'Decrypted JSON exported successfully!', type: 'success' });
+                          } catch (err) {
+                            addToast({ message: `Export failed: ${err}`, type: 'error' });
+                          }
+                        }}
+                        className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
+                      >
+                        <FileCode size={13} />
+                        <span>Export JSON</span>
+                      </button>
+                    </div>
                   </SettingSection>
                 </div>
               )}
@@ -900,6 +1025,11 @@ export default function SettingsPanel() {
             <ChangeMasterPasswordModal
               open={showChangePassword}
               onClose={() => setShowChangePassword(false)}
+            />
+
+            <ImportModal
+              isOpen={showImportModal}
+              onClose={() => setShowImportModal(false)}
             />
           </motion.div>
         </>

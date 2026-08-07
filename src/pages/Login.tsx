@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen } from 'lucide-react';
+import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen, Fingerprint } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -23,22 +23,71 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricType, setBiometricType] = useState('Biometrics');
+  const hasAutoPromptedRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isLockedOut = Date.now() < lockedUntil;
   const lockoutRemaining = Math.ceil((lockedUntil - Date.now()) / 1000);
 
-  // Redirect if not in Tauri desktop mode or no vault is selected
+  const triggerShake = useCallback(() => {
+    setShake(true);
+    setTimeout(() => setShake(false), 300);
+  }, []);
+
+  const handleBiometricUnlock = useCallback(async () => {
+    if (!currentVault?.path) return;
+    setLoading(true);
+    setError('');
+    try {
+      const backend = await getBackend();
+      const info = await backend.unlockVaultBiometric(currentVault.path);
+      const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+      const newVault = { id: info.id, name: info.name, path: info.path };
+      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+      setCurrentVault(newVault);
+      setIsLocked(false);
+      navigate('/app');
+    } catch (err: any) {
+      const msg = err.toString() || 'Biometric authentication failed';
+      if (!msg.includes('canceled')) {
+        setError(msg);
+        triggerShake();
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [currentVault, navigate, setCurrentVault, setIsLocked, triggerShake]);
+
+  // Redirect if not in Tauri desktop mode or no vault is selected & check biometrics
   useEffect(() => {
     if (!isTauri() || !currentVault) {
       navigate('/');
-    }
-  }, [currentVault, navigate]);
+    } else if (currentVault?.path) {
+      getBackend().then(async (backend) => {
+        try {
+          const enabled = await backend.isBiometricEnabled(currentVault.path);
+          if (enabled) {
+            const info = await backend.checkBiometricAvailable();
+            setBiometricAvailable(info.available);
+            if (info.biometric_type) setBiometricType(info.biometric_type);
 
-  const triggerShake = () => {
-    setShake(true);
-    setTimeout(() => setShake(false), 300);
-  };
+            // SOTA UX: Auto-trigger biometric challenge on launch once per page load
+            if (info.available && !hasAutoPromptedRef.current) {
+              hasAutoPromptedRef.current = true;
+              setTimeout(() => {
+                handleBiometricUnlock();
+              }, 150);
+            }
+          }
+        } catch (e) {
+          console.error('Biometric check error:', e);
+        }
+      });
+    }
+  }, [currentVault, navigate, handleBiometricUnlock]);
 
   const handleBrowseKeyFile = async () => {
     if (!isTauri()) return;
@@ -64,6 +113,12 @@ export default function Login() {
 
       if (isLockedOut) {
         setError(`Too many attempts. Try again in ${lockoutRemaining}s`);
+        return;
+      }
+
+      // If biometrics is available and no password typed, trigger 1-click biometric unlock
+      if (biometricAvailable && !password.trim() && !useKeyFile) {
+        handleBiometricUnlock();
         return;
       }
 
@@ -262,6 +317,18 @@ export default function Login() {
               t('login.unlock_btn')
             )}
           </button>
+
+          {biometricAvailable && (
+            <button
+              type="button"
+              onClick={handleBiometricUnlock}
+              disabled={loading || isLockedOut}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-primary)] transition-all hover:bg-[var(--bg-hover)] active:scale-[0.99] disabled:opacity-50"
+            >
+              <Fingerprint size={16} className="text-[var(--accent)]" />
+              <span>Unlock with {biometricType}</span>
+            </button>
+          )}
         </form>
 
         {/* Attempts warning */}

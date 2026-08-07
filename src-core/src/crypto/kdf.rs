@@ -34,6 +34,41 @@ pub struct SubKeys {
     pub search_key: SearchKey,
 }
 
+impl SubKeys {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(160);
+        buf.extend_from_slice(&self.vault_key.bytes);
+        buf.extend_from_slice(&self.entry_key.bytes);
+        buf.extend_from_slice(&self.hmac_key.bytes);
+        buf.extend_from_slice(&self.search_key.bytes);
+        buf
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
+        if bytes.len() != 160 {
+            return Err(crate::error::VaultError::DecryptionError(
+                "Invalid subkeys buffer length for biometric unlock".into()
+            ));
+        }
+        let mut vault_key_bytes = [0u8; 32];
+        let mut entry_key_bytes = [0u8; 32];
+        let mut hmac_key_bytes = [0u8; 64];
+        let mut search_key_bytes = [0u8; 32];
+
+        vault_key_bytes.copy_from_slice(&bytes[0..32]);
+        entry_key_bytes.copy_from_slice(&bytes[32..64]);
+        hmac_key_bytes.copy_from_slice(&bytes[64..128]);
+        search_key_bytes.copy_from_slice(&bytes[128..160]);
+
+        Ok(SubKeys {
+            vault_key: VaultKey { bytes: vault_key_bytes },
+            entry_key: EntryKey { bytes: entry_key_bytes },
+            hmac_key: HmacKey { bytes: hmac_key_bytes },
+            search_key: SearchKey { bytes: search_key_bytes },
+        })
+    }
+}
+
 #[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct VaultKey {
     pub bytes: [u8; 32],

@@ -44,6 +44,11 @@ pub fn run() {
             commands::lock_vault,
             commands::get_vault_info,
             commands::generate_key_file,
+            commands::check_biometric_available,
+            commands::is_biometric_enabled,
+            commands::unlock_vault_biometric,
+            commands::enable_biometric,
+            commands::disable_biometric,
             // Entries
             commands::list_entries,
             commands::search_entries,
@@ -94,9 +99,14 @@ pub fn run() {
             commands::run_p2p_sync_client,
             commands::split_master_password,
             commands::reconstruct_master_password_hash,
-            // Export
+            // Export & Import
             commands::export_vault,
+            commands::export_vault_csv,
+            commands::export_vault_json,
             commands::get_vault_path,
+            commands::parse_import_file,
+            commands::parse_import_content,
+            commands::import_entries,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};

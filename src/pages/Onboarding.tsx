@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Moon, Sun, Monitor, Check, ArrowRight, ArrowLeft, Clock, Clipboard, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { Moon, Sun, Monitor, Check, ArrowRight, ArrowLeft, Clock, Clipboard, ChevronDown, ChevronUp, Search, X, FolderInput } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAppState } from '@/contexts/AppStateContext';
+import ImportModal from '@/components/ImportModal';
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -15,6 +16,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [showAllLanguages, setShowAllLanguages] = useState(false);
   const [langSearch, setLangSearch] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const [autoLockMinutes, setAutoLockMinutes] = useState(settings?.autoLockMinutes ?? 15);
   const [clipboardClearSeconds, setClipboardClearSeconds] = useState(settings?.clipboardClearSeconds ?? 30);
@@ -51,6 +53,7 @@ export default function Onboarding() {
     t('onboarding.step_language'),
     t('onboarding.step_theme'),
     t('onboarding.step_security'),
+    'Import',
     t('onboarding.ready_title'),
   ];
 
@@ -346,8 +349,49 @@ export default function Onboarding() {
               </motion.div>
             )}
 
-            {/* STEP 3: READY */}
+            {/* STEP 3: COMPETITOR IMPORT */}
             {step === 3 && (
+              <motion.div
+                key="step-import"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.15 }}
+                className="flex flex-col gap-3"
+              >
+                <div>
+                  <h2 className="text-[14px] font-medium text-[var(--text-primary)]">
+                    Import Existing Passwords
+                  </h2>
+                  <p className="text-[12px] text-[var(--text-secondary)]">
+                    Migrate logins from Bitwarden, 1Password, KeePass, Chrome, or LastPass.
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-4 text-center gap-2 mt-1">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                    <FolderInput size={18} />
+                  </div>
+                  <p className="text-[12px] font-medium text-[var(--text-primary)]">
+                    Import credentials safely in RAM
+                  </p>
+                  <p className="text-[10px] text-[var(--text-tertiary)] max-w-[280px]">
+                    Multi-format auto-detection with duplicate conflict resolution.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowImportModal(true)}
+                    className="mt-1 flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    <FolderInput size={13} />
+                    <span>Launch Competitor Importer</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 4: READY */}
+            {step === 4 && (
               <motion.div
                 key="step-ready"
                 initial={{ opacity: 0, y: 6 }}
@@ -376,27 +420,27 @@ export default function Onboarding() {
             <button
               type="button"
               onClick={() => setStep(step - 1)}
-              className="flex h-9 items-center gap-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="flex h-9 items-center gap-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
             >
               <ArrowLeft size={13} />
               {t('onboarding.back')}
             </button>
           ) : <div />}
 
-          {step < 3 ? (
+          {step < 4 ? (
             <button
               type="button"
               onClick={() => setStep(step + 1)}
-              className="flex h-9 items-center gap-1 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 ml-auto"
+              className="flex h-9 items-center gap-1 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 ml-auto cursor-pointer"
             >
-              {t('onboarding.next')}
+              {step === 3 ? 'Skip / Next' : t('onboarding.next')}
               <ArrowRight size={13} />
             </button>
           ) : (
             <button
               type="button"
               onClick={handleFinish}
-              className="flex h-9 items-center justify-center gap-1 rounded-[3px] bg-[var(--text-primary)] px-5 text-[13px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 ml-auto"
+              className="flex h-9 items-center justify-center gap-1 rounded-[3px] bg-[var(--text-primary)] px-5 text-[13px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 ml-auto cursor-pointer"
             >
               {t('onboarding.get_started')}
               <ArrowRight size={14} />
@@ -404,6 +448,12 @@ export default function Onboarding() {
           )}
         </div>
       </div>
+
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSuccess={() => setShowImportModal(false)}
+      />
     </motion.div>
   );
 }

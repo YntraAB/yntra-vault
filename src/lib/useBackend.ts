@@ -84,14 +84,74 @@ export function useVault() {
     }
   }, [backend]);
 
-  const lockVault = useCallback(async () => {
+  const unlockVaultBiometric = useCallback(async (path: string) => {
     if (!backend) return;
-    await backend.lockVault();
-    setVaultInfo(null);
-    setIsLocked(true);
+    setLoading(true);
+    setError(null);
+    try {
+      const info = await backend.unlockVaultBiometric(path);
+      setVaultInfo(info);
+      setIsLocked(false);
+      return info;
+    } catch (e: any) {
+      setError(e.toString());
+      throw e;
+    } finally {
+      setLoading(false);
+    }
   }, [backend]);
 
-  return { vaultInfo, isLocked, loading, error, createVault, openVault, lockVault };
+  return { vaultInfo, isLocked, loading, error, createVault, openVault, unlockVaultBiometric, lockVault };
+}
+
+// ─── Biometrics Hook ───────────────────────────────────────────────────
+
+export function useBiometric() {
+  const { backend } = useBackend();
+  const [info, setInfo] = useState<{ available: boolean; biometric_type: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const checkAvailability = useCallback(async () => {
+    if (!backend) return null;
+    try {
+      const res = await backend.checkBiometricAvailable();
+      setInfo(res);
+      return res;
+    } catch {
+      return null;
+    }
+  }, [backend]);
+
+  const isEnabled = useCallback(async (path: string) => {
+    if (!backend) return false;
+    try {
+      return await backend.isBiometricEnabled(path);
+    } catch {
+      return false;
+    }
+  }, [backend]);
+
+  const enable = useCallback(async () => {
+    if (!backend) return;
+    setLoading(true);
+    try {
+      await backend.enableBiometric();
+    } finally {
+      setLoading(false);
+    }
+  }, [backend]);
+
+  const disable = useCallback(async () => {
+    if (!backend) return;
+    setLoading(true);
+    try {
+      await backend.disableBiometric();
+    } finally {
+      setLoading(false);
+    }
+  }, [backend]);
+
+  return { info, loading, checkAvailability, isEnabled, enable, disable };
 }
 
 // ─── Entries Hook ───────────────────────────────────────────────────────

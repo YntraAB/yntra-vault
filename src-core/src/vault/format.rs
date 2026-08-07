@@ -18,7 +18,16 @@ use serde::{Deserialize, Serialize};
 use crate::error::VaultError;
 
 pub const MAGIC_BYTES: &[u8; 4] = b"YNTR";
-pub const FORMAT_VERSION: u16 = 3;
+pub const FORMAT_VERSION: u16 = 4;
+pub const FLAG_HAS_BIOMETRIC: u16 = 0x0001;
+
+/// Embedded biometric header block stored inside the .vdb file when biometrics is enrolled.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EmbeddedBiometricHeader {
+    pub nonce: [u8; 24],
+    pub wrapped_kek: Vec<u8>,
+    pub encrypted_subkeys: Vec<u8>,
+}
 
 /// KDF parameters stored in the file so we can always decrypt.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -111,6 +120,7 @@ impl FileHeader {
 pub struct VaultFile {
     pub header: FileHeader,
     pub hmac: Option<[u8; 64]>,
+    pub biometric: Option<EmbeddedBiometricHeader>,
     pub encrypted_payload: Vec<u8>,
 }
 
@@ -118,6 +128,13 @@ impl VaultFile {
     /// Serialize the vault file to bytes for writing to disk.
     pub fn to_bytes(&self) -> crate::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(256 + self.encrypted_payload.len());
+
+        let mut flags = self.header.flags;
+        if self.biometric.is_some() {
+            flags |= FLAG_HAS_BIOMETRIC;
+        } else {
+            flags &= !FLAG_HAS_BIOMETRIC;
+        }
 
         // Magic bytes
         buf.write_all(MAGIC_BYTES)
@@ -128,7 +145,7 @@ impl VaultFile {
             .map_err(|e| VaultError::SerializationError(e.to_string()))?;
 
         // Flags (u16 LE)
-        buf.write_all(&self.header.flags.to_le_bytes())
+        buf.write_all(&flags.to_le_bytes())
             .map_err(|e| VaultError::SerializationError(e.to_string()))?;
 
         // Salt (32 bytes)
@@ -150,6 +167,17 @@ impl VaultFile {
             .map_err(|e| VaultError::SerializationError(e.to_string()))?;
         buf.write_all(&kdf_bytes)
             .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+
+        // Embedded Biometric container block (if FLAG_HAS_BIOMETRIC)
+        if let Some(ref bio) = self.biometric {
+            let bio_bytes = bincode::serialize(bio)
+                .map_err(|e| VaultError::SerializationError(format!("Biometric serialize: {}", e)))?;
+            let bio_len = bio_bytes.len() as u32;
+            buf.write_all(&bio_len.to_le_bytes())
+                .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+            buf.write_all(&bio_bytes)
+                .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        }
 
         // Encrypted payload length (u64 LE)
         let payload_len = self.encrypted_payload.len() as u64;
@@ -227,6 +255,23 @@ impl VaultFile {
         // Reject weakened KDF parameters (prevents downgrade attacks)
         kdf_params.validate()?;
 
+        // Embedded Biometric container block (if FLAG_HAS_BIOMETRIC)
+        let biometric = if flags & FLAG_HAS_BIOMETRIC != 0 {
+            let mut bio_len_bytes = [0u8; 4];
+            cursor.read_exact(&mut bio_len_bytes)
+                .map_err(|_| VaultError::InvalidFormat("Failed to read biometric block length".into()))?;
+            let bio_len = u32::from_le_bytes(bio_len_bytes) as usize;
+
+            let mut bio_bytes = vec![0u8; bio_len];
+            cursor.read_exact(&mut bio_bytes)
+                .map_err(|_| VaultError::InvalidFormat("Failed to read biometric block".into()))?;
+            let bio_header: EmbeddedBiometricHeader = bincode::deserialize(&bio_bytes)
+                .map_err(|e| VaultError::InvalidFormat(format!("Invalid biometric block: {}", e)))?;
+            Some(bio_header)
+        } else {
+            None
+        };
+
         // Payload length
         let mut payload_len_bytes = [0u8; 8];
         cursor.read_exact(&mut payload_len_bytes)
@@ -246,6 +291,7 @@ impl VaultFile {
                 kdf_params,
             },
             hmac,
+            biometric,
             encrypted_payload,
         })
     }
@@ -265,6 +311,7 @@ mod tests {
                 kdf_params: KdfParams::default(),
             },
             hmac: None,
+            biometric: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
 
@@ -274,11 +321,41 @@ mod tests {
         assert_eq!(parsed.header.version, FORMAT_VERSION);
         assert_eq!(parsed.header.salt, [42u8; 32]);
         assert!(parsed.hmac.is_none());
+        assert!(parsed.biometric.is_none());
         assert_eq!(parsed.encrypted_payload, vec![1, 2, 3, 4, 5, 6, 7, 8]);
 
         // AAD bytes generation test
         let aad = file.header.aad_bytes().unwrap();
         assert!(!aad.is_empty());
+    }
+
+    #[test]
+    fn test_v4_embedded_biometric_roundtrip_file_format() {
+        let bio = EmbeddedBiometricHeader {
+            nonce: [7u8; 24],
+            wrapped_kek: vec![10, 20, 30],
+            encrypted_subkeys: vec![1, 2, 3, 4, 5],
+        };
+
+        let file = VaultFile {
+            header: FileHeader {
+                version: FORMAT_VERSION,
+                flags: FLAG_HAS_BIOMETRIC,
+                salt: [99u8; 32],
+                kdf_params: KdfParams::default(),
+            },
+            hmac: None,
+            biometric: Some(bio.clone()),
+            encrypted_payload: vec![9, 8, 7, 6],
+        };
+
+        let bytes = file.to_bytes().unwrap();
+        let parsed = VaultFile::from_bytes(&bytes).unwrap();
+
+        assert_eq!(parsed.header.version, FORMAT_VERSION);
+        assert_eq!(parsed.header.flags & FLAG_HAS_BIOMETRIC, FLAG_HAS_BIOMETRIC);
+        assert_eq!(parsed.biometric, Some(bio));
+        assert_eq!(parsed.encrypted_payload, vec![9, 8, 7, 6]);
     }
 
     #[test]
@@ -291,6 +368,7 @@ mod tests {
                 kdf_params: KdfParams::default(),
             },
             hmac: Some([0xAB; 64]),
+            biometric: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
 

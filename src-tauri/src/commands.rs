@@ -62,6 +62,45 @@ pub async fn open_vault(
 }
 
 #[tauri::command]
+pub async fn check_biometric_available() -> Result<yntra_vault_core::crypto::biometric::BiometricInfo, String> {
+    Ok(yntra_vault_core::crypto::biometric::check_biometric_availability())
+}
+
+#[tauri::command]
+pub async fn is_biometric_enabled(path: String) -> Result<bool, String> {
+    let vault_path = PathBuf::from(&path);
+    Ok(yntra_vault_core::crypto::biometric::is_biometric_enabled(&vault_path))
+}
+
+#[tauri::command]
+pub async fn unlock_vault_biometric(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<VaultInfo, String> {
+    let vault_path = PathBuf::from(&path);
+    let manager = VaultManager::open_with_biometric(&vault_path)
+        .map_err(|e| e.to_string())?;
+
+    let info = manager.info();
+    *state.vault.lock().map_err(|e| e.to_string())? = Some(manager);
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn enable_biometric(state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.enable_biometric().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn disable_biometric(state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.disable_biometric().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn generate_key_file(path: String) -> Result<(), String> {
     let kf_path = PathBuf::from(&path);
     VaultManager::generate_key_file(&kf_path).map_err(|e| e.to_string())
@@ -617,9 +656,116 @@ pub async fn export_vault(
 }
 
 #[tauri::command]
+pub async fn export_vault_csv(
+    dest_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let path = PathBuf::from(&dest_path);
+    manager.export_csv(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn export_vault_json(
+    dest_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let path = PathBuf::from(&dest_path);
+    manager.export_json(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_vault_path(state: State<'_, AppState>) -> Result<String, String> {
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_ref().ok_or("Vault is locked")?;
     Ok(manager.info().path)
+}
+
+// ─── Import Commands ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn parse_import_file(
+    file_path: String,
+    format: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::vault::importer::ImportPreviewResult, String> {
+    let requested_fmt = match format.as_deref() {
+        Some("bitwarden_json") => yntra_vault_core::vault::importer::ImportFormat::BitwardenJson,
+        Some("bitwarden_csv") => yntra_vault_core::vault::importer::ImportFormat::BitwardenCsv,
+        Some("onepassword_csv") => yntra_vault_core::vault::importer::ImportFormat::OnePasswordCsv,
+        Some("keepass_csv") => yntra_vault_core::vault::importer::ImportFormat::KeepassCsv,
+        Some("keepass_xml") => yntra_vault_core::vault::importer::ImportFormat::KeepassXml,
+        Some("chrome_csv") => yntra_vault_core::vault::importer::ImportFormat::ChromeCsv,
+        Some("lastpass_csv") => yntra_vault_core::vault::importer::ImportFormat::LastPassCsv,
+        Some("dashlane_csv") => yntra_vault_core::vault::importer::ImportFormat::DashlaneCsv,
+        Some("protonpass_json") => yntra_vault_core::vault::importer::ImportFormat::ProtonPassJson,
+        Some("protonpass_csv") => yntra_vault_core::vault::importer::ImportFormat::ProtonPassCsv,
+        Some("generic_csv") => yntra_vault_core::vault::importer::ImportFormat::GenericCsv,
+        _ => yntra_vault_core::vault::importer::ImportFormat::AutoDetect,
+    };
+
+    let path = PathBuf::from(&file_path);
+    let mut preview = yntra_vault_core::vault::importer::Importer::parse_file(&path, requested_fmt)
+        .map_err(|e| e.to_string())?;
+
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    if let Some(ref manager) = *vault {
+        preview.duplicates_count = manager.check_import_duplicates(&mut preview.entries);
+    }
+
+    Ok(preview)
+}
+
+#[tauri::command]
+pub async fn parse_import_content(
+    content: String,
+    format: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::vault::importer::ImportPreviewResult, String> {
+    let requested_fmt = match format.as_deref() {
+        Some("bitwarden_json") => yntra_vault_core::vault::importer::ImportFormat::BitwardenJson,
+        Some("bitwarden_csv") => yntra_vault_core::vault::importer::ImportFormat::BitwardenCsv,
+        Some("onepassword_csv") => yntra_vault_core::vault::importer::ImportFormat::OnePasswordCsv,
+        Some("keepass_csv") => yntra_vault_core::vault::importer::ImportFormat::KeepassCsv,
+        Some("keepass_xml") => yntra_vault_core::vault::importer::ImportFormat::KeepassXml,
+        Some("chrome_csv") => yntra_vault_core::vault::importer::ImportFormat::ChromeCsv,
+        Some("lastpass_csv") => yntra_vault_core::vault::importer::ImportFormat::LastPassCsv,
+        Some("dashlane_csv") => yntra_vault_core::vault::importer::ImportFormat::DashlaneCsv,
+        Some("protonpass_json") => yntra_vault_core::vault::importer::ImportFormat::ProtonPassJson,
+        Some("protonpass_csv") => yntra_vault_core::vault::importer::ImportFormat::ProtonPassCsv,
+        Some("generic_csv") => yntra_vault_core::vault::importer::ImportFormat::GenericCsv,
+        _ => yntra_vault_core::vault::importer::ImportFormat::AutoDetect,
+    };
+
+    let mut preview = yntra_vault_core::vault::importer::Importer::parse_str(&content, requested_fmt)
+        .map_err(|e| e.to_string())?;
+
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    if let Some(ref manager) = *vault {
+        preview.duplicates_count = manager.check_import_duplicates(&mut preview.entries);
+    }
+
+    Ok(preview)
+}
+
+#[tauri::command]
+pub async fn import_entries(
+    entries: Vec<yntra_vault_core::vault::importer::ParsedImportEntry>,
+    duplicate_strategy: String,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+
+    let strategy = match duplicate_strategy.as_str() {
+        "overwrite" => yntra_vault_core::vault::importer::DuplicateStrategy::Overwrite,
+        "keep_both" => yntra_vault_core::vault::importer::DuplicateStrategy::KeepBoth,
+        _ => yntra_vault_core::vault::importer::DuplicateStrategy::Skip,
+    };
+
+    manager.bulk_import_entries(entries, strategy).map_err(|e| e.to_string())
 }
 

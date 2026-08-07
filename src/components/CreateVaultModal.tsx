@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Database, FolderOpen, Eye, EyeOff, Loader2, ShieldCheck, KeyRound, Sparkles } from 'lucide-react';
+import { X, Database, FolderOpen, Eye, EyeOff, Loader2, ShieldCheck, KeyRound } from 'lucide-react';
 import { PasswordStrength } from './PasswordStrength';
 import { isTauri } from '@/lib/backend';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -381,7 +381,6 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                           onChange={() => setGenerateNewKeyFile(true)}
                           className="accent-[var(--accent)]"
                         />
-                        <Sparkles size={11} className="text-amber-400" />
                         <span>{t('create_vault.gen_new_keyfile')}</span>
                       </label>
                     </div>

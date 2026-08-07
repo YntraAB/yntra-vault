@@ -40,5 +40,17 @@ pub enum VaultError {
 
     #[error("Integrity check failed - vault may be corrupted or tampered with")]
     IntegrityError,
+
+    #[error("Biometric authentication not available on this device: {0}")]
+    BiometricNotAvailable(String),
+
+    #[error("Biometric authentication failed: {0}")]
+    BiometricAuthFailed(String),
+
+    #[error("Biometric authentication canceled by user")]
+    BiometricCanceled,
+
+    #[error("Biometric hardware error: {0}")]
+    BiometricHardwareError(String),
 }
 

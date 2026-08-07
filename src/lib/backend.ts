@@ -21,6 +21,11 @@ export interface VaultInfo {
   last_opened: string | null;
 }
 
+export interface BiometricInfo {
+  available: boolean;
+  biometric_type: string;
+}
+
 export interface MergeStats {
   entries_added: number;
   entries_updated: number;
@@ -218,6 +223,29 @@ export interface DecryptedHistoryItem {
   changed_at: string;
 }
 
+export interface ParsedImportEntry {
+  title: string;
+  username: string;
+  password: string;
+  url: string;
+  email: string;
+  notes: string;
+  totp_secret: string | null;
+  tags: string[];
+  is_duplicate: boolean;
+  duplicate_reason?: string;
+}
+
+export interface ImportPreviewResult {
+  format_detected: string;
+  detected_format_key: string;
+  is_format_mismatch: boolean;
+  suggested_brand_name?: string;
+  total_found: number;
+  entries: ParsedImportEntry[];
+  duplicates_count: number;
+}
+
 // ─── Backend Interface ──────────────────────────────────────────────────
 
 export interface YntraVaultBackend {
@@ -289,9 +317,21 @@ export interface YntraVaultBackend {
   splitMasterPassword(password: string): Promise<string[]>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
 
-  // Export
+  // Export & Import
   exportVault(destPath: string): Promise<void>;
+  exportVaultCsv(destPath: string): Promise<void>;
+  exportVaultJson(destPath: string): Promise<void>;
   getVaultPath(): Promise<string>;
+  parseImportFile(filePath: string, format?: string): Promise<ImportPreviewResult>;
+  parseImportContent(content: string, format?: string): Promise<ImportPreviewResult>;
+  importEntries(entries: ParsedImportEntry[], duplicateStrategy: 'skip' | 'overwrite' | 'keep_both'): Promise<number>;
+
+  // Biometrics
+  checkBiometricAvailable(): Promise<BiometricInfo>;
+  isBiometricEnabled(path: string): Promise<boolean>;
+  unlockVaultBiometric(path: string): Promise<VaultInfo>;
+  enableBiometric(): Promise<void>;
+  disableBiometric(): Promise<void>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────
