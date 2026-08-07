@@ -1,4 +1,4 @@
-//! Vault Search Tokenization Benchmarks (Fast Developer Mode)
+//! Vault Search Tokenization Benchmarks
 
 use criterion::{black_box, Criterion};
 use std::time::Duration;

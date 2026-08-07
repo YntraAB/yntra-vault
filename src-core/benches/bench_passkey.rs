@@ -1,4 +1,4 @@
-//! Passkey (FIDO2 / WebAuthn) Cryptography Benchmarks (Fast Developer Mode)
+//! Passkey (FIDO2 / WebAuthn) Cryptography Benchmarks
 
 use criterion::{black_box, Criterion};
 use std::time::Duration;

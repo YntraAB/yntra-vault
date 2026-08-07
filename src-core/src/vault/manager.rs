@@ -299,40 +299,111 @@ impl VaultManager {
         }).collect())
     }
 
-    pub(crate) fn entry_field_aad(entry_id: &Uuid, field_scope: &str) -> Vec<u8> {
-        let mut aad = Vec::with_capacity(16 + field_scope.len());
-        aad.extend_from_slice(entry_id.as_bytes());
-        aad.extend_from_slice(field_scope.as_bytes());
-        aad
+    /// Executes a closure with a zero-allocation stack-buffered length-prefixed AAD for field encryption/decryption.
+    /// Format: [16-byte raw UUID] || [u16_BE(scope_len)] || [scope_bytes]
+    pub(crate) fn with_entry_field_aad<'a, F, R>(entry_id: &Uuid, field_scope: impl Into<FieldScope<'a>>, f: F) -> R
+    where
+        F: FnOnce(&[u8]) -> R,
+    {
+        let scope: FieldScope<'a> = field_scope.into();
+        const MAX_STACK_SCOPE: usize = 64;
+        let scope_cow = scope.as_cow();
+        let scope_bytes = scope_cow.as_bytes();
+        let scope_len = scope_bytes.len();
+        let scope_len_be = (scope_len as u16).to_be_bytes();
+
+        if scope_len <= MAX_STACK_SCOPE {
+            let mut stack_buf = [0u8; 16 + 2 + MAX_STACK_SCOPE];
+            stack_buf[..16].copy_from_slice(entry_id.as_bytes());
+            stack_buf[16..18].copy_from_slice(&scope_len_be);
+            let end = 18 + scope_len;
+            stack_buf[18..end].copy_from_slice(scope_bytes);
+            let res = f(&stack_buf[..end]);
+            stack_buf.zeroize();
+            res
+        } else {
+            let mut aad = Vec::with_capacity(16 + 2 + scope_len);
+            aad.extend_from_slice(entry_id.as_bytes());
+            aad.extend_from_slice(&scope_len_be);
+            aad.extend_from_slice(scope_bytes);
+            let res = f(&aad);
+            aad.zeroize();
+            res
+        }
     }
 
-    pub(crate) fn encrypt_entry_field(
+    /// Legacy un-prefixed AAD builder [16-byte raw UUID] || [scope_bytes] for backwards compatibility fallback.
+    pub(crate) fn with_entry_field_aad_legacy<'a, F, R>(entry_id: &Uuid, field_scope: impl Into<FieldScope<'a>>, f: F) -> R
+    where
+        F: FnOnce(&[u8]) -> R,
+    {
+        let scope: FieldScope<'a> = field_scope.into();
+        const MAX_STACK_SCOPE: usize = 64;
+        let scope_cow = scope.as_cow();
+        let scope_bytes = scope_cow.as_bytes();
+        if scope_bytes.len() <= MAX_STACK_SCOPE {
+            let mut stack_buf = [0u8; 16 + MAX_STACK_SCOPE];
+            stack_buf[..16].copy_from_slice(entry_id.as_bytes());
+            let end = 16 + scope_bytes.len();
+            stack_buf[16..end].copy_from_slice(scope_bytes);
+            let res = f(&stack_buf[..end]);
+            stack_buf.zeroize();
+            res
+        } else {
+            let mut aad = Vec::with_capacity(16 + scope_bytes.len());
+            aad.extend_from_slice(entry_id.as_bytes());
+            aad.extend_from_slice(scope_bytes);
+            let res = f(&aad);
+            aad.zeroize();
+            res
+        }
+    }
+
+    pub(crate) fn encrypt_entry_field<'a>(
         plaintext: &[u8],
         master_entry_key: &EntryKey,
         entry_id: &Uuid,
-        field_scope: &str,
+        field_scope: impl Into<FieldScope<'a>>,
     ) -> crate::Result<EncryptedBlob> {
         let per_entry_key = crate::crypto::derive_per_entry_key(master_entry_key, entry_id)?;
-        let aad = Self::entry_field_aad(entry_id, field_scope);
-        crate::crypto::encrypt_entry_with_aad(plaintext, &per_entry_key, &aad)
+        Self::with_entry_field_aad(entry_id, field_scope, |aad| {
+            crate::crypto::encrypt_entry_with_aad(plaintext, &per_entry_key, aad)
+        })
     }
 
-    pub(crate) fn decrypt_entry_field(
+    pub(crate) fn decrypt_entry_field<'a>(
         blob: &EncryptedBlob,
         master_entry_key: &EntryKey,
         entry_id: &Uuid,
-        field_scope: &str,
+        field_scope: impl Into<FieldScope<'a>> + Copy,
     ) -> crate::Result<Zeroizing<Vec<u8>>> {
         let per_entry_key = crate::crypto::derive_per_entry_key(master_entry_key, entry_id)?;
-        let aad = Self::entry_field_aad(entry_id, field_scope);
 
-        // 1. Try per-entry HKDF key + AAD
-        if let Ok(bytes) = crate::crypto::decrypt_entry_with_aad(blob, &per_entry_key, &aad) {
+        // 1. Try per-entry HKDF key + length-prefixed AAD
+        if let Ok(bytes) = Self::with_entry_field_aad(entry_id, field_scope, |aad| {
+            crate::crypto::decrypt_entry_with_aad(blob, &per_entry_key, aad)
+        }) {
             return Ok(bytes);
         }
 
-        // 2. Fallback for legacy vaults: global entry key + AAD
-        crate::crypto::decrypt_entry_with_aad(blob, master_entry_key, &aad)
+        // 2. Try global entry key + length-prefixed AAD
+        if let Ok(bytes) = Self::with_entry_field_aad(entry_id, field_scope, |aad| {
+            crate::crypto::decrypt_entry_with_aad(blob, master_entry_key, aad)
+        }) {
+            return Ok(bytes);
+        }
+
+        // 3. Fallback for legacy un-prefixed AAD (per-entry key)
+        if let Ok(bytes) = Self::with_entry_field_aad_legacy(entry_id, field_scope, |aad| {
+            crate::crypto::decrypt_entry_with_aad(blob, &per_entry_key, aad)
+        }) {
+            return Ok(bytes);
+        }
+
+        // 4. Fallback for legacy un-prefixed AAD (global entry key)
+        Self::with_entry_field_aad_legacy(entry_id, field_scope, |aad| {
+            crate::crypto::decrypt_entry_with_aad(blob, master_entry_key, aad)
+        })
     }
 
     /// Get a full entry with decrypted password.
@@ -399,12 +470,12 @@ impl VaultManager {
             new.password.as_bytes(),
             &keys.entry_key,
             &id,
-            "password",
+            FieldScope::Password,
         )?;
 
         // Encrypt TOTP secret if provided
         let encrypted_totp = if let Some(ref secret) = new.totp_secret {
-            Some(Self::encrypt_entry_field(secret.as_bytes(), &keys.entry_key, &id, "totp")?)
+            Some(Self::encrypt_entry_field(secret.as_bytes(), &keys.entry_key, &id, FieldScope::Totp)?)
         } else {
             None
         };
@@ -437,7 +508,7 @@ impl VaultManager {
         if new.generate_passkey.unwrap_or(false) {
             let pair = crate::crypto::passkey::generate_passkey_pair()?;
             entry.encrypted_passkey = Some(
-                Self::encrypt_entry_field(&pair.private_key, &keys.entry_key, &id, "passkey")?
+                Self::encrypt_entry_field(&pair.private_key, &keys.entry_key, &id, FieldScope::Passkey)?
             );
             entry.passkey_public_key = Some(pair.public_key);
         }
@@ -466,15 +537,21 @@ impl VaultManager {
                     &entry.encrypted_password,
                     &entry_key,
                     &id,
-                    "password",
+                    FieldScope::Password,
                 )?;
                 let old_password = String::from_utf8(old_password_bytes.to_vec())
                     .map_err(|e| crate::error::VaultError::DecryptionError(e.to_string()))?;
 
                 if &old_password != new_password {
-                    // Save current password to history before overwriting
+                    // Save current password to history before overwriting (encrypted under scope "history")
+                    let history_encrypted = Self::encrypt_entry_field(
+                        old_password_bytes.as_slice(),
+                        &entry_key,
+                        &id,
+                        FieldScope::History,
+                    )?;
                     let history_item = PasswordHistoryItem {
-                        encrypted_password: entry.encrypted_password.clone(),
+                        encrypted_password: history_encrypted,
                         changed_at: entry.password_changed_at,
                     };
                     entry.password_history.push(history_item);
@@ -488,7 +565,7 @@ impl VaultManager {
                         new_password.as_bytes(),
                         &entry_key,
                         &id,
-                        "password",
+                        FieldScope::Password,
                     )?;
                     entry.password_changed_at = now;
                     entry.breach_status = BreachStatus::Unknown; // Reset breach status
@@ -513,7 +590,7 @@ impl VaultManager {
                     entry.encrypted_totp_secret = None;
                 } else {
                     entry.encrypted_totp_secret = Some(
-                        Self::encrypt_entry_field(totp_secret.as_bytes(), &entry_key, &id, "totp")?
+                        Self::encrypt_entry_field(totp_secret.as_bytes(), &entry_key, &id, FieldScope::Totp)?
                     );
                 }
             }
@@ -524,7 +601,7 @@ impl VaultManager {
                     "generate" => {
                         let pair = crate::crypto::passkey::generate_passkey_pair()?;
                         entry.encrypted_passkey = Some(
-                            Self::encrypt_entry_field(&pair.private_key, &entry_key, &id, "passkey")?
+                            Self::encrypt_entry_field(&pair.private_key, &entry_key, &id, FieldScope::Passkey)?
                         );
                         entry.passkey_public_key = Some(pair.public_key);
                     }
@@ -865,8 +942,9 @@ impl VaultManager {
 
             // Re-encrypt password history
             for hist in &mut entry.password_history {
-                let hist_bytes = Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "password")?;
-                hist.encrypted_password = Self::encrypt_entry_field(&hist_bytes, &new_keys.entry_key, &entry.id, "password")?;
+                let hist_bytes = Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "history")
+                    .or_else(|_| Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "password"))?;
+                hist.encrypted_password = Self::encrypt_entry_field(&hist_bytes, &new_keys.entry_key, &entry.id, "history")?;
             }
         }
 
@@ -894,8 +972,9 @@ impl VaultManager {
 
             // Re-encrypt password history
             for hist in &mut entry.password_history {
-                let hist_bytes = Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "password")?;
-                hist.encrypted_password = Self::encrypt_entry_field(&hist_bytes, &new_keys.entry_key, &entry.id, "password")?;
+                let hist_bytes = Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "history")
+                    .or_else(|_| Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "password"))?;
+                hist.encrypted_password = Self::encrypt_entry_field(&hist_bytes, &new_keys.entry_key, &entry.id, "history")?;
             }
         }
 
@@ -1226,6 +1305,45 @@ mod tests {
             Ok(_) => panic!("Expected error on truncated payload, got Ok"),
         }
     }
+
+    #[test]
+    fn test_history_aad_isolation_prevents_substitution() {
+        let test_vault = TestVault::new();
+        let password = "test-password";
+        let mut manager = VaultManager::create("test-vault", password, &test_vault.path).unwrap();
+
+        let entry = NewEntry {
+            title: "Security Test".to_string(),
+            username: "user".to_string(),
+            password: "active-password-v1".to_string(),
+            url: "".to_string(),
+            email: "".to_string(),
+            notes: "".to_string(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: Vec::new(),
+            entry_type: None,
+            generate_passkey: None,
+        };
+        let id = manager.add_entry(entry).unwrap();
+
+        // Update password to populate history
+        manager.update_entry(id, UpdateEntry {
+            password: Some("active-password-v2".to_string()),
+            ..Default::default()
+        }).unwrap();
+
+        let history = manager.get_password_history(id).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].password, "active-password-v1");
+
+        // Attempt substitution attack: overwrite active password blob with history password blob
+        let entry_ref = manager.data.entries.iter_mut().find(|e| e.id == id).unwrap();
+        let history_blob = entry_ref.password_history[0].encrypted_password.clone();
+        entry_ref.encrypted_password = history_blob; // Transmit history blob into active password field
+
+        // Decrypting active entry MUST fail because history blob uses "history" AAD scope, not "password" AAD scope!
+        let decrypted_res = manager.get_entry(id);
+        assert!(decrypted_res.is_err(), "Substitution attack must fail AEAD tag check due to AAD scope isolation");
+    }
 }
-
-

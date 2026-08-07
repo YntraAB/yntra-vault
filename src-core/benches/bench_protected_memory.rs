@@ -1,13 +1,13 @@
-//! Memory Safety & Zeroization Benchmarks (Fast Developer Mode)
+//! Protected Memory & Scrambling Security Benchmarks
 
 use criterion::{black_box, BenchmarkId, Criterion};
 use std::time::Duration;
 use yntra_vault_core::crypto::kdf::{derive_master_key, derive_subkeys, generate_salt};
-use yntra_vault_core::crypto::mem::ScrambledString;
+use yntra_vault_core::crypto::mem::{ProtectedSecret, ScrambledString};
 use zeroize::Zeroizing;
 
-pub fn bench_memory_zeroize(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Memory Safety & Zeroization Cost");
+pub fn bench_protected_memory(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Protected Memory & Scrambling Cost");
     group.warm_up_time(Duration::from_millis(200));
     group.measurement_time(Duration::from_millis(500));
     group.sample_size(10);
@@ -56,6 +56,20 @@ pub fn bench_memory_zeroize(c: &mut Criterion) {
         b.iter(|| {
             let decrypted = scrambled.decrypt().unwrap();
             black_box(decrypted);
+        });
+    });
+
+    group.bench_function("ScrambledString Direct In-Place Decrypt to LockedBuffer", |b| {
+        b.iter(|| {
+            let locked = scrambled.decrypt_to_locked().unwrap();
+            black_box(locked);
+        });
+    });
+
+    let protected = ProtectedSecret::new(sensitive_text);
+    group.bench_function("ProtectedSecret Scoped Execution with_secret", |b| {
+        b.iter(|| {
+            protected.with_secret(|s| black_box(s.len())).unwrap()
         });
     });
 

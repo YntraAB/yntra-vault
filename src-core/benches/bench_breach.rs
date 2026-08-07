@@ -1,4 +1,4 @@
-//! Breach Detection & Password Strength Benchmarks (Fast Developer Mode)
+//! Breach Detection & Password Strength Benchmarks
 
 use criterion::{black_box, BenchmarkId, Criterion};
 use std::time::Duration;

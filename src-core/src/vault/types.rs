@@ -265,3 +265,44 @@ pub enum IssueSeverity {
     Critical,
 }
 
+// ─── Field Scope (AAD Domain Isolation) ───────────────────────────────────
+
+use std::borrow::Cow;
+
+/// Strongly-typed AAD field scope for domain-isolated per-entry field encryption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldScope<'a> {
+    Password,
+    History,
+    Totp,
+    Passkey,
+    CustomField { field_id: &'a Uuid, name: &'a str },
+    Custom(&'a str),
+}
+
+impl<'a> FieldScope<'a> {
+    /// Returns the string representation of the field scope using zero-copy Cow.
+    pub fn as_cow(&self) -> Cow<'a, str> {
+        match self {
+            Self::Password => Cow::Borrowed("password"),
+            Self::History => Cow::Borrowed("history"),
+            Self::Totp => Cow::Borrowed("totp"),
+            Self::Passkey => Cow::Borrowed("passkey"),
+            Self::CustomField { field_id, name } => Cow::Owned(format!("custom:{field_id}:{name}")),
+            Self::Custom(name) => Cow::Borrowed(name),
+        }
+    }
+}
+
+impl<'a> From<&'a str> for FieldScope<'a> {
+    fn from(s: &'a str) -> Self {
+        match s {
+            "password" => Self::Password,
+            "history" => Self::History,
+            "totp" => Self::Totp,
+            "passkey" => Self::Passkey,
+            other => Self::Custom(other),
+        }
+    }
+}
+

@@ -1,4 +1,4 @@
-//! Password & Passphrase Generator Benchmarks (Fast Developer Mode)
+//! Password & Passphrase Generator Benchmarks
 
 use criterion::{black_box, Criterion};
 use std::time::Duration;

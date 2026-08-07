@@ -1,4 +1,4 @@
-//! TOTP Engine (RFC 6238) Benchmarks (Fast Developer Mode)
+//! TOTP Engine (RFC 6238) Benchmarks
 
 use criterion::{black_box, Criterion};
 use std::time::Duration;

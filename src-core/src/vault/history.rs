@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 use crate::vault::manager::VaultManager;
-use crate::vault::types::PasswordHistoryItem;
+use crate::vault::types::{PasswordHistoryItem, FieldScope};
 use crate::error::VaultError;
 
 /// A decrypted password history item for the UI.
@@ -23,7 +23,8 @@ impl VaultManager {
 
         let mut history = Vec::new();
         for item in &entry.password_history {
-            let pw_bytes = VaultManager::decrypt_entry_field(&item.encrypted_password, &keys.entry_key, &entry_id, "password")?;
+            let pw_bytes = VaultManager::decrypt_entry_field(&item.encrypted_password, &keys.entry_key, &entry_id, FieldScope::History)
+                .or_else(|_| VaultManager::decrypt_entry_field(&item.encrypted_password, &keys.entry_key, &entry_id, FieldScope::Password))?;
             let password = String::from_utf8(pw_bytes.to_vec())
                 .map_err(|e| VaultError::DecryptionError(format!("History password: {}", e)))?;
             history.push(DecryptedHistoryItem {
@@ -43,7 +44,7 @@ impl VaultManager {
         entry_id: Uuid,
         history_index: usize,
     ) -> crate::Result<()> {
-        let _keys = self.keys_ref().ok_or(VaultError::VaultLocked)?;
+        let entry_key = self.keys_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();
 
         let entry = self.data_mut().entries.iter_mut()
             .find(|e| e.id == entry_id)
@@ -53,20 +54,27 @@ impl VaultManager {
             return Err(VaultError::EntryNotFound("History index out of bounds".into()));
         }
 
-        // Get the history item
-        let history_item = entry.password_history[history_index].clone();
+        // Decrypt the history item to restore (trying FieldScope::History, with fallback to FieldScope::Password for legacy vaults)
+        let history_item = &entry.password_history[history_index];
+        let restored_pw_bytes = VaultManager::decrypt_entry_field(&history_item.encrypted_password, &entry_key, &entry_id, FieldScope::History)
+            .or_else(|_| VaultManager::decrypt_entry_field(&history_item.encrypted_password, &entry_key, &entry_id, FieldScope::Password))?;
 
-        // Save current password to history
+        // Decrypt current active password (FieldScope::Password)
+        let current_pw_bytes = VaultManager::decrypt_entry_field(&entry.encrypted_password, &entry_key, &entry_id, FieldScope::Password)?;
+
+        // Encrypt current active password with FieldScope::History and push to history
+        let current_history_blob = VaultManager::encrypt_entry_field(&current_pw_bytes, &entry_key, &entry_id, FieldScope::History)?;
         let current_history = PasswordHistoryItem {
-            encrypted_password: entry.encrypted_password.clone(),
+            encrypted_password: current_history_blob,
             changed_at: entry.password_changed_at,
         };
-        entry.password_history.push(current_history);
 
-        // Restore old password as current
-        entry.encrypted_password = history_item.encrypted_password;
+        // Encrypt restored password with FieldScope::Password and set as active password
+        entry.encrypted_password = VaultManager::encrypt_entry_field(&restored_pw_bytes, &entry_key, &entry_id, FieldScope::Password)?;
         entry.password_changed_at = chrono::Utc::now();
         entry.updated_at = chrono::Utc::now();
+
+        entry.password_history.push(current_history);
 
         // Keep max history
         while entry.password_history.len() > crate::vault::types::MAX_PASSWORD_HISTORY {

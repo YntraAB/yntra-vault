@@ -14,7 +14,7 @@ mod bench_io_atomic_save;
 mod bench_search_engine;
 mod bench_passkey;
 mod bench_concurrency;
-mod bench_memory_zeroize;
+mod bench_protected_memory;
 
 use criterion::{criterion_group, criterion_main};
 
@@ -31,6 +31,6 @@ criterion_group!(
     bench_search_engine::bench_search_engine,
     bench_passkey::bench_passkey,
     bench_concurrency::bench_concurrency,
-    bench_memory_zeroize::bench_memory_zeroize
+    bench_protected_memory::bench_protected_memory
 );
 criterion_main!(benches);
