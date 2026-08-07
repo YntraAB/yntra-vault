@@ -2379,6 +2379,7 @@ dependencies = [
  "tokio",
  "uuid",
  "windows",
+ "windows-core 0.58.0",
  "zeroize",
 ]
 

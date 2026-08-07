@@ -1,6 +1,3 @@
-// Yntra Vault Core - Password Manager Engine
-// All cryptography, vault management, TOTP, and breach detection
-
 pub mod crypto;
 pub mod vault;
 pub mod totp;

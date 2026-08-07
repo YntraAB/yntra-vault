@@ -5,6 +5,7 @@ pub mod sharing;
 pub mod tpm;
 pub mod passkey;
 pub mod biometric;
+pub mod hardware2fa;
 
 pub use kdf::{MasterKey, SubKeys, EntryKey, derive_master_key, derive_master_key_with_keyfile, derive_subkeys, derive_per_entry_key};
 pub use cipher::{

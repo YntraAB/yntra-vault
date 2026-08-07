@@ -100,6 +100,83 @@ pub async fn disable_biometric(state: State<'_, AppState>) -> Result<(), String>
     manager.disable_biometric().map_err(|e| e.to_string())
 }
 
+// ─── Hardware 2FA Commands ────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn check_hardware2fa_available() -> Result<yntra_vault_core::crypto::hardware2fa::Hardware2FaInfo, String> {
+    Ok(yntra_vault_core::crypto::hardware2fa::check_hardware2fa_availability())
+}
+
+#[tauri::command]
+pub async fn list_hardware_keys() -> Result<Vec<yntra_vault_core::crypto::hardware2fa::HardwareKeyInfo>, String> {
+    Ok(yntra_vault_core::crypto::hardware2fa::list_hardware_keys())
+}
+
+#[tauri::command]
+pub async fn is_hardware2fa_enabled(path: String) -> Result<bool, String> {
+    let vault_path = PathBuf::from(&path);
+    Ok(VaultManager::is_hardware2fa_enabled_file(&vault_path))
+}
+
+#[tauri::command]
+pub async fn open_vault_with_hardware2fa(
+    path: String,
+    password: String,
+    key_file_path: Option<String>,
+    hardware_response: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<VaultInfo, String> {
+    let vault_path = PathBuf::from(&path);
+    let kf_path = key_file_path.as_ref().map(PathBuf::from);
+    let manager = VaultManager::open_with_hardware2fa(
+        &vault_path,
+        &password,
+        kf_path.as_deref(),
+        &hardware_response,
+    ).map_err(|e| e.to_string())?;
+
+    let info = manager.info();
+    *state.vault.lock().map_err(|e| e.to_string())? = Some(manager);
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn perform_hardware2fa_challenge(
+    protocol: String,
+    challenge: Option<Vec<u8>>,
+) -> Result<Vec<u8>, String> {
+    let proto = match protocol.as_str() {
+        "Fido2Ctap2HmacSecret" | "fido2" => yntra_vault_core::crypto::hardware2fa::Hardware2FaProtocol::Fido2Ctap2HmacSecret,
+        _ => yntra_vault_core::crypto::hardware2fa::Hardware2FaProtocol::YubiKeyChallengeResponse,
+    };
+    let chall = challenge.unwrap_or_else(|| b"yntra-vault-hardware2fa-default-challenge".to_vec());
+    yntra_vault_core::crypto::hardware2fa::perform_hardware2fa_challenge(proto, &chall)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn enable_hardware2fa(
+    protocol: String,
+    key_name: String,
+    hardware_response: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    let proto = match protocol.as_str() {
+        "Fido2Ctap2HmacSecret" | "fido2" => yntra_vault_core::crypto::hardware2fa::Hardware2FaProtocol::Fido2Ctap2HmacSecret,
+        _ => yntra_vault_core::crypto::hardware2fa::Hardware2FaProtocol::YubiKeyChallengeResponse,
+    };
+    manager.enable_hardware2fa(proto, &key_name, &hardware_response).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn disable_hardware2fa(state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.disable_hardware2fa().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn generate_key_file(path: String) -> Result<(), String> {
     let kf_path = PathBuf::from(&path);

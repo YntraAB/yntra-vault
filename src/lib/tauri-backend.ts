@@ -26,6 +26,9 @@ import type {
   ParsedImportEntry,
   ImportPreviewResult,
   BiometricInfo,
+  Hardware2FaInfo,
+  HardwareKeyInfo,
+  Hardware2FaProtocol,
 } from './backend';
 
 export class TauriBackend implements YntraVaultBackend {
@@ -313,6 +316,53 @@ export class TauriBackend implements YntraVaultBackend {
 
   async disableBiometric(): Promise<void> {
     return invoke('disable_biometric');
+  }
+
+  // ─── Hardware 2FA / YubiKey ──────────────────────────────────────
+
+  async checkHardware2FaAvailable(): Promise<Hardware2FaInfo> {
+    return invoke('check_hardware2fa_available');
+  }
+
+  async listHardwareKeys(): Promise<HardwareKeyInfo[]> {
+    return invoke('list_hardware_keys');
+  }
+
+  async isHardware2FaEnabled(path: string): Promise<boolean> {
+    return invoke('is_hardware2fa_enabled', { path });
+  }
+
+  async openVaultWithHardware2Fa(
+    path: string,
+    password: string,
+    keyFilePath: string | undefined,
+    hardwareResponse: number[],
+  ): Promise<VaultInfo> {
+    return invoke('open_vault_with_hardware2fa', {
+      path,
+      password,
+      keyFilePath,
+      hardwareResponse,
+    });
+  }
+
+  async performHardware2FaChallenge(
+    protocol: Hardware2FaProtocol,
+    challenge?: number[],
+  ): Promise<number[]> {
+    return invoke('perform_hardware2fa_challenge', { protocol, challenge });
+  }
+
+  async enableHardware2Fa(
+    protocol: Hardware2FaProtocol,
+    keyName: string,
+    hardwareResponse: number[],
+  ): Promise<void> {
+    return invoke('enable_hardware2fa', { protocol, keyName, hardwareResponse });
+  }
+
+  async disableHardware2Fa(): Promise<void> {
+    return invoke('disable_hardware2fa');
   }
 }
 

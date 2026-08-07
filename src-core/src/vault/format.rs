@@ -20,6 +20,7 @@ use crate::error::VaultError;
 pub const MAGIC_BYTES: &[u8; 4] = b"YNTR";
 pub const FORMAT_VERSION: u16 = 4;
 pub const FLAG_HAS_BIOMETRIC: u16 = 0x0001;
+pub const FLAG_HAS_HARDWARE_2FA: u16 = 0x0002;
 
 /// Embedded biometric header block stored inside the .vdb file when biometrics is enrolled.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -121,6 +122,7 @@ pub struct VaultFile {
     pub header: FileHeader,
     pub hmac: Option<[u8; 64]>,
     pub biometric: Option<EmbeddedBiometricHeader>,
+    pub hardware2fa: Option<Vec<crate::crypto::hardware2fa::EmbeddedHardware2FaHeader>>,
     pub encrypted_payload: Vec<u8>,
 }
 
@@ -134,6 +136,11 @@ impl VaultFile {
             flags |= FLAG_HAS_BIOMETRIC;
         } else {
             flags &= !FLAG_HAS_BIOMETRIC;
+        }
+        if self.hardware2fa.is_some() {
+            flags |= FLAG_HAS_HARDWARE_2FA;
+        } else {
+            flags &= !FLAG_HAS_HARDWARE_2FA;
         }
 
         // Magic bytes
@@ -176,6 +183,17 @@ impl VaultFile {
             buf.write_all(&bio_len.to_le_bytes())
                 .map_err(|e| VaultError::SerializationError(e.to_string()))?;
             buf.write_all(&bio_bytes)
+                .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        }
+
+        // Embedded Hardware 2FA container block (if FLAG_HAS_HARDWARE_2FA)
+        if let Some(ref hw) = self.hardware2fa {
+            let hw_bytes = bincode::serialize(hw)
+                .map_err(|e| VaultError::SerializationError(format!("Hardware 2FA serialize: {}", e)))?;
+            let hw_len = hw_bytes.len() as u32;
+            buf.write_all(&hw_len.to_le_bytes())
+                .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+            buf.write_all(&hw_bytes)
                 .map_err(|e| VaultError::SerializationError(e.to_string()))?;
         }
 
@@ -272,6 +290,28 @@ impl VaultFile {
             None
         };
 
+        // Embedded Hardware 2FA container block (if FLAG_HAS_HARDWARE_2FA)
+        let hardware2fa = if flags & FLAG_HAS_HARDWARE_2FA != 0 {
+            let mut hw_len_bytes = [0u8; 4];
+            cursor.read_exact(&mut hw_len_bytes)
+                .map_err(|_| VaultError::InvalidFormat("Failed to read hardware 2FA block length".into()))?;
+            let hw_len = u32::from_le_bytes(hw_len_bytes) as usize;
+
+            let mut hw_bytes = vec![0u8; hw_len];
+            cursor.read_exact(&mut hw_bytes)
+                .map_err(|_| VaultError::InvalidFormat("Failed to read hardware 2FA block".into()))?;
+            match bincode::deserialize::<Vec<crate::crypto::hardware2fa::EmbeddedHardware2FaHeader>>(&hw_bytes) {
+                Ok(hw_vec) => Some(hw_vec),
+                Err(_) => {
+                    let single: crate::crypto::hardware2fa::EmbeddedHardware2FaHeader = bincode::deserialize(&hw_bytes)
+                        .map_err(|e| VaultError::InvalidFormat(format!("Invalid hardware 2FA block: {}", e)))?;
+                    Some(vec![single])
+                }
+            }
+        } else {
+            None
+        };
+
         // Payload length
         let mut payload_len_bytes = [0u8; 8];
         cursor.read_exact(&mut payload_len_bytes)
@@ -292,6 +332,7 @@ impl VaultFile {
             },
             hmac,
             biometric,
+            hardware2fa,
             encrypted_payload,
         })
     }
@@ -312,6 +353,7 @@ mod tests {
             },
             hmac: None,
             biometric: None,
+            hardware2fa: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
 
@@ -322,6 +364,7 @@ mod tests {
         assert_eq!(parsed.header.salt, [42u8; 32]);
         assert!(parsed.hmac.is_none());
         assert!(parsed.biometric.is_none());
+        assert!(parsed.hardware2fa.is_none());
         assert_eq!(parsed.encrypted_payload, vec![1, 2, 3, 4, 5, 6, 7, 8]);
 
         // AAD bytes generation test
@@ -346,6 +389,7 @@ mod tests {
             },
             hmac: None,
             biometric: Some(bio.clone()),
+            hardware2fa: None,
             encrypted_payload: vec![9, 8, 7, 6],
         };
 
@@ -355,7 +399,42 @@ mod tests {
         assert_eq!(parsed.header.version, FORMAT_VERSION);
         assert_eq!(parsed.header.flags & FLAG_HAS_BIOMETRIC, FLAG_HAS_BIOMETRIC);
         assert_eq!(parsed.biometric, Some(bio));
+        assert!(parsed.hardware2fa.is_none());
         assert_eq!(parsed.encrypted_payload, vec![9, 8, 7, 6]);
+    }
+
+    #[test]
+    fn test_v5_hardware2fa_roundtrip_file_format() {
+        let hw = crate::crypto::hardware2fa::EmbeddedHardware2FaHeader {
+            protocol: crate::crypto::hardware2fa::Hardware2FaProtocol::YubiKeyChallengeResponse,
+            credential_id: vec![1, 2, 3, 4],
+            challenge_salt: [5u8; 32],
+            nonce: [9u8; 24],
+            wrapped_kek: vec![11, 22, 33],
+            encrypted_subkeys: vec![44, 55, 66],
+            key_name: "Test YubiKey".to_string(),
+        };
+
+        let file = VaultFile {
+            header: FileHeader {
+                version: FORMAT_VERSION,
+                flags: FLAG_HAS_HARDWARE_2FA,
+                salt: [88u8; 32],
+                kdf_params: KdfParams::default(),
+            },
+            hmac: None,
+            biometric: None,
+            hardware2fa: Some(vec![hw.clone()]),
+            encrypted_payload: vec![3, 2, 1],
+        };
+
+        let bytes = file.to_bytes().unwrap();
+        let parsed = VaultFile::from_bytes(&bytes).unwrap();
+
+        assert_eq!(parsed.header.version, FORMAT_VERSION);
+        assert_eq!(parsed.header.flags & FLAG_HAS_HARDWARE_2FA, FLAG_HAS_HARDWARE_2FA);
+        assert_eq!(parsed.hardware2fa, Some(vec![hw]));
+        assert_eq!(parsed.encrypted_payload, vec![3, 2, 1]);
     }
 
     #[test]
@@ -369,6 +448,7 @@ mod tests {
             },
             hmac: Some([0xAB; 64]),
             biometric: None,
+            hardware2fa: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
 

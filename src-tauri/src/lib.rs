@@ -49,6 +49,14 @@ pub fn run() {
             commands::unlock_vault_biometric,
             commands::enable_biometric,
             commands::disable_biometric,
+            // Hardware 2FA / YubiKey
+            commands::check_hardware2fa_available,
+            commands::list_hardware_keys,
+            commands::is_hardware2fa_enabled,
+            commands::open_vault_with_hardware2fa,
+            commands::perform_hardware2fa_challenge,
+            commands::enable_hardware2fa,
+            commands::disable_hardware2fa,
             // Entries
             commands::list_entries,
             commands::search_entries,

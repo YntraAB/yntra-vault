@@ -33,6 +33,8 @@ pub struct VaultManager {
     pub(crate) salt: [u8; 32],
     /// Embedded biometric container block
     pub(crate) biometric: Option<crate::vault::format::EmbeddedBiometricHeader>,
+    /// Embedded hardware 2FA container block
+    pub(crate) hardware2fa: Option<Vec<crate::crypto::hardware2fa::EmbeddedHardware2FaHeader>>,
     /// In-memory Zero-Disclosure search index
     pub(crate) search_index: std::collections::HashMap<[u8; 8], Vec<Uuid>>,
 }
@@ -111,6 +113,7 @@ impl VaultManager {
             keys: Some(subkeys),
             salt,
             biometric: None,
+            hardware2fa: None,
             search_index: std::collections::HashMap::new(),
         };
 
@@ -140,6 +143,11 @@ impl VaultManager {
 
         // Parse file format
         let vault_file = VaultFile::from_bytes(&file_bytes)?;
+
+        // If Hardware 2FA is enrolled, require hardware 2FA unlock method
+        if vault_file.hardware2fa.is_some() {
+            return Err(VaultError::Hardware2FaRequired);
+        }
 
         let key_file_bytes = match key_file_path {
             Some(kf_path) => Some(read_key_file_safely(kf_path)?),
@@ -219,6 +227,7 @@ impl VaultManager {
             keys: Some(subkeys),
             salt: vault_file.header.salt,
             biometric: vault_file.biometric,
+            hardware2fa: vault_file.hardware2fa,
             search_index: std::collections::HashMap::new(),
         };
         manager.rebuild_search_index();
@@ -231,6 +240,11 @@ impl VaultManager {
             .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", path.display(), e)))?;
 
         let vault_file = VaultFile::from_bytes(&file_bytes)?;
+
+        if vault_file.hardware2fa.is_some() {
+            return Err(VaultError::Hardware2FaRequired);
+        }
+
         let subkeys = crate::crypto::biometric::unlock_from_vault_file(&vault_file)?;
 
         if vault_file.encrypted_payload.len() < 24 {
@@ -278,6 +292,7 @@ impl VaultManager {
             keys: Some(subkeys),
             salt: vault_file.header.salt,
             biometric: vault_file.biometric,
+            hardware2fa: vault_file.hardware2fa,
             search_index: std::collections::HashMap::new(),
         };
         manager.rebuild_search_index();
@@ -309,6 +324,143 @@ impl VaultManager {
         self.biometric.is_some()
     }
 
+    /// Open an existing vault with password + optional key file + Hardware 2FA response.
+    pub fn open_with_hardware2fa(
+        path: &Path,
+        password: &str,
+        key_file_path: Option<&Path>,
+        hardware_response: &[u8],
+    ) -> crate::Result<Self> {
+        let file_bytes = fs::read(path)
+            .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", path.display(), e)))?;
+
+        let vault_file = VaultFile::from_bytes(&file_bytes)?;
+
+        let key_file_bytes = match key_file_path {
+            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
+            None => None,
+        };
+
+        // Try unlocking via embedded hardware 2FA header envelope first
+        let subkeys = if vault_file.hardware2fa.is_some() {
+            crate::crypto::hardware2fa::unlock_from_hardware2fa(&vault_file, hardware_response)?
+        } else {
+            // Otherwise derive master key with hardware response mixed into KDF pre-hash
+            let master_key = crate::crypto::hardware2fa::derive_master_key_with_hardware_2fa(
+                password.as_bytes(),
+                key_file_bytes.as_ref().map(|b| b.as_slice()),
+                hardware_response,
+                &vault_file.header.salt,
+            )?;
+            derive_subkeys(&master_key)?
+        };
+
+        if vault_file.encrypted_payload.len() < 24 {
+            return Err(VaultError::InvalidFormat(
+                "Encrypted payload too short (must be at least 24 bytes for XChaCha20 nonce)".into(),
+            ));
+        }
+
+        let encrypted_blob = crate::crypto::cipher::EncryptedBlob {
+            nonce: vault_file.encrypted_payload[..24].to_vec(),
+            ciphertext: vault_file.encrypted_payload[24..].to_vec(),
+        };
+
+        let decrypted = if vault_file.header.version >= 3 {
+            let aad = vault_file.header.aad_bytes()?;
+            decrypt_vault_with_aad(&encrypted_blob, &subkeys.vault_key, &aad)?
+        } else {
+            decrypt_vault(&encrypted_blob, &subkeys.vault_key)?
+        };
+
+        let data: VaultData = match vault_file.header.version {
+            1 => {
+                match bincode::deserialize(&decrypted) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        let legacy: LegacyVaultData = bincode::deserialize(&decrypted)
+                            .map_err(|e| VaultError::SerializationError(
+                                format!("Legacy vault deserialize: {}", e)
+                            ))?;
+                        legacy.into_current()
+                    }
+                }
+            }
+            _ => {
+                rmp_serde::from_slice(&decrypted)
+                    .map_err(|e| VaultError::SerializationError(
+                        format!("Vault deserialize: {}", e)
+                    ))?
+            }
+        };
+
+        let mut manager = VaultManager {
+            path: path.to_path_buf(),
+            data,
+            keys: Some(subkeys),
+            salt: vault_file.header.salt,
+            biometric: vault_file.biometric,
+            hardware2fa: vault_file.hardware2fa,
+            search_index: std::collections::HashMap::new(),
+        };
+        manager.rebuild_search_index();
+        Ok(manager)
+    }
+
+    /// Enroll Hardware 2FA for the current open vault.
+    pub fn enable_hardware2fa(
+        &mut self,
+        protocol: crate::crypto::hardware2fa::Hardware2FaProtocol,
+        key_name: &str,
+        hardware_response: &[u8],
+    ) -> crate::Result<()> {
+        let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        let mut flags = 0u16;
+        if self.biometric.is_some() { flags |= crate::vault::format::FLAG_HAS_BIOMETRIC; }
+        flags |= crate::vault::format::FLAG_HAS_HARDWARE_2FA;
+
+        let temp_header = FileHeader {
+            version: FORMAT_VERSION,
+            flags,
+            salt: self.salt,
+            kdf_params: KdfParams::default(),
+        };
+
+        let hw_header = crate::crypto::hardware2fa::create_embedded_hardware2fa_header(
+            keys,
+            &temp_header,
+            protocol,
+            key_name,
+            hardware_response,
+        )?;
+
+        let mut list = self.hardware2fa.take().unwrap_or_default();
+        list.push(hw_header);
+        self.hardware2fa = Some(list);
+        self.save()
+    }
+
+    /// Disable Hardware 2FA for the current vault.
+    pub fn disable_hardware2fa(&mut self) -> crate::Result<()> {
+        self.hardware2fa = None;
+        self.save()
+    }
+
+    /// Check if Hardware 2FA is enabled for the current vault.
+    pub fn is_hardware2fa_enabled(&self) -> bool {
+        self.hardware2fa.is_some()
+    }
+
+    /// Check if Hardware 2FA is enrolled inside a .vdb file at path.
+    pub fn is_hardware2fa_enabled_file(vault_path: &Path) -> bool {
+        if let Ok(file_bytes) = fs::read(vault_path) {
+            if let Ok(vault_file) = VaultFile::from_bytes(&file_bytes) {
+                return vault_file.hardware2fa.is_some();
+            }
+        }
+        false
+    }
+
     /// Save the vault to disk with full encryption (Single-File .vdb Architecture).
     pub fn save(&mut self) -> crate::Result<()> {
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
@@ -325,9 +477,13 @@ impl VaultManager {
         let serialized = rmp_serde::to_vec(&self.data)
             .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {}", e)))?;
 
+        let mut flags = 0u16;
+        if self.biometric.is_some() { flags |= crate::vault::format::FLAG_HAS_BIOMETRIC; }
+        if self.hardware2fa.is_some() { flags |= crate::vault::format::FLAG_HAS_HARDWARE_2FA; }
+
         let header = FileHeader {
             version: FORMAT_VERSION,
-            flags: if self.biometric.is_some() { crate::vault::format::FLAG_HAS_BIOMETRIC } else { 0 },
+            flags,
             salt: self.salt,
             kdf_params: KdfParams::default(),
         };
@@ -341,11 +497,12 @@ impl VaultManager {
         payload.extend_from_slice(&encrypted.nonce);
         payload.extend_from_slice(&encrypted.ciphertext);
 
-        // Build single-file vault structure (v4)
+        // Build single-file vault structure (v4/v5)
         let vault_file = VaultFile {
             header,
             hmac: None,
             biometric: self.biometric.clone(),
+            hardware2fa: self.hardware2fa.clone(),
             encrypted_payload: payload,
         };
 
@@ -1634,6 +1791,7 @@ mod tests {
             header,
             hmac: None,
             biometric: None,
+            hardware2fa: None,
             encrypted_payload: vec![1, 2, 3], // Payload < 24 bytes
         };
         let corrupted_bytes = file.to_bytes().unwrap();

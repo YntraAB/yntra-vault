@@ -71,6 +71,7 @@ pub fn bench_vault_serialization(c: &mut Criterion) {
             entries,
             tags: vec![],
             trash: vec![],
+            settings: Default::default(),
         };
 
         let serialized_bincode = bincode::serialize(&vault_data).unwrap();
@@ -100,6 +101,8 @@ pub fn bench_vault_serialization(c: &mut Criterion) {
                 kdf_params: KdfParams::default(),
             },
             hmac: Some([7u8; 64]),
+            biometric: None,
+            hardware2fa: None,
             encrypted_payload: serialized_bincode.clone(),
         };
 

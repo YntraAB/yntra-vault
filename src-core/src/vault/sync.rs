@@ -645,6 +645,7 @@ mod tests {
             },
             hmac: None,
             biometric: None,
+            hardware2fa: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
         let client_data = vault_file.to_bytes().unwrap();

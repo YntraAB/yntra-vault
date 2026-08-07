@@ -23,10 +23,24 @@ pub struct BiometricInfo {
 
 // ─── Windows Hello WinRT Hardware Integration ───────────────────────────
 #[cfg(target_os = "windows")]
+#[allow(non_snake_case)]
 mod win_hello {
     use windows::Security::Credentials::UI::{UserConsentVerifier, UserConsentVerificationResult, UserConsentVerifierAvailability};
-    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    use windows::Win32::Foundation::HWND;
+    use windows::core::{HSTRING, factory, Interface};
     use crate::error::VaultError;
+
+    #[windows::core::interface("39e050c3-4e74-4414-bdf6-b81185f9263a")]
+    unsafe trait IUserConsentVerifierInterop: windows::core::IUnknown {
+        unsafe fn RequestVerificationForWindowAsync(
+            &self,
+            appwindow: HWND,
+            message: &HSTRING,
+            riid: *const windows::core::GUID,
+            asyncoperation: *mut *mut std::ffi::c_void,
+        ) -> windows::core::HRESULT;
+    }
 
     pub fn check_availability() -> (bool, String) {
         match UserConsentVerifier::CheckAvailabilityAsync() {
@@ -43,8 +57,29 @@ mod win_hello {
 
     pub fn request_user_consent(prompt: &str) -> crate::Result<()> {
         let msg = HSTRING::from(prompt);
-        let async_op = UserConsentVerifier::RequestVerificationAsync(&msg)
-            .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?;
+        let hwnd = unsafe { GetForegroundWindow() };
+
+        let async_op = match factory::<UserConsentVerifier, IUserConsentVerifierInterop>() {
+            Ok(interop) => unsafe {
+                let mut op: Option<windows::Foundation::IAsyncOperation<UserConsentVerificationResult>> = None;
+                let hr = interop.RequestVerificationForWindowAsync(
+                    hwnd,
+                    &msg,
+                    &windows::Foundation::IAsyncOperation::<UserConsentVerificationResult>::IID,
+                    &mut op as *mut _ as _,
+                );
+                if hr.is_ok() && op.is_some() {
+                    op.unwrap()
+                } else {
+                    UserConsentVerifier::RequestVerificationAsync(&msg)
+                        .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?
+                }
+            },
+            Err(_) => {
+                UserConsentVerifier::RequestVerificationAsync(&msg)
+                    .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?
+            }
+        };
 
         let result = async_op.get()
             .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello verification failed: {}", e)))?;
@@ -210,6 +245,7 @@ mod tests {
             header,
             hmac: None,
             biometric: Some(bio_header),
+            hardware2fa: None,
             encrypted_payload: vec![1, 2, 3, 4],
         };
 

@@ -26,6 +26,23 @@ export interface BiometricInfo {
   biometric_type: string;
 }
 
+export type Hardware2FaProtocol = 'YubiKeyChallengeResponse' | 'Fido2Ctap2HmacSecret';
+
+export interface HardwareKeyInfo {
+  id: string;
+  name: string;
+  protocol: Hardware2FaProtocol;
+  serial: number | null;
+  is_connected: boolean;
+}
+
+export interface Hardware2FaInfo {
+  available: boolean;
+  key_count: number;
+  supported_protocols: Hardware2FaProtocol[];
+  connected_keys: HardwareKeyInfo[];
+}
+
 export interface MergeStats {
   entries_added: number;
   entries_updated: number;
@@ -332,6 +349,15 @@ export interface YntraVaultBackend {
   unlockVaultBiometric(path: string): Promise<VaultInfo>;
   enableBiometric(): Promise<void>;
   disableBiometric(): Promise<void>;
+
+  // Hardware 2FA / YubiKey
+  checkHardware2FaAvailable(): Promise<Hardware2FaInfo>;
+  listHardwareKeys(): Promise<HardwareKeyInfo[]>;
+  isHardware2FaEnabled(path: string): Promise<boolean>;
+  openVaultWithHardware2Fa(path: string, password: string, keyFilePath: string | undefined, hardwareResponse: number[]): Promise<VaultInfo>;
+  performHardware2FaChallenge(protocol: Hardware2FaProtocol, challenge?: number[]): Promise<number[]>;
+  enableHardware2Fa(protocol: Hardware2FaProtocol, keyName: string, hardwareResponse: number[]): Promise<void>;
+  disableHardware2Fa(): Promise<void>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────
