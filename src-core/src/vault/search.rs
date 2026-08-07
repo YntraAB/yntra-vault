@@ -37,7 +37,8 @@ pub fn hash_trigram(trigram: &str, key: &[u8; 32]) -> [u8; 8] {
 
 impl VaultManager {
     /// Rebuild the in-memory HMAC-SHA256 trigram search index from all current entries.
-    pub(crate) fn rebuild_search_index(&mut self) {
+    pub fn rebuild_search_index(&mut self) {
+
         let mut index = std::collections::HashMap::new();
         if let Some(ref keys) = self.keys {
             for entry in &self.data.entries {

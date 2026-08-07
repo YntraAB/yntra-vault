@@ -39,7 +39,7 @@ pub struct VaultKey {
     pub bytes: [u8; 32],
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct EntryKey {
     pub bytes: [u8; 32],
 }
@@ -126,6 +126,20 @@ pub fn derive_subkeys(master_key: &MasterKey) -> crate::Result<SubKeys> {
     })
 }
 
+/// Derive an isolated, unique per-entry encryption key from the master entry key and entry UUID using HKDF-SHA512.
+pub fn derive_per_entry_key(master_entry_key: &EntryKey, entry_id: &uuid::Uuid) -> crate::Result<EntryKey> {
+    let hk = Hkdf::<Sha512>::new(None, &master_entry_key.bytes);
+    let mut info = Vec::with_capacity(32 + 16);
+    info.extend_from_slice(b"yntra-vault-per-entry-key-v1-");
+    info.extend_from_slice(entry_id.as_bytes());
+
+    let mut entry_key_bytes = [0u8; 32];
+    hk.expand(&info, &mut entry_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (per-entry key): {}", e)))?;
+
+    Ok(EntryKey { bytes: entry_key_bytes })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +206,23 @@ mod tests {
 
         let mk_with_kf_2 = derive_master_key_with_keyfile(password, Some(key_file), &salt).unwrap();
         assert_eq!(mk_with_kf.as_bytes(), mk_with_kf_2.as_bytes());
+    }
+
+    #[test]
+    fn test_per_entry_key_isolation() {
+        let master_key = derive_master_key(b"test-password", &[42u8; 32]).unwrap();
+        let subkeys = derive_subkeys(&master_key).unwrap();
+
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+
+        let ek1 = derive_per_entry_key(&subkeys.entry_key, &id1).unwrap();
+        let ek2 = derive_per_entry_key(&subkeys.entry_key, &id2).unwrap();
+        let ek1_repeat = derive_per_entry_key(&subkeys.entry_key, &id1).unwrap();
+
+        assert_ne!(ek1.bytes, ek2.bytes);
+        assert_ne!(ek1.bytes, subkeys.entry_key.bytes);
+        assert_eq!(ek1.bytes, ek1_repeat.bytes);
     }
 }
 

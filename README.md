@@ -119,8 +119,13 @@ bun run tauri build
 ### Running Test Suite
 
 ```bash
+# Core unit tests
 cargo test --lib --manifest-path src-core/Cargo.toml
+
+# Core micro-benchmark suite
+bun run bench
 ```
+
 
 ---
 

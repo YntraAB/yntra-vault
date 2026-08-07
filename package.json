@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "bench": "cargo bench --manifest-path src-core/Cargo.toml"
+
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

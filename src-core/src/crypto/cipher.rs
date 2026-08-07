@@ -1,14 +1,15 @@
 //! Multi-layer encryption engine
 //!
 //! Layer 1: XChaCha20-Poly1305 — Vault-level authenticated encryption
-//! Layer 2: AES-256-GCM — Per-entry encryption
+//! Layer 2: XChaCha20-Poly1305 — Per-entry encryption (with legacy AES-256-GCM fallback)
 //! Layer 3: HMAC-SHA512 — Integrity verification
 
-use chacha20poly1305::{XChaCha20Poly1305, aead::{Aead, KeyInit}};
-use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
+use chacha20poly1305::{XChaCha20Poly1305, aead::{Aead, KeyInit, Payload}};
+use aes_gcm::{Aes256Gcm, Nonce as AesNonce, aead::Payload as AesPayload};
 use hmac::{Hmac, Mac};
-use sha2::Sha512;
+use sha2::{Sha512, Digest};
 use rand::Rng;
+use zeroize::Zeroizing;
 
 use super::kdf::{VaultKey, EntryKey, HmacKey};
 use crate::error::VaultError;
@@ -22,14 +23,31 @@ pub struct EncryptedBlob {
     pub ciphertext: Vec<u8>,
 }
 
+/// Generate a 24-byte hedged nonce by digesting CSPRNG entropy, plaintext, and AAD context.
+///
+/// Provides fault tolerance against OS CSPRNG entropy starvation, stuck RNGs, or VM snapshot rollbacks.
+pub fn generate_hedged_nonce_24(plaintext: &[u8], aad: &[u8]) -> [u8; 24] {
+    let mut csprng_bytes = [0u8; 32];
+    rand::rng().fill(&mut csprng_bytes);
+
+    let mut hasher = Sha512::new();
+    hasher.update(&csprng_bytes);
+    hasher.update(plaintext);
+    hasher.update(aad);
+    let hash_output = hasher.finalize();
+
+    let mut nonce = [0u8; 24];
+    nonce.copy_from_slice(&hash_output[..24]);
+    nonce
+}
+
 // ─── Layer 1: XChaCha20-Poly1305 (Vault-level) ─────────────────────────
 
 pub fn encrypt_vault(plaintext: &[u8], key: &VaultKey) -> crate::Result<EncryptedBlob> {
     let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
         .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 key init: {}", e)))?;
 
-    let mut nonce_bytes = [0u8; 24];
-    rand::rng().fill(&mut nonce_bytes);
+    let nonce_bytes = generate_hedged_nonce_24(plaintext, b"yntra-vault-container-v2");
     let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
@@ -42,7 +60,7 @@ pub fn encrypt_vault(plaintext: &[u8], key: &VaultKey) -> crate::Result<Encrypte
     })
 }
 
-pub fn decrypt_vault(blob: &EncryptedBlob, key: &VaultKey) -> crate::Result<Vec<u8>> {
+pub fn decrypt_vault(blob: &EncryptedBlob, key: &VaultKey) -> crate::Result<Zeroizing<Vec<u8>>> {
     let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
         .map_err(|e| VaultError::DecryptionError(format!("XChaCha20 key init: {}", e)))?;
 
@@ -53,24 +71,34 @@ pub fn decrypt_vault(blob: &EncryptedBlob, key: &VaultKey) -> crate::Result<Vec<
     }
 
     let nonce = chacha20poly1305::XNonce::from_slice(&blob.nonce);
-    cipher
+    let plaintext = cipher
         .decrypt(nonce, blob.ciphertext.as_ref())
-        .map_err(|_| VaultError::InvalidPassword)
+        .map_err(|_| VaultError::InvalidPassword)?;
+
+    Ok(Zeroizing::new(plaintext))
 }
 
-// ─── Layer 2: AES-256-GCM (Per-entry) ──────────────────────────────────
+// ─── Layer 2: XChaCha20-Poly1305 (Per-entry, 24-byte Hedged Nonce + AAD Binding) ──────
 
-pub fn encrypt_entry(plaintext: &[u8], key: &EntryKey) -> crate::Result<EncryptedBlob> {
-    let cipher = Aes256Gcm::new_from_slice(&key.bytes)
-        .map_err(|e| VaultError::EncryptionError(format!("AES-GCM key init: {}", e)))?;
+pub fn encrypt_entry_with_aad(
+    plaintext: &[u8],
+    key: &EntryKey,
+    aad: &[u8],
+) -> crate::Result<EncryptedBlob> {
+    let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
+        .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 key init: {}", e)))?;
 
-    let mut nonce_bytes = [0u8; 12];
-    rand::rng().fill(&mut nonce_bytes);
-    let nonce = AesNonce::from_slice(&nonce_bytes);
+    let nonce_bytes = generate_hedged_nonce_24(plaintext, aad);
+    let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
+
+    let payload = Payload {
+        msg: plaintext,
+        aad,
+    };
 
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
-        .map_err(|e| VaultError::EncryptionError(format!("AES-GCM encrypt: {}", e)))?;
+        .encrypt(nonce, payload)
+        .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 entry encrypt: {}", e)))?;
 
     Ok(EncryptedBlob {
         nonce: nonce_bytes.to_vec(),
@@ -78,20 +106,74 @@ pub fn encrypt_entry(plaintext: &[u8], key: &EntryKey) -> crate::Result<Encrypte
     })
 }
 
-pub fn decrypt_entry(blob: &EncryptedBlob, key: &EntryKey) -> crate::Result<Vec<u8>> {
-    let cipher = Aes256Gcm::new_from_slice(&key.bytes)
-        .map_err(|e| VaultError::DecryptionError(format!("AES-GCM key init: {}", e)))?;
+pub fn encrypt_entry(plaintext: &[u8], key: &EntryKey) -> crate::Result<EncryptedBlob> {
+    encrypt_entry_with_aad(plaintext, key, b"")
+}
 
-    if blob.nonce.len() != 12 {
-        return Err(VaultError::DecryptionError(
-            "Invalid AES-GCM nonce length (expected 12 bytes)".into(),
-        ));
+pub fn decrypt_entry_with_aad(
+    blob: &EncryptedBlob,
+    key: &EntryKey,
+    aad: &[u8],
+) -> crate::Result<Zeroizing<Vec<u8>>> {
+    match blob.nonce.len() {
+        24 => {
+            let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
+                .map_err(|e| VaultError::DecryptionError(format!("XChaCha20 key init: {}", e)))?;
+            let nonce = chacha20poly1305::XNonce::from_slice(&blob.nonce);
+
+            let payload = Payload {
+                msg: blob.ciphertext.as_ref(),
+                aad,
+            };
+            if let Ok(plaintext) = cipher.decrypt(nonce, payload) {
+                return Ok(Zeroizing::new(plaintext));
+            }
+
+            if !aad.is_empty() {
+                let empty_payload = Payload {
+                    msg: blob.ciphertext.as_ref(),
+                    aad: b"",
+                };
+                if let Ok(plaintext) = cipher.decrypt(nonce, empty_payload) {
+                    return Ok(Zeroizing::new(plaintext));
+                }
+            }
+
+            Err(VaultError::DecryptionError("XChaCha20 auth tag mismatch (data/AAD tampered)".into()))
+        }
+        12 => {
+            let cipher = Aes256Gcm::new_from_slice(&key.bytes)
+                .map_err(|e| VaultError::DecryptionError(format!("AES-GCM key init: {}", e)))?;
+            let nonce = AesNonce::from_slice(&blob.nonce);
+
+            let payload = AesPayload {
+                msg: blob.ciphertext.as_ref(),
+                aad,
+            };
+            if let Ok(plaintext) = cipher.decrypt(nonce, payload) {
+                return Ok(Zeroizing::new(plaintext));
+            }
+
+            if !aad.is_empty() {
+                let empty_payload = AesPayload {
+                    msg: blob.ciphertext.as_ref(),
+                    aad: b"",
+                };
+                if let Ok(plaintext) = cipher.decrypt(nonce, empty_payload) {
+                    return Ok(Zeroizing::new(plaintext));
+                }
+            }
+
+            Err(VaultError::DecryptionError("AES-GCM auth tag mismatch".into()))
+        }
+        _ => Err(VaultError::DecryptionError(
+            format!("Invalid entry nonce length: expected 24 or 12 bytes, got {}", blob.nonce.len())
+        )),
     }
+}
 
-    let nonce = AesNonce::from_slice(&blob.nonce);
-    cipher
-        .decrypt(nonce, blob.ciphertext.as_ref())
-        .map_err(|_| VaultError::DecryptionError("AES-GCM auth tag mismatch".into()))
+pub fn decrypt_entry(blob: &EncryptedBlob, key: &EntryKey) -> crate::Result<Zeroizing<Vec<u8>>> {
+    decrypt_entry_with_aad(blob, key, b"")
 }
 
 // ─── Layer 3: HMAC-SHA512 (Integrity) ───────────────────────────────────
@@ -142,7 +224,7 @@ mod tests {
         assert_ne!(&encrypted.ciphertext, plaintext);
         assert_eq!(encrypted.nonce.len(), 24);
         let decrypted = decrypt_vault(&encrypted, &key).unwrap();
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext);
     }
 
     #[test]
@@ -168,9 +250,56 @@ mod tests {
         let key = test_entry_key();
         let plaintext = b"individual entry password data";
         let encrypted = encrypt_entry(plaintext, &key).unwrap();
-        assert_eq!(encrypted.nonce.len(), 12);
+        assert_eq!(encrypted.nonce.len(), 24);
         let decrypted = decrypt_entry(&encrypted, &key).unwrap();
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_aad_binding_isolation_and_fallback() {
+        let key = test_entry_key();
+        let aad_entry_a = b"entry-uuid-A-password";
+        let aad_entry_b = b"entry-uuid-B-password";
+        let plaintext = b"sensitive-password-123";
+
+        // Encrypt with Entry A's AAD
+        let encrypted = encrypt_entry_with_aad(plaintext, &key, aad_entry_a).unwrap();
+
+        // Decrypting with correct AAD succeeds
+        let decrypted = decrypt_entry_with_aad(&encrypted, &key, aad_entry_a).unwrap();
+        assert_eq!(*decrypted, plaintext);
+
+        // Decrypting with wrong AAD (transplant attack) MUST fail
+        let wrong_aad_result = decrypt_entry_with_aad(&encrypted, &key, aad_entry_b);
+        assert!(wrong_aad_result.is_err());
+
+        // Decrypting legacy blob without AAD with empty AAD succeeds
+        let legacy_unbound = encrypt_entry(plaintext, &key).unwrap();
+        let decrypted_fallback = decrypt_entry_with_aad(&legacy_unbound, &key, aad_entry_a).unwrap();
+        assert_eq!(*decrypted_fallback, plaintext);
+    }
+
+    #[test]
+    fn test_legacy_aes_gcm_entry_fallback() {
+        let key = test_entry_key();
+        let plaintext = b"legacy aes-256-gcm entry password";
+
+        // Manually construct legacy 12-byte AES-256-GCM blob
+        let cipher = Aes256Gcm::new_from_slice(&key.bytes).unwrap();
+        let mut nonce_bytes = [0u8; 12];
+        rand::rng().fill(&mut nonce_bytes);
+        let nonce = AesNonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
+
+        let legacy_blob = EncryptedBlob {
+            nonce: nonce_bytes.to_vec(),
+            ciphertext,
+        };
+        assert_eq!(legacy_blob.nonce.len(), 12);
+
+        // Verify decrypt_entry automatically falls back and decrypts 12-byte AES-GCM blob
+        let decrypted = decrypt_entry(&legacy_blob, &key).unwrap();
+        assert_eq!(*decrypted, plaintext);
     }
 
     #[test]
@@ -180,6 +309,22 @@ mod tests {
         let e2 = encrypt_vault(b"same data", &key).unwrap();
         assert_ne!(e1.nonce, e2.nonce);
         assert_ne!(e1.ciphertext, e2.ciphertext);
+    }
+
+    #[test]
+    fn test_hedged_nonce_generation() {
+        let plaintext_a = b"password_a";
+        let plaintext_b = b"password_b";
+        let aad = b"test-aad-scope";
+
+        let n1 = generate_hedged_nonce_24(plaintext_a, aad);
+        let n2 = generate_hedged_nonce_24(plaintext_b, aad);
+        let n1_repeat = generate_hedged_nonce_24(plaintext_a, aad);
+
+        assert_eq!(n1.len(), 24);
+        assert_ne!(n1, n2);
+        // Due to 32 bytes of CSPRNG entropy mixed into SHA-512, sequential calls get fresh nonces
+        assert_ne!(n1, n1_repeat);
     }
 
     #[test]
@@ -201,7 +346,7 @@ mod tests {
         let plaintext = vec![0xABu8; 1_000_000];
         let encrypted = encrypt_vault(&plaintext, &key).unwrap();
         let decrypted = decrypt_vault(&encrypted, &key).unwrap();
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext);
     }
 }
 

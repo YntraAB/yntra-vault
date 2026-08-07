@@ -18,7 +18,7 @@ pub struct Entry {
     pub id: Uuid,
     pub title: String,
     pub username: String,
-    /// Encrypted with per-entry AES-256-GCM
+    /// Encrypted with per-entry XChaCha20-Poly1305
     pub encrypted_password: EncryptedBlob,
     pub url: String,
     pub email: String,
@@ -40,7 +40,7 @@ pub struct Entry {
     pub strength_score: Option<StrengthScore>,
     /// When the password was last changed
     pub password_changed_at: DateTime<Utc>,
-    /// Passkey private key — encrypted with per-entry AES-256-GCM
+    /// Passkey private key — encrypted with per-entry XChaCha20-Poly1305
     #[serde(default)]
     pub encrypted_passkey: Option<EncryptedBlob>,
     /// Passkey public key — SEC1 uncompressed format (65 bytes for P-256)

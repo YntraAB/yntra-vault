@@ -12,13 +12,13 @@ use crate::crypto::{
     derive_master_key_with_keyfile, derive_subkeys,
     encrypt_vault, decrypt_vault,
     compute_hmac, verify_hmac,
-    SubKeys,
+    SubKeys, EntryKey, cipher::EncryptedBlob,
 };
 use crate::crypto::kdf::generate_salt;
 use crate::vault::format::{VaultFile, FileHeader, KdfParams, FORMAT_VERSION};
 use crate::vault::types::*;
+use zeroize::{Zeroize, Zeroizing};
 use crate::error::VaultError;
-use zeroize::Zeroize;
 
 
 /// Active vault state — holds decrypted data + derived keys.
@@ -133,6 +133,12 @@ impl VaultManager {
             &vault_file.hmac,
             &subkeys.hmac_key,
         )?;
+
+        if vault_file.encrypted_payload.len() < 24 {
+            return Err(VaultError::InvalidFormat(
+                "Encrypted payload too short (must be at least 24 bytes for XChaCha20 nonce)".into(),
+            ));
+        }
 
         // Decrypt vault payload (Layer 1: XChaCha20-Poly1305)
         let encrypted_blob = crate::crypto::cipher::EncryptedBlob {
@@ -293,6 +299,42 @@ impl VaultManager {
         }).collect())
     }
 
+    pub(crate) fn entry_field_aad(entry_id: &Uuid, field_scope: &str) -> Vec<u8> {
+        let mut aad = Vec::with_capacity(16 + field_scope.len());
+        aad.extend_from_slice(entry_id.as_bytes());
+        aad.extend_from_slice(field_scope.as_bytes());
+        aad
+    }
+
+    pub(crate) fn encrypt_entry_field(
+        plaintext: &[u8],
+        master_entry_key: &EntryKey,
+        entry_id: &Uuid,
+        field_scope: &str,
+    ) -> crate::Result<EncryptedBlob> {
+        let per_entry_key = crate::crypto::derive_per_entry_key(master_entry_key, entry_id)?;
+        let aad = Self::entry_field_aad(entry_id, field_scope);
+        crate::crypto::encrypt_entry_with_aad(plaintext, &per_entry_key, &aad)
+    }
+
+    pub(crate) fn decrypt_entry_field(
+        blob: &EncryptedBlob,
+        master_entry_key: &EntryKey,
+        entry_id: &Uuid,
+        field_scope: &str,
+    ) -> crate::Result<Zeroizing<Vec<u8>>> {
+        let per_entry_key = crate::crypto::derive_per_entry_key(master_entry_key, entry_id)?;
+        let aad = Self::entry_field_aad(entry_id, field_scope);
+
+        // 1. Try per-entry HKDF key + AAD
+        if let Ok(bytes) = crate::crypto::decrypt_entry_with_aad(blob, &per_entry_key, &aad) {
+            return Ok(bytes);
+        }
+
+        // 2. Fallback for legacy vaults: global entry key + AAD
+        crate::crypto::decrypt_entry_with_aad(blob, master_entry_key, &aad)
+    }
+
     /// Get a full entry with decrypted password.
     pub fn get_entry(&self, id: Uuid) -> crate::Result<DecryptedEntry> {
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
@@ -301,18 +343,20 @@ impl VaultManager {
             .find(|e| e.id == id)
             .ok_or(VaultError::EntryNotFound(id.to_string()))?;
 
-        // Decrypt password (Layer 2: AES-256-GCM)
-        let password_bytes = crate::crypto::decrypt_entry(
+        // Decrypt password (Layer 2: XChaCha20-Poly1305 with per-entry key + AAD)
+        let password_bytes = Self::decrypt_entry_field(
             &entry.encrypted_password,
             &keys.entry_key,
+            &entry.id,
+            "password",
         )?;
-        let password = String::from_utf8(password_bytes)
+        let password = String::from_utf8(password_bytes.to_vec())
             .map_err(|e| VaultError::DecryptionError(format!("Invalid UTF-8 password: {}", e)))?;
 
         // Decrypt TOTP secret if present
         let totp_secret = if let Some(ref encrypted_totp) = entry.encrypted_totp_secret {
-            let bytes = crate::crypto::decrypt_entry(encrypted_totp, &keys.entry_key)?;
-            Some(String::from_utf8(bytes)
+            let bytes = Self::decrypt_entry_field(encrypted_totp, &keys.entry_key, &entry.id, "totp")?;
+            Some(String::from_utf8(bytes.to_vec())
                 .map_err(|e| VaultError::DecryptionError(format!("Invalid UTF-8 TOTP: {}", e)))?)
         } else {
             None
@@ -350,15 +394,17 @@ impl VaultManager {
         let now = Utc::now();
         let id = Uuid::new_v4();
 
-        // Encrypt password (Layer 2: AES-256-GCM)
-        let encrypted_password = crate::crypto::encrypt_entry(
+        // Encrypt password (Layer 2: XChaCha20-Poly1305 with per-entry key + AAD)
+        let encrypted_password = Self::encrypt_entry_field(
             new.password.as_bytes(),
             &keys.entry_key,
+            &id,
+            "password",
         )?;
 
         // Encrypt TOTP secret if provided
         let encrypted_totp = if let Some(ref secret) = new.totp_secret {
-            Some(crate::crypto::encrypt_entry(secret.as_bytes(), &keys.entry_key)?)
+            Some(Self::encrypt_entry_field(secret.as_bytes(), &keys.entry_key, &id, "totp")?)
         } else {
             None
         };
@@ -391,7 +437,7 @@ impl VaultManager {
         if new.generate_passkey.unwrap_or(false) {
             let pair = crate::crypto::passkey::generate_passkey_pair()?;
             entry.encrypted_passkey = Some(
-                crate::crypto::encrypt_entry(&pair.private_key, &keys.entry_key)?
+                Self::encrypt_entry_field(&pair.private_key, &keys.entry_key, &id, "passkey")?
             );
             entry.passkey_public_key = Some(pair.public_key);
         }
@@ -405,8 +451,7 @@ impl VaultManager {
 
     /// Update an existing entry. Tracks password history.
     pub fn update_entry(&mut self, id: Uuid, update: UpdateEntry) -> crate::Result<()> {
-        let entry_key_bytes = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.bytes;
-        let entry_key = crate::crypto::kdf::EntryKey { bytes: entry_key_bytes };
+        let entry_key = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();
         let now = Utc::now();
 
         // 1. Perform modifications in a nested block to drop `entry` borrow
@@ -417,11 +462,13 @@ impl VaultManager {
 
             // If password changed, save old one to history and reset breach status
             if let Some(ref new_password) = update.password {
-                let old_password_bytes = crate::crypto::decrypt_entry(
+                let old_password_bytes = Self::decrypt_entry_field(
                     &entry.encrypted_password,
                     &entry_key,
+                    &id,
+                    "password",
                 )?;
-                let old_password = String::from_utf8(old_password_bytes)
+                let old_password = String::from_utf8(old_password_bytes.to_vec())
                     .map_err(|e| crate::error::VaultError::DecryptionError(e.to_string()))?;
 
                 if &old_password != new_password {
@@ -437,9 +484,11 @@ impl VaultManager {
                         entry.password_history.remove(0);
                     }
 
-                    entry.encrypted_password = crate::crypto::encrypt_entry(
+                    entry.encrypted_password = Self::encrypt_entry_field(
                         new_password.as_bytes(),
                         &entry_key,
+                        &id,
+                        "password",
                     )?;
                     entry.password_changed_at = now;
                     entry.breach_status = BreachStatus::Unknown; // Reset breach status
@@ -464,7 +513,7 @@ impl VaultManager {
                     entry.encrypted_totp_secret = None;
                 } else {
                     entry.encrypted_totp_secret = Some(
-                        crate::crypto::encrypt_entry(totp_secret.as_bytes(), &entry_key)?
+                        Self::encrypt_entry_field(totp_secret.as_bytes(), &entry_key, &id, "totp")?
                     );
                 }
             }
@@ -475,7 +524,7 @@ impl VaultManager {
                     "generate" => {
                         let pair = crate::crypto::passkey::generate_passkey_pair()?;
                         entry.encrypted_passkey = Some(
-                            crate::crypto::encrypt_entry(&pair.private_key, &entry_key)?
+                            Self::encrypt_entry_field(&pair.private_key, &entry_key, &id, "passkey")?
                         );
                         entry.passkey_public_key = Some(pair.public_key);
                     }
@@ -625,8 +674,8 @@ impl VaultManager {
         // Decrypt all passwords for reuse detection and on-the-fly strength checking
         let mut plain_passwords = Vec::with_capacity(total);
         for entry in &self.data.entries {
-            let pwd_bytes = crate::crypto::decrypt_entry(&entry.encrypted_password, &keys.entry_key)?;
-            let pwd = String::from_utf8(pwd_bytes)
+            let pwd_bytes = Self::decrypt_entry_field(&entry.encrypted_password, &keys.entry_key, &entry.id, "password")?;
+            let pwd = String::from_utf8(pwd_bytes.to_vec())
                 .map_err(|e| crate::error::VaultError::DecryptionError(e.to_string()))?;
             plain_passwords.push((entry.id, entry.title.clone(), pwd));
         }
@@ -775,10 +824,10 @@ impl VaultManager {
 
         // Quick check: try decrypting first entry's password (or first trashed entry if entries is empty)
         if let Some(entry) = self.data.entries.first() {
-            crate::crypto::decrypt_entry(&entry.encrypted_password, &current_keys.entry_key)
+            Self::decrypt_entry_field(&entry.encrypted_password, &current_keys.entry_key, &entry.id, "password")
                 .map_err(|_| VaultError::InvalidPassword)?;
         } else if let Some(trashed) = self.data.trash.first() {
-            crate::crypto::decrypt_entry(&trashed.entry.encrypted_password, &current_keys.entry_key)
+            Self::decrypt_entry_field(&trashed.entry.encrypted_password, &current_keys.entry_key, &trashed.entry.id, "password")
                 .map_err(|_| VaultError::InvalidPassword)?;
         }
 
@@ -797,41 +846,56 @@ impl VaultManager {
         // Re-encrypt every entry's password and TOTP with new keys
         for entry in &mut self.data.entries {
             // Decrypt with old key, re-encrypt with new key
-            let pw_bytes = crate::crypto::decrypt_entry(&entry.encrypted_password, &current_keys.entry_key)?;
-            entry.encrypted_password = crate::crypto::encrypt_entry(&pw_bytes, &new_keys.entry_key)?;
+            let pw_bytes = Self::decrypt_entry_field(&entry.encrypted_password, &current_keys.entry_key, &entry.id, "password")?;
+            entry.encrypted_password = Self::encrypt_entry_field(&pw_bytes, &new_keys.entry_key, &entry.id, "password")?;
 
             if let Some(ref totp) = entry.encrypted_totp_secret {
-                let totp_bytes = crate::crypto::decrypt_entry(totp, &current_keys.entry_key)?;
+                let totp_bytes = Self::decrypt_entry_field(totp, &current_keys.entry_key, &entry.id, "totp")?;
                 entry.encrypted_totp_secret = Some(
-                    crate::crypto::encrypt_entry(&totp_bytes, &new_keys.entry_key)?
+                    Self::encrypt_entry_field(&totp_bytes, &new_keys.entry_key, &entry.id, "totp")?
+                );
+            }
+
+            if let Some(ref passkey) = entry.encrypted_passkey {
+                let passkey_bytes = Self::decrypt_entry_field(passkey, &current_keys.entry_key, &entry.id, "passkey")?;
+                entry.encrypted_passkey = Some(
+                    Self::encrypt_entry_field(&passkey_bytes, &new_keys.entry_key, &entry.id, "passkey")?
                 );
             }
 
             // Re-encrypt password history
             for hist in &mut entry.password_history {
-                let hist_bytes = crate::crypto::decrypt_entry(&hist.encrypted_password, &current_keys.entry_key)?;
-                hist.encrypted_password = crate::crypto::encrypt_entry(&hist_bytes, &new_keys.entry_key)?;
+                let hist_bytes = Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "password")?;
+                hist.encrypted_password = Self::encrypt_entry_field(&hist_bytes, &new_keys.entry_key, &entry.id, "password")?;
             }
         }
 
         // Re-encrypt every trashed entry's password and TOTP with new keys
         for trashed in &mut self.data.trash {
             let entry = &mut trashed.entry;
+
             // Decrypt with old key, re-encrypt with new key
-            let pw_bytes = crate::crypto::decrypt_entry(&entry.encrypted_password, &current_keys.entry_key)?;
-            entry.encrypted_password = crate::crypto::encrypt_entry(&pw_bytes, &new_keys.entry_key)?;
+            let pw_bytes = Self::decrypt_entry_field(&entry.encrypted_password, &current_keys.entry_key, &entry.id, "password")?;
+            entry.encrypted_password = Self::encrypt_entry_field(&pw_bytes, &new_keys.entry_key, &entry.id, "password")?;
 
             if let Some(ref totp) = entry.encrypted_totp_secret {
-                let totp_bytes = crate::crypto::decrypt_entry(totp, &current_keys.entry_key)?;
+                let totp_bytes = Self::decrypt_entry_field(totp, &current_keys.entry_key, &entry.id, "totp")?;
                 entry.encrypted_totp_secret = Some(
-                    crate::crypto::encrypt_entry(&totp_bytes, &new_keys.entry_key)?
+                    Self::encrypt_entry_field(&totp_bytes, &new_keys.entry_key, &entry.id, "totp")?
+                );
+            }
+
+            if let Some(ref passkey) = entry.encrypted_passkey {
+                let passkey_bytes = Self::decrypt_entry_field(passkey, &current_keys.entry_key, &entry.id, "passkey")?;
+                entry.encrypted_passkey = Some(
+                    Self::encrypt_entry_field(&passkey_bytes, &new_keys.entry_key, &entry.id, "passkey")?
                 );
             }
 
             // Re-encrypt password history
             for hist in &mut entry.password_history {
-                let hist_bytes = crate::crypto::decrypt_entry(&hist.encrypted_password, &current_keys.entry_key)?;
-                hist.encrypted_password = crate::crypto::encrypt_entry(&hist_bytes, &new_keys.entry_key)?;
+                let hist_bytes = Self::decrypt_entry_field(&hist.encrypted_password, &current_keys.entry_key, &entry.id, "password")?;
+                hist.encrypted_password = Self::encrypt_entry_field(&hist_bytes, &new_keys.entry_key, &entry.id, "password")?;
             }
         }
 
@@ -1130,6 +1194,37 @@ mod tests {
         let restored_history = reopened_mut.get_password_history(id1).unwrap();
         assert_eq!(restored_history.len(), 1);
         assert_eq!(restored_history[0].password, "passwordA-1");
+    }
+
+    #[test]
+    fn test_truncated_payload_returns_error() {
+        let test_vault = TestVault::new();
+        let password = "test-password";
+        let manager = VaultManager::create("test-vault", password, &test_vault.path).unwrap();
+        drop(manager);
+
+        // Read vault bytes, corrupt payload length to < 24 bytes
+        let header = FileHeader {
+            version: FORMAT_VERSION,
+            flags: 0,
+            salt: [1u8; 32],
+            kdf_params: KdfParams::default(),
+        };
+        let file = VaultFile {
+            header,
+            hmac: [0u8; 64],
+            encrypted_payload: vec![1, 2, 3], // Payload < 24 bytes
+        };
+        let corrupted_bytes = file.to_bytes().unwrap();
+        fs::write(&test_vault.path, &corrupted_bytes).unwrap();
+
+        let result = VaultManager::open(&test_vault.path, password);
+        assert!(result.is_err());
+        match result {
+            Err(VaultError::IntegrityError) | Err(VaultError::InvalidFormat(_)) => {},
+            Err(e) => panic!("Expected IntegrityError or InvalidFormat, got err {:?}", e),
+            Ok(_) => panic!("Expected error on truncated payload, got Ok"),
+        }
     }
 }
 

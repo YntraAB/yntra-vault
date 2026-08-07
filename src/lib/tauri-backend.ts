@@ -260,11 +260,6 @@ export class TauriBackend implements YntraVaultBackend {
   async getVaultPath(): Promise<string> {
     return invoke('get_vault_path');
   }
-
-  // Browser Extension
-  async installBrowserExtension(): Promise<string> {
-    return invoke('install_browser_extension');
-  }
 }
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────

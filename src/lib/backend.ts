@@ -282,9 +282,6 @@ export interface YntraVaultBackend {
   // Export
   exportVault(destPath: string): Promise<void>;
   getVaultPath(): Promise<string>;
-
-  // Browser Extension
-  installBrowserExtension(): Promise<string>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────

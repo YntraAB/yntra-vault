@@ -15,7 +15,7 @@ argon2 = { version = "0.5", features = ["std"] }
 
 # Encryption - Multi-layer
 chacha20poly1305 = "0.10"   # XChaCha20-Poly1305 AEAD (Layer 1 - vault)
-aes-gcm = "0.10"            # AES-256-GCM AEAD (Layer 2 - per-entry)
+aes-gcm = "0.10"            # AES-256-GCM AEAD (Legacy per-entry fallback)
 
 # Key derivation
 hkdf = "0.12"
@@ -72,10 +72,15 @@ libc = "0.2"
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
 
-[[bin]]
-name = "yntra-vault-native-host"
-path = "src/bin/yntra-vault-native-host.rs"
+[[bench]]
+name = "benchmarks"
+harness = false
+
+
+
+
 
 [features]
 default = []

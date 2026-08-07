@@ -23,8 +23,8 @@ impl VaultManager {
 
         let mut history = Vec::new();
         for item in &entry.password_history {
-            let pw_bytes = crate::crypto::decrypt_entry(&item.encrypted_password, &keys.entry_key)?;
-            let password = String::from_utf8(pw_bytes)
+            let pw_bytes = VaultManager::decrypt_entry_field(&item.encrypted_password, &keys.entry_key, &entry_id, "password")?;
+            let password = String::from_utf8(pw_bytes.to_vec())
                 .map_err(|e| VaultError::DecryptionError(format!("History password: {}", e)))?;
             history.push(DecryptedHistoryItem {
                 password,

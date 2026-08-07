@@ -95,8 +95,6 @@ pub fn run() {
             // Export
             commands::export_vault,
             commands::get_vault_path,
-            // Browser Extension
-            commands::install_browser_extension,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};

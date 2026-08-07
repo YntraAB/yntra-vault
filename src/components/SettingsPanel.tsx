@@ -702,27 +702,6 @@ export default function SettingsPanel() {
                       Export Vault File...
                     </button>
                   </SettingSection>
-
-                  {/* Browser Extension */}
-                  <SettingSection label="Browser Extension">
-                    <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Register the native messaging host so the Yntra Vault browser extension can communicate with the desktop app.
-                    </p>
-                    <button
-                      onClick={async () => {
-                        if (!backend) return;
-                        try {
-                          const result = await backend.installBrowserExtension();
-                          addToast({ message: result, type: 'success' });
-                        } catch (err) {
-                          addToast({ message: `Setup failed: ${err}`, type: 'error' });
-                        }
-                      }}
-                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-                    >
-                      Install Browser Integration
-                    </button>
-                  </SettingSection>
                 </div>
               )}
 
