@@ -517,7 +517,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
               {/* Reorderable Fields list */}
               <Reorder.Group axis="y" values={fieldsOrder} onReorder={setFieldsOrder} className="flex flex-col gap-3">
                 {fieldsOrder.map((id) => {
-                  const isStandard = ['username', 'password', 'email', 'url', 'notes', 'totpSecret'].includes(id);
+                  const isStandard = ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey'].includes(id);
                   let icon = <FileText size={13} />;
                   let label = 'Custom Field';
                   let content = null;

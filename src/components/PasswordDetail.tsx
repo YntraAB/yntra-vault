@@ -903,12 +903,10 @@ export default function PasswordDetail() {
                   {!isEditing && (
                     <button
                       onClick={async () => {
-                        if (!backend || !selectedEntry) return;
+                        if (!selectedEntry) return;
                         if (!window.confirm('Remove the passkey from this entry?')) return;
                         try {
-                          await backend.updateEntry(selectedEntry.id, { passkey_action: 'remove' } as any);
-                          await refreshEntries();
-                          await selectEntryById(selectedEntry.id);
+                          await updateEntry({ ...selectedEntry, passkeyAction: 'remove' });
                           addToast({ message: 'Passkey removed', type: 'success' });
                         } catch (err) {
                           addToast({ message: `Failed to remove passkey: ${err}`, type: 'error' });
