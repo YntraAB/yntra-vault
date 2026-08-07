@@ -153,6 +153,7 @@ export const ar = {
   'settings.title': 'الإعدادات',
   'settings.tab_general': 'عام',
   'settings.tab_appearance': 'المظهر',
+  'settings.tab_keybinds': 'الاختصارات',
   'settings.tab_security': 'الأمان',
   'settings.tab_backup': 'النسخ الاحتياطي',
   'settings.tab_trash': 'سلة المهملات',

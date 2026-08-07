@@ -153,6 +153,7 @@ export const no = {
   'settings.title': 'Innstillinger',
   'settings.tab_general': 'Generelt',
   'settings.tab_appearance': 'Utseende',
+  'settings.tab_keybinds': 'Snarveier',
   'settings.tab_security': 'Sikkerhet',
   'settings.tab_backup': 'Sikkerhetskopi',
   'settings.tab_trash': 'Papirkurv',

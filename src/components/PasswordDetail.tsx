@@ -33,12 +33,28 @@ import { formatDate, getFieldLayout, openExternalUrl } from '@/lib/utils';
 import type { Tag } from '@/types';
 import { Skeleton } from './ui/skeleton';
 import { ActionTooltip } from './ui/tooltip';
-
-
+import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
 
 export default function PasswordDetail() {
   const { t } = useTranslation();
-  const { selectedEntry, setIsEditing, isEditing, deleteEntry, updateEntry, tags, togglePin, toggleFavorite, isLoadingDetail, addToast, settings, refreshEntries, selectEntryById, setFilterCategory } = useAppState();
+  const {
+    selectedEntry,
+    setIsEditing,
+    isEditing,
+    deleteEntry,
+    updateEntry,
+    tags,
+    togglePin,
+    toggleFavorite,
+    isLoadingDetail,
+    addToast,
+    settings,
+    settingsOpen,
+    isEntryModalOpen,
+    refreshEntries,
+    selectEntryById,
+    setFilterCategory,
+  } = useAppState();
   const { backend } = useBackend();
   const [editData, setEditData] = useState(selectedEntry);
   const [showDelConfirm, setShowDelConfirm] = useState(false);
@@ -50,6 +66,153 @@ export default function PasswordDetail() {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [warningTimer, setWarningTimer] = useState(0);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  const runSmartLoginAction = useCallback(async () => {
+    if (!backend || !selectedEntry) return;
+    addToast({
+      message: 'Smart Login active! Focus a username or password input in your browser.',
+      type: 'info'
+    });
+    try {
+      await backend.runSmartAutotype(
+        selectedEntry.username,
+        selectedEntry.password,
+        selectedEntry.totpSecret || '',
+        selectedEntry.url || '',
+        settings.autotypeLaunchBrowser !== false,
+        settings.autotypeCharDelayMs || 15,
+        settings.autotypeFieldDelayMs || 300
+      );
+    } catch (err) {
+      addToast({ message: `Smart Login failed: ${err}`, type: 'error' });
+    }
+  }, [backend, selectedEntry, settings.autotypeLaunchBrowser, settings.autotypeCharDelayMs, settings.autotypeFieldDelayMs, addToast]);
+
+  // Keyboard shortcuts to copy entry details (Password, Username, URL, TOTP) using single configured keybinds
+  useEffect(() => {
+    if (!selectedEntry || isEditing) return;
+
+    const handleCopyShortcuts = async (e: KeyboardEvent) => {
+      if (settingsOpen || isEntryModalOpen || showDelConfirm || showWarningModal || showEditModal) {
+        return;
+      }
+
+      const hasOpenDialog = Boolean(
+        document.querySelector('[role="dialog"], [aria-modal="true"], dialog[open], .fixed.inset-0')
+      );
+      if (hasOpenDialog) return;
+
+      const kb = getKeybinds(settings.keybinds);
+      const selection = window.getSelection()?.toString() || '';
+      const hasSelection = selection.length > 0;
+      const isInputFocused =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement ||
+        document.activeElement?.getAttribute('contenteditable') === 'true';
+
+      // 1. Copy Password
+      if (matchesShortcut(e, kb.copyPassword)) {
+        if (!hasSelection && !isInputFocused && selectedEntry.password) {
+          e.preventDefault();
+          e.stopPropagation();
+          navigator.clipboard.writeText(selectedEntry.password).catch(() => {});
+          addToast({ message: 'Password copied to clipboard', type: 'info' });
+        }
+        return;
+      }
+
+      // 2. Copy Username
+      if (matchesShortcut(e, kb.copyUsername)) {
+        if (selectedEntry.username) {
+          e.preventDefault();
+          e.stopPropagation();
+          navigator.clipboard.writeText(selectedEntry.username).catch(() => {});
+          addToast({ message: 'Username copied to clipboard', type: 'info' });
+        }
+        return;
+      }
+
+      // 3. Copy Website URL
+      if (matchesShortcut(e, kb.copyUrl)) {
+        if (selectedEntry.url) {
+          e.preventDefault();
+          e.stopPropagation();
+          navigator.clipboard.writeText(selectedEntry.url).catch(() => {});
+          addToast({ message: 'Website URL copied to clipboard', type: 'info' });
+        }
+        return;
+      }
+
+      // 4. Copy TOTP / 2FA Code
+      if (matchesShortcut(e, kb.copyTotp)) {
+        if (selectedEntry.totpSecret) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (backend) {
+            try {
+              const totpRes = await backend.generateTotp(selectedEntry.totpSecret);
+              if (totpRes && totpRes.code) {
+                await navigator.clipboard.writeText(totpRes.code);
+                addToast({ message: `TOTP code (${totpRes.code}) copied to clipboard`, type: 'info' });
+              }
+            } catch {
+              addToast({ message: 'Failed to generate TOTP code', type: 'error' });
+            }
+          }
+        }
+        return;
+      }
+
+      // 5. Edit Entry
+      if (matchesShortcut(e, kb.editEntry)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowEditModal(true);
+        return;
+      }
+
+      // 6. Delete Entry
+      if (matchesShortcut(e, kb.deleteEntry)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowDelConfirm(true);
+        return;
+      }
+
+      // 7. Open Website URL in Browser
+      if (matchesShortcut(e, kb.openUrl)) {
+        if (selectedEntry.url) {
+          e.preventDefault();
+          e.stopPropagation();
+          openExternalUrl(selectedEntry.url);
+        }
+        return;
+      }
+
+      // 8. Smart Login / Autotype
+      if (matchesShortcut(e, kb.autotype)) {
+        e.preventDefault();
+        e.stopPropagation();
+        runSmartLoginAction();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleCopyShortcuts, true);
+    return () => window.removeEventListener('keydown', handleCopyShortcuts, true);
+  }, [
+    selectedEntry,
+    isEditing,
+    settings.keybinds,
+    settingsOpen,
+    isEntryModalOpen,
+    showDelConfirm,
+    showWarningModal,
+    showEditModal,
+    addToast,
+    backend,
+    runSmartLoginAction,
+  ]);
 
   useEffect(() => {
     let intervalId: any = null;
@@ -102,26 +265,7 @@ export default function PasswordDetail() {
     }
   }, [editData, setIsEditing, updateEntry]);
 
-  const runSmartLoginAction = useCallback(async () => {
-    if (!backend || !selectedEntry) return;
-    addToast({
-      message: 'Smart Login active! Focus a username or password input in your browser.',
-      type: 'info'
-    });
-    try {
-      await backend.runSmartAutotype(
-        selectedEntry.username,
-        selectedEntry.password,
-        selectedEntry.totpSecret || '',
-        selectedEntry.url || '',
-        settings.autotypeLaunchBrowser !== false,
-        settings.autotypeCharDelayMs || 15,
-        settings.autotypeFieldDelayMs || 300
-      );
-    } catch (err) {
-      addToast({ message: `Smart Login failed: ${err}`, type: 'error' });
-    }
-  }, [backend, selectedEntry, settings.autotypeLaunchBrowser, settings.autotypeCharDelayMs, settings.autotypeFieldDelayMs, addToast]);
+
 
   const handleSmartLoginClick = useCallback(() => {
     const skipWarning = localStorage.getItem('yntra-vault-skip-smart-login-warning') === 'true';

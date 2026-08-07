@@ -13,6 +13,8 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Skeleton } from './ui/skeleton';
 import { ActionTooltip } from './ui/tooltip';
 
+import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
+
 interface PasswordListProps {
   onResizeStart: (e: React.MouseEvent) => void;
 }
@@ -36,6 +38,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
     selectEntryById,
     isLoadingEntries,
     settings,
+    settingsOpen,
     isEntryModalOpen,
     setIsEntryModalOpen,
     deleteEntry,
@@ -56,6 +59,38 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
 
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input on configured keybind (default: Ctrl+K) unless in a dialog or settings
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const kb = getKeybinds(settings.keybinds);
+
+      if (matchesShortcut(e, kb.search)) {
+        if (settingsOpen || isEntryModalOpen || deleteConfirmEntry) {
+          return;
+        }
+
+        const hasOpenDialog = Boolean(
+          document.querySelector('[role="dialog"], [aria-modal="true"], dialog[open], .fixed.inset-0')
+        );
+
+        if (hasOpenDialog) {
+          return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+        if (searchInputRef.current) {
+          searchInputRef.current.focus();
+          searchInputRef.current.select();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [settings.keybinds, settingsOpen, isEntryModalOpen, deleteConfirmEntry]);
 
   // Auto-focus and focus trap for delete confirmation dialog
   useEffect(() => {
@@ -181,6 +216,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
         <div className="flex h-8 items-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 transition-colors focus-within:border-[var(--border-focus)]">
           <Search size={14} className="shrink-0 text-[var(--text-tertiary)]" />
           <input
+            ref={searchInputRef}
             type="text"
             placeholder={t('app.search_placeholder')}
             value={searchTerm}

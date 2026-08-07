@@ -153,6 +153,7 @@ export const en = {
   'settings.title': 'Settings',
   'settings.tab_general': 'General',
   'settings.tab_appearance': 'Appearance',
+  'settings.tab_keybinds': 'Shortcuts',
   'settings.tab_security': 'Security',
   'settings.tab_backup': 'Backup',
   'settings.tab_trash': 'Trash',

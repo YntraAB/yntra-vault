@@ -153,6 +153,7 @@ export const hi = {
   'settings.title': 'सेटिंग्स',
   'settings.tab_general': 'सामान्य',
   'settings.tab_appearance': 'दिखावट',
+  'settings.tab_keybinds': 'शॉर्टकट्स',
   'settings.tab_security': 'सुरक्षा',
   'settings.tab_backup': 'बैकअप',
   'settings.tab_trash': 'ट्रैश',

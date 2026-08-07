@@ -153,6 +153,7 @@ export const fi = {
   'settings.title': 'Asetukset',
   'settings.tab_general': 'Yleiset',
   'settings.tab_appearance': 'Ulkoasu',
+  'settings.tab_keybinds': 'Pikanäppäimet',
   'settings.tab_security': 'Turvallisuus',
   'settings.tab_backup': 'Varmuuskopio',
   'settings.tab_trash': 'Roskakori',

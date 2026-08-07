@@ -153,6 +153,7 @@ export const ja = {
   'settings.title': '設定',
   'settings.tab_general': '一般',
   'settings.tab_appearance': '外観',
+  'settings.tab_keybinds': 'ショートカット',
   'settings.tab_security': 'セキュリティ',
   'settings.tab_backup': 'バックアップ',
   'settings.tab_trash': 'ゴミ箱',

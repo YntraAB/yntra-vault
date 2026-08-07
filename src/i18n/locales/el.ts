@@ -153,6 +153,7 @@ export const el = {
   'settings.title': 'Ρυθμίσεις',
   'settings.tab_general': 'Γενικά',
   'settings.tab_appearance': 'Εμφάνιση',
+  'settings.tab_keybinds': 'Συντομεύσεις',
   'settings.tab_security': 'Ασφάλεια',
   'settings.tab_backup': 'Αντίγραφο ασφαλείας',
   'settings.tab_trash': 'Κάδος απορριμμάτων',

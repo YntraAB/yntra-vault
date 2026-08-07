@@ -153,6 +153,7 @@ export const tr = {
   'settings.title': 'Ayarlar',
   'settings.tab_general': 'Genel',
   'settings.tab_appearance': 'Görünüm',
+  'settings.tab_keybinds': 'Kısayollar',
   'settings.tab_security': 'Güvenlik',
   'settings.tab_backup': 'Yedekleme',
   'settings.tab_trash': 'Çöp Kutusu',

@@ -153,6 +153,7 @@ export const cs = {
   'settings.title': 'Nastavení',
   'settings.tab_general': 'Obecné',
   'settings.tab_appearance': 'Vzhled',
+  'settings.tab_keybinds': 'Zkratky',
   'settings.tab_security': 'Zabezpečení',
   'settings.tab_backup': 'Záloha',
   'settings.tab_trash': 'Koš',

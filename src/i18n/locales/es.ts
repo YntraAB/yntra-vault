@@ -153,6 +153,7 @@ export const es = {
   'settings.title': 'Ajustes',
   'settings.tab_general': 'General',
   'settings.tab_appearance': 'Apariencia',
+  'settings.tab_keybinds': 'Atajos',
   'settings.tab_security': 'Seguridad',
   'settings.tab_backup': 'Respaldo',
   'settings.tab_trash': 'Papelera',

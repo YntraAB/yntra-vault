@@ -153,6 +153,7 @@ export const da = {
   'settings.title': 'Indstillinger',
   'settings.tab_general': 'Generelt',
   'settings.tab_appearance': 'Udseende',
+  'settings.tab_keybinds': 'Genveje',
   'settings.tab_security': 'Sikkerhed',
   'settings.tab_backup': 'Sikkerhedskopi',
   'settings.tab_trash': 'Papirkurv',

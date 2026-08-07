@@ -153,6 +153,7 @@ export const nl = {
   'settings.title': 'Instellingen',
   'settings.tab_general': 'Algemeen',
   'settings.tab_appearance': 'Uiterlijk',
+  'settings.tab_keybinds': 'Snelkoppelingen',
   'settings.tab_security': 'Beveiliging',
   'settings.tab_backup': 'Back-up',
   'settings.tab_trash': 'Prullenbak',

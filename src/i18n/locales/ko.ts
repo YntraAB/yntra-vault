@@ -153,6 +153,7 @@ export const ko = {
   'settings.title': '설정',
   'settings.tab_general': '일반',
   'settings.tab_appearance': '모양',
+  'settings.tab_keybinds': '단축키',
   'settings.tab_security': '보안',
   'settings.tab_backup': '백업',
   'settings.tab_trash': '휴지통',

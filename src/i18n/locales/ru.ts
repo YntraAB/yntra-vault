@@ -153,6 +153,7 @@ export const ru = {
   'settings.title': 'Настройки',
   'settings.tab_general': 'Общие',
   'settings.tab_appearance': 'Внешний вид',
+  'settings.tab_keybinds': 'Комбинации клавиш',
   'settings.tab_security': 'Безопасность',
   'settings.tab_backup': 'Резервное копирование',
   'settings.tab_trash': 'Корзина',

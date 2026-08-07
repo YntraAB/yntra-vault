@@ -153,6 +153,7 @@ export const uk = {
   'settings.title': 'Налаштування',
   'settings.tab_general': 'Загальні',
   'settings.tab_appearance': 'Зовнішній вигляд',
+  'settings.tab_keybinds': 'Комбінації клавіш',
   'settings.tab_security': 'Безпека',
   'settings.tab_backup': 'Резервне копіювання',
   'settings.tab_trash': 'Кошик',

@@ -8,10 +8,49 @@ import SettingsPanel from '@/components/SettingsPanel';
 import ToastContainer from '@/components/ToastContainer';
 import { isTauri } from '@/lib/backend';
 
+import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
+
 export default function AppLayout() {
   const navigate = useNavigate();
-  const { currentVault, isLocked, setIsLocked, settings } = useAppState();
+  const { currentVault, isLocked, setIsLocked, settings, settingsOpen, isEntryModalOpen, setIsEntryModalOpen, addToast } = useAppState();
   const autoLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Global Keybinds (Lock Vault, New Entry)
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const kb = getKeybinds(settings.keybinds);
+
+      // Lock Vault
+      if (matchesShortcut(e, kb.lockVault)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsLocked(true);
+        addToast({ message: 'Vault locked', type: 'info' });
+        navigate('/login');
+        return;
+      }
+
+      if (settingsOpen) return;
+
+      const hasOpenDialog = Boolean(
+        document.querySelector('[role="dialog"], [aria-modal="true"], dialog[open], .fixed.inset-0')
+      );
+      if (hasOpenDialog && !isEntryModalOpen) return;
+
+      // New Entry
+      if (matchesShortcut(e, kb.newEntry)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isEntryModalOpen) {
+          setIsEntryModalOpen(true);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalShortcuts, true);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts, true);
+  }, [settings.keybinds, settingsOpen, isEntryModalOpen, setIsEntryModalOpen, setIsLocked, navigate, addToast]);
 
   // Redirect if not authenticated or not in Tauri desktop mode
   useEffect(() => {

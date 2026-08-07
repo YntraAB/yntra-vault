@@ -153,6 +153,7 @@ export const pt = {
   'settings.title': 'Configurações',
   'settings.tab_general': 'Geral',
   'settings.tab_appearance': 'Aparência',
+  'settings.tab_keybinds': 'Atalhos',
   'settings.tab_security': 'Segurança',
   'settings.tab_backup': 'Backup',
   'settings.tab_trash': 'Lixeira',

@@ -55,6 +55,28 @@ export interface Vault {
   path: string;
 }
 
+export interface KeybindShortcut {
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+  key: string;
+}
+
+export interface KeybindsConfig {
+  search: KeybindShortcut;
+  newEntry: KeybindShortcut;
+  lockVault: KeybindShortcut;
+  copyPassword: KeybindShortcut;
+  copyUsername: KeybindShortcut;
+  copyUrl: KeybindShortcut;
+  copyTotp: KeybindShortcut;
+  editEntry: KeybindShortcut;
+  deleteEntry: KeybindShortcut;
+  openUrl: KeybindShortcut;
+  autotype: KeybindShortcut;
+}
+
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system';
   language: string;
@@ -73,6 +95,7 @@ export interface AppSettings {
   autotypeFieldDelayMs: number;
   autotypeSettleDelayMs: number;
   autotypeLaunchBrowser: boolean;
+  keybinds?: KeybindsConfig;
 }
 
 export interface TOTPState {

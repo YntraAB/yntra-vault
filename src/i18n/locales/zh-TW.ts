@@ -153,6 +153,7 @@ export const zhTW = {
   'settings.title': '設定',
   'settings.tab_general': '一般',
   'settings.tab_appearance': '外觀',
+  'settings.tab_keybinds': '快捷鍵',
   'settings.tab_security': '安全',
   'settings.tab_backup': '備份',
   'settings.tab_trash': '垃圾桶',

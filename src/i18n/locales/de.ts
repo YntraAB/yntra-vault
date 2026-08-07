@@ -153,6 +153,7 @@ export const de = {
   'settings.title': 'Einstellungen',
   'settings.tab_general': 'Allgemein',
   'settings.tab_appearance': 'Erscheinungsbild',
+  'settings.tab_keybinds': 'Tastenkürzel',
   'settings.tab_security': 'Sicherheit',
   'settings.tab_backup': 'Sicherung',
   'settings.tab_trash': 'Papierkorb',

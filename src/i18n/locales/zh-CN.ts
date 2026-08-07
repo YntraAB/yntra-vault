@@ -153,6 +153,7 @@ export const zhCN = {
   'settings.title': '设置',
   'settings.tab_general': '通用',
   'settings.tab_appearance': '外观',
+  'settings.tab_keybinds': '快捷键',
   'settings.tab_security': '安全',
   'settings.tab_backup': '备份',
   'settings.tab_trash': '回收站',

@@ -153,6 +153,7 @@ export const fr = {
   'settings.title': 'Paramètres',
   'settings.tab_general': 'Général',
   'settings.tab_appearance': 'Apparence',
+  'settings.tab_keybinds': 'Raccourcis',
   'settings.tab_security': 'Sécurité',
   'settings.tab_backup': 'Sauvegarde',
   'settings.tab_trash': 'Corbeille',

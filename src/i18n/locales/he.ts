@@ -153,6 +153,7 @@ export const he = {
   'settings.title': 'הגדרות',
   'settings.tab_general': 'כללי',
   'settings.tab_appearance': 'מראה',
+  'settings.tab_keybinds': 'קיצורי דרך',
   'settings.tab_security': 'אבטחה',
   'settings.tab_backup': 'גיבוי',
   'settings.tab_trash': 'סל מחזור',

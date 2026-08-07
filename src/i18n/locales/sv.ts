@@ -153,6 +153,7 @@ export const sv = {
   'settings.title': 'Inställningar',
   'settings.tab_general': 'Allmänt',
   'settings.tab_appearance': 'Utseende',
+  'settings.tab_keybinds': 'Genvägar',
   'settings.tab_security': 'Säkerhet',
   'settings.tab_backup': 'Säkerhetskopia',
   'settings.tab_trash': 'Papperskorg',

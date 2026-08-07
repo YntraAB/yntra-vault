@@ -4,6 +4,8 @@ import { isTauri, getBackend, type YntraVaultBackend, type EntryPreview, type De
 
 
 
+import { DEFAULT_KEYBINDS } from '@/lib/keybinds';
+
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
   language: 'en',
@@ -22,6 +24,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autotypeFieldDelayMs: 300,
   autotypeSettleDelayMs: 3000,
   autotypeLaunchBrowser: true,
+  keybinds: DEFAULT_KEYBINDS,
 };
 
 // ─── Conversion helpers (Rust types ↔ frontend types) ───────────────────
@@ -151,7 +154,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     try {
       const saved = localStorage.getItem('yntra-vault-settings');
       if (saved) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          keybinds: {
+            ...DEFAULT_KEYBINDS,
+            ...(parsed.keybinds || {}),
+          },
+        };
       }
     } catch (e) {
       console.warn('Failed to load settings from localStorage:', e);

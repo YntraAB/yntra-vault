@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Monitor, Palette, Shield, Database, Trash2 } from 'lucide-react';
+import { X, Monitor, Palette, Keyboard, Shield, Database, Trash2 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import ChangeMasterPasswordModal from './ChangeMasterPasswordModal';
@@ -12,15 +12,17 @@ import { ActionTooltip } from './ui/tooltip';
 
 import { GeneralTab } from './settings/GeneralTab';
 import { AppearanceTab } from './settings/AppearanceTab';
+import { KeybindsTab } from './settings/KeybindsTab';
 import { SecurityTab } from './settings/SecurityTab';
 import { BackupTab } from './settings/BackupTab';
 import { TrashTab } from './settings/TrashTab';
 
-type Tab = 'general' | 'appearance' | 'security' | 'backup' | 'trash';
+type Tab = 'general' | 'appearance' | 'keybinds' | 'security' | 'backup' | 'trash';
 
 const TABS: { id: Tab; labelKey: string; icon: React.ReactNode }[] = [
   { id: 'general', labelKey: 'settings.tab_general', icon: <Monitor size={14} /> },
   { id: 'appearance', labelKey: 'settings.tab_appearance', icon: <Palette size={14} /> },
+  { id: 'keybinds', labelKey: 'settings.tab_keybinds', icon: <Keyboard size={14} /> },
   { id: 'security', labelKey: 'settings.tab_security', icon: <Shield size={14} /> },
   { id: 'backup', labelKey: 'settings.tab_backup', icon: <Database size={14} /> },
   { id: 'trash', labelKey: 'settings.tab_trash', icon: <Trash2 size={14} /> },
@@ -230,6 +232,10 @@ export default function SettingsPanel() {
 
               {activeTab === 'appearance' && (
                 <AppearanceTab />
+              )}
+
+              {activeTab === 'keybinds' && (
+                <KeybindsTab />
               )}
 
               {activeTab === 'security' && (
