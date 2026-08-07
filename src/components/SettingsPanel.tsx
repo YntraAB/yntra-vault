@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Monitor, Sun, Moon, Palette, Database, Shield, Trash2, RotateCcw, Trash } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useTranslation } from '@/contexts/LanguageContext';
+import { LanguageCombobox } from './ui/LanguageCombobox';
 import { SecurityDashboard } from './SecurityDashboard';
 import ChangeMasterPasswordModal from './ChangeMasterPasswordModal';
 import { useBackend } from '@/lib/useBackend';
@@ -11,33 +13,34 @@ import { ActionTooltip } from './ui/tooltip';
 
 type Tab = 'general' | 'appearance' | 'security' | 'backup' | 'trash';
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'general', label: 'General', icon: <Monitor size={14} /> },
-  { id: 'appearance', label: 'Appearance', icon: <Palette size={14} /> },
-  { id: 'security', label: 'Security', icon: <Shield size={14} /> },
-  { id: 'backup', label: 'Backup', icon: <Database size={14} /> },
-  { id: 'trash', label: 'Trash', icon: <Trash2 size={14} /> },
+const TABS: { id: Tab; labelKey: string; icon: React.ReactNode }[] = [
+  { id: 'general', labelKey: 'settings.tab_general', icon: <Monitor size={14} /> },
+  { id: 'appearance', labelKey: 'settings.tab_appearance', icon: <Palette size={14} /> },
+  { id: 'security', labelKey: 'settings.tab_security', icon: <Shield size={14} /> },
+  { id: 'backup', labelKey: 'settings.tab_backup', icon: <Database size={14} /> },
+  { id: 'trash', labelKey: 'settings.tab_trash', icon: <Trash2 size={14} /> },
 ];
 
 const AUTO_LOCK_OPTIONS = [
-  { value: 1, label: '1 minute' },
-  { value: 5, label: '5 minutes' },
-  { value: 15, label: '15 minutes' },
-  { value: 30, label: '30 minutes' },
-  { value: 0, label: 'Never' },
+  { value: 1, labelKey: 'time.1_min' },
+  { value: 5, labelKey: 'time.5_min' },
+  { value: 15, labelKey: 'time.15_min' },
+  { value: 30, labelKey: 'time.30_min' },
+  { value: 0, labelKey: 'time.never' },
 ];
 
 const CLIPBOARD_OPTIONS = [
-  { value: 10, label: '10 seconds' },
-  { value: 30, label: '30 seconds' },
-  { value: 60, label: '1 minute' },
-  { value: 300, label: '5 minutes' },
-  { value: 0, label: 'Never' },
+  { value: 10, labelKey: 'time.10_sec' },
+  { value: 30, labelKey: 'time.30_sec' },
+  { value: 60, labelKey: 'time.1_min' },
+  { value: 300, labelKey: 'time.5_min' },
+  { value: 0, labelKey: 'time.never' },
 ];
 
 export default function SettingsPanel() {
-  const { settingsOpen, setSettingsOpen, settings, updateSettings, refreshEntries, addToast, currentVault } = useAppState();
+  const { settingsOpen, setSettingsOpen, settings, updateSettings, refreshEntries, addToast, currentVault, setIsLocked, setCurrentVault } = useAppState();
   const { theme, setTheme } = useTheme();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [showChangePassword, setShowChangePassword] = useState(false);
 
@@ -60,6 +63,13 @@ export default function SettingsPanel() {
   const [reconstructedHash, setReconstructedHash] = useState('');
 
   const { backend } = useBackend();
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  const handleTabsWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (tabsRef.current && e.deltaY !== 0) {
+      tabsRef.current.scrollLeft += e.deltaY;
+    }
+  }, []);
   const [trashItems, setTrashItems] = useState<TrashedEntryPreview[]>([]);
   const [loadingTrash, setLoadingTrash] = useState(false);
 
@@ -166,29 +176,35 @@ export default function SettingsPanel() {
           >
             {/* Header */}
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4">
-              <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Settings</h2>
-              <button
-                onClick={() => setSettingsOpen(false)}
-                className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <X size={18} />
-              </button>
+              <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">{t('settings.title')}</h2>
+              <ActionTooltip content={t('common.close')} side="left">
+                <button
+                  onClick={() => setSettingsOpen(false)}
+                  className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <X size={18} />
+                </button>
+              </ActionTooltip>
             </div>
 
             {/* Tabs */}
-            <div className="flex h-10 shrink-0 items-center gap-0 border-b border-[var(--border-subtle)] px-4">
+            <div
+              ref={tabsRef}
+              onWheel={handleTabsWheel}
+              className="flex h-10 shrink-0 items-center gap-0 border-b border-[var(--border-subtle)] px-4 overflow-x-auto no-scrollbar"
+            >
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex h-full items-center gap-1.5 px-3 text-[12px] font-medium transition-colors ${
+                  className={`flex h-full shrink-0 items-center gap-1.5 px-3 text-[12px] font-medium whitespace-nowrap transition-colors ${
                     activeTab === tab.id
                       ? 'border-b-2 border-[var(--text-primary)] text-[var(--text-primary)]'
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                 >
                   {tab.icon}
-                  {tab.label}
+                  {t(tab.labelKey)}
                 </button>
               ))}
             </div>
@@ -204,14 +220,14 @@ export default function SettingsPanel() {
               {activeTab === 'general' && (
                 <div className="flex flex-col gap-6">
                   {currentVault && (
-                    <SettingSection label="Active Vault">
+                    <SettingSection label={t('settings.active_vault')}>
                       <div className="flex flex-col gap-2.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Vault Name</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.vault_name')}</span>
                           <span className="text-[13px] font-medium text-[var(--text-primary)]">{currentVault.name}</span>
                         </div>
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">File Location</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.file_location')}</span>
                           <span className="font-mono text-[11px] text-[var(--text-secondary)] break-all">{currentVault.path}</span>
                         </div>
                         {isTauri() && (
@@ -224,16 +240,23 @@ export default function SettingsPanel() {
                             }}
                             className="mt-1 h-7 self-start rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                           >
-                            Show in Explorer
+                            {t('settings.show_in_explorer')}
                           </button>
                         )}
                       </div>
                     </SettingSection>
                   )}
 
-                  <SettingSection label="Auto-Lock">
+                  <SettingSection label={t('settings.language_label')}>
+                    <p className="mb-2.5 text-[12px] text-[var(--text-secondary)]">
+                      {t('settings.language_desc')}
+                    </p>
+                    <LanguageCombobox />
+                  </SettingSection>
+
+                  <SettingSection label={t('settings.autolock_label')}>
                     <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
-                      Lock the vault after a period of inactivity
+                      {t('settings.autolock_desc')}
                     </p>
                     <select
                       value={settings.autoLockMinutes}
@@ -242,15 +265,15 @@ export default function SettingsPanel() {
                     >
                       {AUTO_LOCK_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>
-                          {o.label}
+                          {t(o.labelKey)}
                         </option>
                       ))}
                     </select>
                   </SettingSection>
 
-                  <SettingSection label="Clipboard">
+                  <SettingSection label={t('settings.clipboard_label')}>
                     <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
-                      Clear copied passwords from clipboard after
+                      {t('settings.clipboard_desc')}
                     </p>
                     <select
                       value={settings.clipboardClearSeconds}
@@ -261,17 +284,17 @@ export default function SettingsPanel() {
                     >
                       {CLIPBOARD_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>
-                          {o.label}
+                          {t(o.labelKey)}
                         </option>
                       ))}
                     </select>
                   </SettingSection>
 
-                  <SettingSection label="Autotype & Smart Login Delays">
+                  <SettingSection label={t('settings.autotype_title')}>
                     <div className="flex flex-col gap-4">
                       <div>
                         <div className="flex justify-between items-center mb-1">
-                          <span className="text-[12px] text-[var(--text-secondary)]">Character Delay (Typing Speed)</span>
+                          <span className="text-[12px] text-[var(--text-secondary)]">{t('settings.char_delay')}</span>
                           <span className="text-[11px] font-mono text-[var(--text-primary)]">{(settings.autotypeCharDelayMs ?? 15)} ms</span>
                         </div>
                         <input
@@ -286,7 +309,7 @@ export default function SettingsPanel() {
                       </div>
                       <div>
                         <div className="flex justify-between items-center mb-1">
-                          <span className="text-[12px] text-[var(--text-secondary)]">Field Transition Delay (Tab delay)</span>
+                          <span className="text-[12px] text-[var(--text-secondary)]">{t('settings.field_delay')}</span>
                           <span className="text-[11px] font-mono text-[var(--text-primary)]">{(settings.autotypeFieldDelayMs ?? 300)} ms</span>
                         </div>
                         <input
@@ -301,7 +324,7 @@ export default function SettingsPanel() {
                       </div>
                       <div>
                         <div className="flex justify-between items-center mb-1">
-                          <span className="text-[12px] text-[var(--text-secondary)]">Focus Settle Delay (Autotype)</span>
+                          <span className="text-[12px] text-[var(--text-secondary)]">{t('settings.settle_delay')}</span>
                           <span className="text-[11px] font-mono text-[var(--text-primary)]">{((settings.autotypeSettleDelayMs ?? 3000) / 1000).toFixed(1)} s</span>
                         </div>
                         <input
@@ -318,8 +341,8 @@ export default function SettingsPanel() {
                   </SettingSection>
 
                   <SettingRow
-                    label="Auto-open website on Smart Login"
-                    description="Launch default browser directly to the login page"
+                    label={t('settings.autotype_launch_browser')}
+                    description={t('settings.autotype_launch_browser_desc')}
                   >
                     <Toggle
                       checked={settings.autotypeLaunchBrowser !== false}
@@ -328,8 +351,8 @@ export default function SettingsPanel() {
                   </SettingRow>
 
                   <SettingRow
-                    label="Minimize to system tray"
-                    description="Keep running in background"
+                    label={t('settings.minimize_to_tray')}
+                    description={t('settings.minimize_to_tray_desc')}
                   >
                     <Toggle
                       checked={settings.minimizeToTray}
@@ -337,7 +360,7 @@ export default function SettingsPanel() {
                     />
                   </SettingRow>
 
-                  <SettingRow label="Start on system login">
+                  <SettingRow label={t('settings.autostart_label')} description={t('settings.autostart_desc')}>
                     <Toggle
                       checked={launchOnStartup}
                       onChange={handleToggleLaunch}
@@ -345,8 +368,8 @@ export default function SettingsPanel() {
                   </SettingRow>
 
                   <SettingRow
-                    label="Disable loading delay"
-                    description="Instantly render data without minimum skeleton display time"
+                    label={t('settings.disable_skeleton_delays')}
+                    description={t('settings.disable_skeleton_delays_desc')}
                   >
                     <Toggle
                       checked={settings.disableSkeletonDelays}
@@ -355,8 +378,8 @@ export default function SettingsPanel() {
                   </SettingRow>
 
                   <SettingRow
-                    label="Auto-check password breaches"
-                    description="Automatically verify password safety on the web check database"
+                    label={t('settings.breach_label')}
+                    description={t('settings.breach_desc')}
                   >
                     <Toggle
                       checked={settings.autoBreachCheck}
@@ -365,8 +388,8 @@ export default function SettingsPanel() {
                   </SettingRow>
 
                   <SettingRow
-                    label="Show breach alerts in list"
-                    description="Display warning badges next to compromised items in the sidebar list"
+                    label={t('settings.show_breach_in_list')}
+                    description={t('settings.show_breach_in_list_desc')}
                   >
                     <Toggle
                       checked={settings.showBreachInList}
@@ -378,12 +401,12 @@ export default function SettingsPanel() {
 
               {activeTab === 'appearance' && (
                 <div className="flex flex-col gap-6">
-                  <SettingSection label="Theme">
+                  <SettingSection label={t('settings.theme_label')}>
                     <div className="flex gap-2">
                       {([
-                        { value: 'light' as const, label: 'Light', icon: <Sun size={20} /> },
-                        { value: 'dark' as const, label: 'Dark', icon: <Moon size={20} /> },
-                        { value: 'system' as const, label: 'System', icon: <Monitor size={20} /> },
+                        { value: 'light' as const, label: t('settings.theme_light'), icon: <Sun size={20} /> },
+                        { value: 'dark' as const, label: t('settings.theme_dark'), icon: <Moon size={20} /> },
+                        { value: 'system' as const, label: t('settings.theme_system'), icon: <Monitor size={20} /> },
                       ]).map((t) => (
                         <button
                           key={t.value}
@@ -401,7 +424,7 @@ export default function SettingsPanel() {
                     </div>
                   </SettingSection>
 
-                  <SettingSection label="Font Size">
+                  <SettingSection label={t('settings.font_size')}>
                     <div className="flex items-center gap-4">
                       <input
                         type="range"
@@ -418,9 +441,9 @@ export default function SettingsPanel() {
                     </div>
                   </SettingSection>
 
-                  <SettingSection label="Density">
+                  <SettingSection label={t('settings.density')}>
                     <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
-                      Control the spacing between elements
+                      {t('settings.density_desc')}
                     </p>
                     <div className="flex rounded-[3px] border border-[var(--border)]">
                       {(['compact', 'normal', 'comfortable'] as const).map((d) => (
@@ -433,37 +456,51 @@ export default function SettingsPanel() {
                               : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                           }`}
                         >
-                          {d}
+                          {d === 'compact' ? t('settings.density_compact') : d === 'normal' ? t('settings.density_normal') : t('settings.density_comfortable')}
                         </button>
                       ))}
                     </div>
+                  </SettingSection>
+
+                  <SettingSection label={t('onboarding.rerun_setup')}>
+                    <button
+                      onClick={() => {
+                        localStorage.removeItem('yntra-vault-setup-completed');
+                        setIsLocked(true);
+                        setCurrentVault(null);
+                        window.location.href = '/#/setup';
+                      }}
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      {t('onboarding.rerun_setup')}
+                    </button>
                   </SettingSection>
                 </div>
               )}
 
               {activeTab === 'security' && (
                 <div className="flex flex-col gap-6">
-                  <SettingSection label="Master Password">
+                  <SettingSection label={t('settings.master_password')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Change your vault master password
+                      {t('security.master_password')}
                     </p>
                     <button
                       onClick={() => setShowChangePassword(true)}
                       className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                     >
-                      Change Password...
+                      {t('settings.change_password')}
                     </button>
                   </SettingSection>
 
-                  <SettingSection label="Emergency Recovery (Shamir's SSSS)">
+                  <SettingSection label={t('settings.emergency_recovery')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Generate 3 recovery shares (2-of-3 threshold). Any 2 shares can reconstruct your password hash.
+                      {t('settings.emergency_recovery_desc')}
                     </p>
                     <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
                       <div className="flex gap-2">
                         <input
                           type="password"
-                          placeholder="Verify Master Password"
+                          placeholder={t('settings.verify_master_placeholder')}
                           value={shamirPass}
                           onChange={(e) => setShamirPass(e.target.value)}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
@@ -481,13 +518,13 @@ export default function SettingsPanel() {
                           }}
                           className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Split
+                          {t('settings.split_button')}
                         </button>
                       </div>
 
                       {shares.length > 0 && (
                         <div className="flex flex-col gap-1.5 mt-2 border-t border-[var(--border-subtle)] pt-2.5">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Your Recovery Shares:</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.recovery_shares_label')}</span>
                           {shares.map((s, idx) => (
                             <div key={idx} className="flex items-center justify-between gap-2 rounded-[3px] bg-[var(--bg-base)] px-2 py-1">
                               <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">{s}</span>
@@ -498,7 +535,7 @@ export default function SettingsPanel() {
                                 }}
                                 className="text-[10px] font-medium text-[var(--text-primary)] hover:underline"
                               >
-                                Copy
+                                {t('common.copy')}
                               </button>
                             </div>
                           ))}
@@ -507,18 +544,18 @@ export default function SettingsPanel() {
                     </div>
 
                     <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 mt-3">
-                      <span className="text-[11px] font-medium text-[var(--text-primary)]">Reconstruct Password Hash</span>
+                      <span className="text-[11px] font-medium text-[var(--text-primary)]">{t('settings.reconstruct_hash')}</span>
                       <div className="flex flex-col gap-2">
                         <input
                           type="text"
-                          placeholder="Enter Share 1 (SL-SHARE...)"
+                          placeholder={t('settings.share1_placeholder')}
                           value={shareA}
                           onChange={(e) => setShareA(e.target.value)}
                           className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                         />
                         <input
                           type="text"
-                          placeholder="Enter Share 2 (SL-SHARE...)"
+                          placeholder={t('settings.share2_placeholder')}
                           value={shareB}
                           onChange={(e) => setShareB(e.target.value)}
                           className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
@@ -536,11 +573,11 @@ export default function SettingsPanel() {
                           }}
                           className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Reconstruct Hash
+                          {t('settings.reconstruct_hash')}
                         </button>
                         {reconstructedHash && (
                           <div className="flex flex-col gap-0.5 mt-1 bg-[var(--bg-base)] p-2 rounded-[3px]">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Reconstructed SHA-256 Hash</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.reconstructed_hash_label')}</span>
                             <span className="font-mono text-[10px] text-green-500 break-all select-all">{reconstructedHash}</span>
                           </div>
                         )}
@@ -548,7 +585,7 @@ export default function SettingsPanel() {
                     </div>
                   </SettingSection>
 
-                  <SettingSection label="Security Audit">
+                  <SettingSection label={t('security.title')}>
                     <SecurityDashboard />
                   </SettingSection>
                 </div>
@@ -557,9 +594,9 @@ export default function SettingsPanel() {
               {activeTab === 'backup' && (
                 <div className="flex flex-col gap-6">
                   {/* WebDAV Cloud Sync */}
-                  <SettingSection label="Cloud Sync (WebDAV)">
+                  <SettingSection label={t('settings.cloud_sync')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Synchronize your vault database with a remote WebDAV server.
+                      {t('settings.cloud_sync_desc')}
                     </p>
                     <div className="flex flex-col gap-2">
                       <input
@@ -572,14 +609,14 @@ export default function SettingsPanel() {
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          placeholder="Username"
+                          placeholder={t('detail.username')}
                           value={webdavUser}
                           onChange={(e) => setWebdavUser(e.target.value)}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                         />
                         <input
                           type="password"
-                          placeholder="Password"
+                          placeholder={t('detail.password')}
                           value={webdavPass}
                           onChange={(e) => setWebdavPass(e.target.value)}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
@@ -598,7 +635,7 @@ export default function SettingsPanel() {
                           }}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Upload Backup
+                          {t('settings.upload_backup')}
                         </button>
                         <button
                           onClick={async () => {
@@ -613,16 +650,16 @@ export default function SettingsPanel() {
                           }}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Download & Restore
+                          {t('settings.download_restore')}
                         </button>
                       </div>
                     </div>
                   </SettingSection>
 
                   {/* Local Network P2P Sync */}
-                  <SettingSection label="Local Network P2P Sync">
+                  <SettingSection label={t('settings.p2p_sync')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Synchronize directly with another device running Yntra Vault on your local network.
+                      {t('settings.p2p_sync_desc')}
                     </p>
                     <div className="flex flex-col gap-2">
                       <input
@@ -651,7 +688,7 @@ export default function SettingsPanel() {
                           }}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                         >
-                          Listen (Server)
+                          {t('settings.listen_server')}
                         </button>
                         <button
                           disabled={isSyncingP2P}
@@ -670,16 +707,16 @@ export default function SettingsPanel() {
                           }}
                           className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
                         >
-                          Connect (Client)
+                          {t('settings.connect_client')}
                         </button>
                       </div>
                     </div>
                   </SettingSection>
 
                   {/* Manual Export */}
-                  <SettingSection label="Manual Export">
+                  <SettingSection label={t('settings.manual_export')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      Save a copy of your encrypted vault file to another location.
+                      {t('settings.manual_export_desc')}
                     </p>
                     <button
                       onClick={async () => {
@@ -699,7 +736,7 @@ export default function SettingsPanel() {
                       }}
                       className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                     >
-                      Export Vault File...
+                      {t('settings.export_file')}
                     </button>
                   </SettingSection>
                 </div>
@@ -707,26 +744,28 @@ export default function SettingsPanel() {
 
               {activeTab === 'trash' && (
                 <div className="flex flex-col gap-6">
-                  <SettingSection label="Trash Management">
+                  <SettingSection label={t('settings.trash_title')}>
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-                      View items moved to the trash. Trashed items are automatically deleted permanently after 30 days.
+                      {t('settings.trash_desc')}
                     </p>
                     {trashItems.length > 0 && (
-                      <button
-                        onClick={handleEmptyTrash}
-                        className="mb-4 flex items-center gap-1.5 rounded-[3px] border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-500 hover:text-white"
-                      >
-                        <Trash size={13} />
-                        Empty Trash
-                      </button>
+                      <ActionTooltip content={t('settings.trash_empty')}>
+                        <button
+                          onClick={handleEmptyTrash}
+                          className="mb-4 flex items-center gap-1.5 rounded-[3px] border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-500 hover:text-white"
+                        >
+                          <Trash size={13} />
+                          {t('settings.trash_empty')}
+                        </button>
+                      </ActionTooltip>
                     )}
 
                     {loadingTrash ? (
-                      <p className="text-[12px] text-[var(--text-tertiary)] py-4">Loading trash...</p>
+                      <p className="text-[12px] text-[var(--text-tertiary)] py-4">{t('settings.loading_trash')}</p>
                     ) : trashItems.length === 0 ? (
                       <div className="flex flex-col items-center justify-center gap-2 py-8 rounded-[3px] border border-dashed border-[var(--border-subtle)]">
                         <Trash2 size={20} className="text-[var(--text-tertiary)]" />
-                        <p className="text-[12px] text-[var(--text-tertiary)]">Trash is empty</p>
+                        <p className="text-[12px] text-[var(--text-tertiary)]">{t('settings.trash_is_empty')}</p>
                       </div>
                     ) : (
                       <div className="flex flex-col gap-[2px] rounded-[3px] border border-[var(--border-subtle)] overflow-hidden">
@@ -744,24 +783,24 @@ export default function SettingsPanel() {
                               </span>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
-                              <ActionTooltip content="Restore entry to active vault">
+                              <ActionTooltip content={t('settings.restore_entry')}>
                                 <button
                                   type="button"
                                   onClick={() => handleRestore(item.id)}
                                   className="inline-flex h-7 items-center gap-1 rounded-[3px] px-2 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-active)] hover:text-[var(--text-primary)]"
                                 >
                                   <RotateCcw size={12} />
-                                  Restore
+                                  {t('settings.restore_entry')}
                                 </button>
                               </ActionTooltip>
-                              <ActionTooltip content="Permanently delete entry from vault">
+                              <ActionTooltip content={t('settings.delete_permanently')}>
                                 <button
                                   type="button"
                                   onClick={() => handlePermanentDelete(item.id)}
                                   className="inline-flex h-7 items-center gap-1 rounded-[3px] px-2 text-[11px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/10"
                                 >
                                   <Trash2 size={12} />
-                                  Delete
+                                  {t('settings.delete_permanently')}
                                 </button>
                               </ActionTooltip>
                             </div>

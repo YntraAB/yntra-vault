@@ -9,6 +9,7 @@ import React, { useEffect } from 'react';
 import { useSecurityAudit } from '../lib/useBackend';
 import type { SecurityIssue, IssueSeverity } from '../lib/backend';
 import { useAppState } from '../contexts/AppStateContext';
+import { useTranslation } from '../contexts/LanguageContext';
 import {
   ShieldAlert, ShieldCheck, AlertTriangle,
   Key, Clock, Copy, Lock, RefreshCw,
@@ -24,6 +25,7 @@ interface SecurityDashboardProps {
 export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
   onNavigateToEntry,
 }) => {
+  const { t } = useTranslation();
   const { audit, loading, runAudit } = useSecurityAudit();
   const { settings, entries } = useAppState();
   const disableDelays = settings.disableSkeletonDelays;
@@ -128,14 +130,14 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
 
               <div className="flex flex-col gap-1">
                 <h3 className="text-[15px] font-semibold text-[var(--text-primary)]">
-                  Security Score
+                  {t('security.health_score')}
                 </h3>
                 <p className="text-[12px] text-[var(--text-secondary)]">
-                  {audit.total_entries} passwords analyzed
+                  {t('security.passwords_analyzed', { count: audit.total_entries })}
                 </p>
               </div>
 
-              <ActionTooltip content="Refresh security audit">
+              <ActionTooltip content={t('security.refresh_tooltip')}>
                 <button
                   onClick={() => runAudit(disableDelays)}
                   className="ml-auto rounded-lg p-2 transition-colors hover:bg-[var(--bg-elevated)]"
@@ -149,37 +151,37 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <StatCard
                 icon={<ShieldAlert size={16} />}
-                label="Breached"
+                label={t('security.stat_breached')}
                 count={audit.breached_count}
                 color="#ef4444"
               />
               <StatCard
                 icon={<Key size={16} />}
-                label="Weak"
+                label={t('security.stat_weak')}
                 count={audit.weak_count}
                 color="#f59e0b"
               />
               <StatCard
                 icon={<Copy size={16} />}
-                label="Reused"
+                label={t('security.stat_reused')}
                 count={audit.reused_count}
                 color="#8b5cf6"
               />
               <StatCard
                 icon={<Clock size={16} />}
-                label="Old (90+ days)"
+                label={t('security.stat_old')}
                 count={audit.old_count}
                 color="#6b7280"
               />
               <StatCard
                 icon={<Lock size={16} />}
-                label="Missing 2FA"
+                label={t('security.stat_missing_2fa')}
                 count={audit.no_2fa_count}
                 color="#3b82f6"
               />
               <StatCard
                 icon={<ShieldCheck size={16} />}
-                label="Secure"
+                label={t('security.stat_secure')}
                 count={audit.total_entries - audit.breached_count - audit.weak_count}
                 color="#22c55e"
               />
@@ -189,7 +191,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
             {audit.issues.length > 0 && (
               <div className="flex flex-col gap-1">
                 <h4 className="text-[13px] font-semibold text-[var(--text-primary)] mb-1">
-                  Issues ({audit.issues.length})
+                  {t('security.issues_count', { count: audit.issues.length })}
                 </h4>
                 {audit.issues.map((issue, i) => (
                   <IssueRow
@@ -205,10 +207,10 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
               <div className="flex flex-col items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-6">
                 <ShieldCheck size={32} className="text-green-500" />
                 <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                  All passwords are secure!
+                  {t('security.all_secure_msg')}
                 </span>
                 <span className="text-[11px] text-[var(--text-tertiary)]">
-                  No issues found in your vault.
+                  {t('security.no_issues')}
                 </span>
               </div>
             )}

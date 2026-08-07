@@ -10,7 +10,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Database, FolderOpen, Eye, EyeOff, Loader2, ShieldCheck, KeyRound, Sparkles } from 'lucide-react';
 import { PasswordStrength } from './PasswordStrength';
 import { isTauri } from '@/lib/backend';
+import { useTranslation } from '@/contexts/LanguageContext';
 import type { Vault } from '@/types';
+import { ActionTooltip } from './ui/tooltip';
 
 interface CreateVaultModalProps {
   open: boolean;
@@ -19,6 +21,7 @@ interface CreateVaultModalProps {
 }
 
 export default function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
   const [pathModified, setPathModified] = useState(false);
@@ -243,34 +246,36 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
             <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
               <div className="flex items-center gap-2.5">
                 <Database size={18} className="text-[var(--text-primary)]" />
-                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Create New Vault</h2>
+                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">{t('create_vault.title')}</h2>
               </div>
-              <button
-                onClick={onClose}
-                className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <X size={16} />
-              </button>
+              <ActionTooltip content={t('common.close')}>
+                <button
+                  onClick={onClose}
+                  className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <X size={16} />
+                </button>
+              </ActionTooltip>
             </div>
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
               {/* Vault Name */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-medium text-[var(--text-secondary)]">Vault Name</label>
+                <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.vault_name')}</label>
                 <input
                   ref={nameRef}
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Personal Vault"
+                  placeholder={t('create_vault.name_placeholder')}
                   className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                 />
               </div>
 
               {/* File Path */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-medium text-[var(--text-secondary)]">File Location</label>
+                <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.location')}</label>
                 <div className="flex gap-1.5">
                   <input
                     type="text"
@@ -279,51 +284,55 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                       setPath(e.target.value);
                       setPathModified(true);
                     }}
-                    placeholder="Click browse to choose folder..."
+                    placeholder={t('create_vault.location_ph')}
                     className="h-9 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
                   />
                   {isTauri() && (
-                    <button
-                      type="button"
-                      onClick={handleBrowse}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
-                    >
-                      <FolderOpen size={15} />
-                    </button>
+                    <ActionTooltip content={t('common.browse')}>
+                      <button
+                        type="button"
+                        onClick={handleBrowse}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                      >
+                        <FolderOpen size={15} />
+                      </button>
+                    </ActionTooltip>
                   )}
                 </div>
               </div>
 
               {/* Master Password */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-medium text-[var(--text-secondary)]">Master Password</label>
+                <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.master_password')}</label>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimum 12 characters"
+                    placeholder={t('cmp.min_chars')}
                     className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 pr-9 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                  >
-                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
+                  <ActionTooltip content={showPassword ? t('login.hide_password') : t('login.show_password')}>
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                    >
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </ActionTooltip>
                 </div>
                 {password.length > 0 && <PasswordStrength password={password} compact />}
               </div>
 
               {/* Confirm Password */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-medium text-[var(--text-secondary)]">Confirm Password</label>
+                <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.confirm_password')}</label>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-enter master password"
+                  placeholder={t('create_vault.reenter_pass_ph')}
                   className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
                     confirmPassword && confirmPassword !== password
                       ? 'border-[var(--destructive)]'
@@ -331,7 +340,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                   }`}
                 />
                 {confirmPassword && confirmPassword !== password && (
-                  <span className="text-[11px] text-[var(--destructive)]">Passwords do not match</span>
+                  <span className="text-[11px] text-[var(--destructive)]">{t('create_vault.err_pass_mismatch')}</span>
                 )}
               </div>
 
@@ -348,7 +357,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                     className="rounded border-[var(--border)] accent-[var(--accent)]"
                   />
                   <KeyRound size={14} className="text-[var(--text-secondary)]" />
-                  <span>Require Key File to unlock</span>
+                  <span>{t('create_vault.enable_keyfile')}</span>
                 </label>
 
                 {useKeyFile && (
@@ -362,7 +371,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                           onChange={() => setGenerateNewKeyFile(false)}
                           className="accent-[var(--accent)]"
                         />
-                        <span>Use existing key file</span>
+                        <span>{t('create_vault.use_existing_keyfile')}</span>
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -373,7 +382,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                           className="accent-[var(--accent)]"
                         />
                         <Sparkles size={11} className="text-amber-400" />
-                        <span>Generate new key file</span>
+                        <span>{t('create_vault.gen_new_keyfile')}</span>
                       </label>
                     </div>
 
@@ -382,7 +391,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                         type="text"
                         value={keyFilePath}
                         onChange={(e) => setKeyFilePath(e.target.value)}
-                        placeholder={generateNewKeyFile ? "Path to save new .key file" : "Path to existing .key file"}
+                        placeholder={generateNewKeyFile ? t('create_vault.save_keyfile_ph') : t('create_vault.exist_keyfile_ph')}
                         className="h-8 flex-1 rounded border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                       />
                       {isTauri() && (
@@ -392,7 +401,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                           className="flex h-8 items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                           <FolderOpen size={12} />
-                          Browse
+                          {t('common.browse')}
                         </button>
                       )}
                     </div>
@@ -404,8 +413,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
               <div className="flex items-start gap-2 rounded-md bg-[var(--bg-elevated)] px-3 py-2.5">
                 <ShieldCheck size={14} className="mt-0.5 shrink-0 text-green-500" />
                 <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
-                  Your vault is encrypted with Argon2id + XChaCha20-Poly1305 + AES-256-GCM.
-                  The master password never leaves your device.
+                  {t('create_vault.security_note')}
                 </p>
               </div>
 
@@ -423,7 +431,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                   onClick={onClose}
                   className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
@@ -433,10 +441,10 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
                   {loading ? (
                     <>
                       <Loader2 size={14} className="animate-spin" />
-                      Creating...
+                      {t('create_vault.creating')}
                     </>
                   ) : (
-                    'Create Vault'
+                    t('create_vault.create_btn')
                   )}
                 </button>
               </div>

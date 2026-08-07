@@ -3,7 +3,8 @@
 use criterion::{black_box, BenchmarkId, Criterion, Throughput};
 use std::time::Duration;
 use yntra_vault_core::crypto::cipher::{
-    compute_hmac, decrypt_entry, decrypt_vault, encrypt_entry, encrypt_vault, verify_hmac,
+    compute_hmac, decrypt_entry, decrypt_vault, decrypt_vault_with_aad, encrypt_entry,
+    encrypt_vault, encrypt_vault_with_aad, verify_hmac,
 };
 use yntra_vault_core::crypto::kdf::{EntryKey, HmacKey, VaultKey};
 
@@ -33,11 +34,21 @@ pub fn bench_cipher(c: &mut Criterion) {
         let plaintext = vec![0x5A; *size];
         group.throughput(Throughput::Bytes(*size as u64));
 
+        let dummy_aad = b"YNTR-v3-header-aad-bytes-benchmark-data";
+
         group.bench_with_input(
             BenchmarkId::new("XChaCha20-Poly1305 Encrypt", format!("{} B", size)),
             &plaintext,
             |b, payload| {
                 b.iter(|| encrypt_vault(black_box(payload), black_box(&vault_key)).unwrap());
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("XChaCha20-Poly1305 Encrypt (with AAD)", format!("{} B", size)),
+            &plaintext,
+            |b, payload| {
+                b.iter(|| encrypt_vault_with_aad(black_box(payload), black_box(&vault_key), black_box(dummy_aad)).unwrap());
             },
         );
 
@@ -47,6 +58,15 @@ pub fn bench_cipher(c: &mut Criterion) {
             &encrypted,
             |b, blob| {
                 b.iter(|| decrypt_vault(black_box(blob), black_box(&vault_key)).unwrap());
+            },
+        );
+
+        let encrypted_aad = encrypt_vault_with_aad(&plaintext, &vault_key, dummy_aad).unwrap();
+        group.bench_with_input(
+            BenchmarkId::new("XChaCha20-Poly1305 Decrypt (with AAD)", format!("{} B", size)),
+            &encrypted_aad,
+            |b, blob| {
+                b.iter(|| decrypt_vault_with_aad(black_box(blob), black_box(&vault_key), black_box(dummy_aad)).unwrap());
             },
         );
     }

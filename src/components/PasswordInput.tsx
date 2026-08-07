@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { maskPassword } from '@/lib/utils';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { ActionTooltip } from './ui/tooltip';
 
 interface PasswordInputProps {
@@ -11,6 +12,7 @@ interface PasswordInputProps {
 }
 
 export default function PasswordInput({ value, onChange, readOnly = false, className = '' }: PasswordInputProps) {
+  const { t } = useTranslation();
   const [show, setShow] = useState(false);
 
   if (readOnly) {
@@ -19,7 +21,7 @@ export default function PasswordInput({ value, onChange, readOnly = false, class
         <span className="font-mono text-[13px] tracking-wider text-[var(--text-primary)]">
           {show ? value : maskPassword(value)}
         </span>
-        <ActionTooltip content={show ? 'Hide password' : 'Show password'}>
+        <ActionTooltip content={show ? t('login.hide_password') : t('login.show_password')}>
           <button
             type="button"
             onClick={() => setShow(!show)}
@@ -40,7 +42,7 @@ export default function PasswordInput({ value, onChange, readOnly = false, class
         onChange={(e) => onChange?.(e.target.value)}
         className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 pr-8 font-mono text-[13px] text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
       />
-      <ActionTooltip content={show ? 'Hide password' : 'Show password'}>
+      <ActionTooltip content={show ? t('login.hide_password') : t('login.show_password')}>
         <button
           type="button"
           onClick={() => setShow(!show)}

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::VaultError;
 
 pub const MAGIC_BYTES: &[u8; 4] = b"YNTR";
-pub const FORMAT_VERSION: u16 = 2;
+pub const FORMAT_VERSION: u16 = 3;
 
 /// KDF parameters stored in the file so we can always decrypt.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,10 +82,35 @@ pub struct FileHeader {
     pub kdf_params: KdfParams,
 }
 
+impl FileHeader {
+    /// Canonical serialization of header fields for AEAD Additional Authenticated Data (AAD) binding.
+    pub fn aad_bytes(&self) -> crate::Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(128);
+        buf.write_all(MAGIC_BYTES)
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        buf.write_all(&self.version.to_le_bytes())
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        buf.write_all(&self.flags.to_le_bytes())
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        buf.write_all(&self.salt)
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+
+        let kdf_bytes = bincode::serialize(&self.kdf_params)
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        let kdf_len = kdf_bytes.len() as u32;
+        buf.write_all(&kdf_len.to_le_bytes())
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        buf.write_all(&kdf_bytes)
+            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+
+        Ok(buf)
+    }
+}
+
 /// Complete vault file structure.
 pub struct VaultFile {
     pub header: FileHeader,
-    pub hmac: [u8; 64],
+    pub hmac: Option<[u8; 64]>,
     pub encrypted_payload: Vec<u8>,
 }
 
@@ -110,9 +135,12 @@ impl VaultFile {
         buf.write_all(&self.header.salt)
             .map_err(|e| VaultError::SerializationError(e.to_string()))?;
 
-        // HMAC (64 bytes)
-        buf.write_all(&self.hmac)
-            .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        // HMAC (64 bytes) — included only for legacy v1 and v2 files
+        if self.header.version <= 2 {
+            let hmac_bytes = self.hmac.unwrap_or([0u8; 64]);
+            buf.write_all(&hmac_bytes)
+                .map_err(|e| VaultError::SerializationError(e.to_string()))?;
+        }
 
         // KDF params (bincode serialized with length prefix)
         let kdf_bytes = bincode::serialize(&self.header.kdf_params)
@@ -173,10 +201,15 @@ impl VaultFile {
         cursor.read_exact(&mut salt)
             .map_err(|_| VaultError::InvalidFormat("Failed to read salt".into()))?;
 
-        // HMAC
-        let mut hmac = [0u8; 64];
-        cursor.read_exact(&mut hmac)
-            .map_err(|_| VaultError::InvalidFormat("Failed to read HMAC".into()))?;
+        // HMAC (64 bytes) for legacy v1 and v2 files
+        let hmac = if version <= 2 {
+            let mut hmac_buf = [0u8; 64];
+            cursor.read_exact(&mut hmac_buf)
+                .map_err(|_| VaultError::InvalidFormat("Failed to read legacy HMAC".into()))?;
+            Some(hmac_buf)
+        } else {
+            None
+        };
 
         // KDF params length
         let mut kdf_len_bytes = [0u8; 4];
@@ -223,7 +256,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_roundtrip_file_format() {
+    fn test_v3_roundtrip_file_format() {
         let file = VaultFile {
             header: FileHeader {
                 version: FORMAT_VERSION,
@@ -231,7 +264,7 @@ mod tests {
                 salt: [42u8; 32],
                 kdf_params: KdfParams::default(),
             },
-            hmac: [0xAB; 64],
+            hmac: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
 
@@ -240,7 +273,32 @@ mod tests {
 
         assert_eq!(parsed.header.version, FORMAT_VERSION);
         assert_eq!(parsed.header.salt, [42u8; 32]);
-        assert_eq!(parsed.hmac, [0xAB; 64]);
+        assert!(parsed.hmac.is_none());
+        assert_eq!(parsed.encrypted_payload, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+
+        // AAD bytes generation test
+        let aad = file.header.aad_bytes().unwrap();
+        assert!(!aad.is_empty());
+    }
+
+    #[test]
+    fn test_v2_legacy_roundtrip_file_format() {
+        let file = VaultFile {
+            header: FileHeader {
+                version: 2,
+                flags: 0,
+                salt: [42u8; 32],
+                kdf_params: KdfParams::default(),
+            },
+            hmac: Some([0xAB; 64]),
+            encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+
+        let bytes = file.to_bytes().unwrap();
+        let parsed = VaultFile::from_bytes(&bytes).unwrap();
+
+        assert_eq!(parsed.header.version, 2);
+        assert_eq!(parsed.hmac, Some([0xAB; 64]));
         assert_eq!(parsed.encrypted_payload, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 

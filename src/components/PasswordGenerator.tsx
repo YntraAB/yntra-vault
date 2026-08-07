@@ -12,6 +12,7 @@ import { usePasswordGenerator } from '../lib/useBackend';
 import type { GeneratorOptions } from '../lib/backend';
 import { PasswordStrength } from './PasswordStrength';
 import { BreachIndicator } from './BreachIndicator';
+import { useTranslation } from '../contexts/LanguageContext';
 import CopyButton from './CopyButton';
 import { RefreshCw, Shuffle, BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
 import { ActionTooltip } from './ui/tooltip';
@@ -242,6 +243,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
   onSelect,
   onClose,
 }) => {
+  const { t } = useTranslation();
   const { password, generate } = usePasswordGenerator();
   const [mode, setMode] = useState<'Random' | 'Diceware'>('Random');
   const [showOptions, setShowOptions] = useState(false);
@@ -348,7 +350,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
           {password || '...'}
         </code>
         <div className="flex items-center gap-1 shrink-0 ml-2">
-          <ActionTooltip content="Regenerate password">
+          <ActionTooltip content={t('generator.regenerate_tooltip')}>
             <button
               type="button"
               onClick={() => generate(buildOptions())}
@@ -377,17 +379,19 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
           </div>
         ) : (
           <div className="text-[11px] text-[var(--text-tertiary)] font-medium">
-            Standard Preset (Secure)
+            {t('generator.std_preset')}
           </div>
         )}
-        <button
-          type="button"
-          onClick={() => setShowOptions(!showOptions)}
-          className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors font-medium"
-        >
-          <span>Options</span>
-          {showOptions ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
+        <ActionTooltip content={showOptions ? t('login.hide_password') : t('login.show_password')}>
+          <button
+            type="button"
+            onClick={() => setShowOptions(!showOptions)}
+            className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors font-medium"
+          >
+            <span>{t('generator.options')}</span>
+            {showOptions ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+        </ActionTooltip>
       </div>
 
       {/* Collapsable Options Panel */}
@@ -402,7 +406,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
                 mode === 'Random' ? 'bg-[var(--bg-base)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              <Shuffle size={11} /> Random
+              <Shuffle size={11} /> {t('generator.mode_random')}
             </button>
             <button
               type="button"
@@ -411,7 +415,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
                 mode === 'Diceware' ? 'bg-[var(--bg-base)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              <BookOpen size={11} /> Diceware
+              <BookOpen size={11} /> {t('generator.mode_diceware')}
             </button>
           </div>
 
@@ -419,7 +423,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
             <div className="flex flex-col gap-3">
               {/* Length Slider */}
               <div className="flex items-center gap-3">
-                <label className="text-[11px] text-[var(--text-secondary)] font-medium min-w-[45px]">Length</label>
+                <label className="text-[11px] text-[var(--text-secondary)] font-medium min-w-[45px]">{t('generator.length')}</label>
                 <input
                   type="range"
                   min={8}
@@ -435,18 +439,18 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
 
               {/* Toggles */}
               <div className="grid grid-cols-2 gap-2 mt-1">
-                <Toggle label="Uppercase (A-Z)" checked={uppercase} onChange={setUppercase} />
-                <Toggle label="Lowercase (a-z)" checked={lowercase} onChange={setLowercase} />
-                <Toggle label="Digits (0-9)" checked={digits} onChange={setDigits} />
-                <Toggle label="Symbols (!@#)" checked={symbols} onChange={setSymbols} />
-                <Toggle label="Exclude Ambiguous" checked={excludeAmbiguous} onChange={setExcludeAmbiguous} />
+                <Toggle label={t('generator.uppercase')} checked={uppercase} onChange={setUppercase} />
+                <Toggle label={t('generator.lowercase')} checked={lowercase} onChange={setLowercase} />
+                <Toggle label={t('generator.numbers')} checked={digits} onChange={setDigits} />
+                <Toggle label={t('generator.symbols')} checked={symbols} onChange={setSymbols} />
+                <Toggle label={t('generator.exclude_ambiguous')} checked={excludeAmbiguous} onChange={setExcludeAmbiguous} />
               </div>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
               {/* Word Count Slider */}
               <div className="flex items-center gap-3">
-                <label className="text-[11px] text-[var(--text-secondary)] font-medium min-w-[45px]">Words</label>
+                <label className="text-[11px] text-[var(--text-secondary)] font-medium min-w-[45px]">{t('generator.words')}</label>
                 <input
                   type="range"
                   min={3}
@@ -462,7 +466,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
 
               {/* Separator selection */}
               <div className="flex items-center justify-between mt-1">
-                <label className="text-[11px] text-[var(--text-secondary)] font-medium">Separator</label>
+                <label className="text-[11px] text-[var(--text-secondary)] font-medium">{t('generator.separator')}</label>
                 <div className="flex gap-1">
                   {['-', '.', '_', ' '].map((sep) => (
                     <button
@@ -482,8 +486,8 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2 mt-1">
-                <Toggle label="Capitalize Words" checked={capitalizeWords} onChange={setCapitalizeWords} />
-                <Toggle label="Include Number" checked={addNumber} onChange={setAddNumber} />
+                <Toggle label={t('generator.capitalize_words')} checked={capitalizeWords} onChange={setCapitalizeWords} />
+                <Toggle label={t('generator.include_number')} checked={addNumber} onChange={setAddNumber} />
               </div>
             </div>
           )}
@@ -497,7 +501,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
           onClick={handleSelect}
           className="mt-1 rounded-[3px] bg-[var(--text-primary)] py-2 text-[12px] font-medium text-[var(--bg-base)] transition-colors hover:opacity-90"
         >
-          Use Password
+          {t('generator.use_password')}
         </button>
       )}
     </div>

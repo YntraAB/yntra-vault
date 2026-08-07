@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { ActionTooltip } from './ui/tooltip';
 
 interface CopyButtonProps {
@@ -9,8 +10,10 @@ interface CopyButtonProps {
   label?: string;
 }
 
-export default function CopyButton({ value, className = '', size = 14, label = 'Copy' }: CopyButtonProps) {
+export default function CopyButton({ value, className = '', size = 14, label }: CopyButtonProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const tooltipLabel = label || t('common.copy');
 
   const handleCopy = useCallback(
     (e: React.MouseEvent) => {
@@ -23,7 +26,7 @@ export default function CopyButton({ value, className = '', size = 14, label = '
   );
 
   return (
-    <ActionTooltip content={copied ? 'Copied!' : label}>
+    <ActionTooltip content={copied ? t('common.copied') : tooltipLabel}>
       <button
         type="button"
         onClick={handleCopy}

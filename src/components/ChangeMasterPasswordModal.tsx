@@ -7,7 +7,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, ShieldCheck, KeyRound, FolderOpen } from 'lucide-react';
 import { PasswordStrength } from './PasswordStrength';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { isTauri, getBackend } from '@/lib/backend';
+import { ActionTooltip } from './ui/tooltip';
 
 interface ChangeMasterPasswordModalProps {
   open: boolean;
@@ -15,6 +17,7 @@ interface ChangeMasterPasswordModalProps {
 }
 
 export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswordModalProps) {
+  const { t } = useTranslation();
   const { addToast } = useAppState();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -127,20 +130,22 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
             <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
               <div className="flex items-center gap-2">
                 <ShieldCheck size={18} className="text-[var(--text-primary)]" />
-                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Change Master Password</h2>
+                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">{t('cmp.title')}</h2>
               </div>
-              <button onClick={onClose} className="rounded-md p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]">
-                <X size={16} />
-              </button>
+              <ActionTooltip content={t('common.close')}>
+                <button onClick={onClose} className="rounded-md p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]">
+                  <X size={16} />
+                </button>
+              </ActionTooltip>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5 max-h-[80vh] overflow-y-auto">
               <PasswordField
-                label="Current Password"
+                label={t('cmp.current_pass')}
                 value={currentPassword}
                 onChange={setCurrentPassword}
                 show={showPasswords}
-                placeholder="Enter current password"
+                placeholder={t('cmp.current_pass_ph')}
               />
 
               {/* Current Key File */}
@@ -153,7 +158,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                     className="rounded border-[var(--border)] accent-[var(--accent)]"
                   />
                   <KeyRound size={13} className="text-[var(--text-tertiary)]" />
-                  <span>Vault currently requires Key File</span>
+                  <span>{t('cmp.req_keyfile')}</span>
                 </label>
                 {useCurrentKeyFile && (
                   <div className="flex gap-1.5">
@@ -161,18 +166,20 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                       type="text"
                       value={currentKeyFile}
                       onChange={(e) => setCurrentKeyFile(e.target.value)}
-                      placeholder="Current .key file path"
+                      placeholder={t('cmp.current_keyfile_ph')}
                       className="h-8 flex-1 rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                     />
                     {isTauri() && (
-                      <button
-                        type="button"
-                        onClick={() => handleBrowseKeyFile(setCurrentKeyFile)}
-                        className="flex h-8 items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                      >
-                        <FolderOpen size={12} />
-                        Browse
-                      </button>
+                      <ActionTooltip content={t('common.browse')}>
+                        <button
+                          type="button"
+                          onClick={() => handleBrowseKeyFile(setCurrentKeyFile)}
+                          className="flex h-8 items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        >
+                          <FolderOpen size={12} />
+                          {t('common.browse')}
+                        </button>
+                      </ActionTooltip>
                     )}
                   </div>
                 )}
@@ -181,20 +188,20 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
               <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
 
               <PasswordField
-                label="New Password"
+                label={t('cmp.new_pass')}
                 value={newPassword}
                 onChange={setNewPassword}
                 show={showPasswords}
-                placeholder="Minimum 12 characters"
+                placeholder={t('cmp.min_chars')}
               />
               {newPassword && <PasswordStrength password={newPassword} compact />}
 
               <PasswordField
-                label="Confirm New Password"
+                label={t('cmp.confirm_new_pass')}
                 value={confirmPassword}
                 onChange={setConfirmPassword}
                 show={showPasswords}
-                placeholder="Re-enter new password"
+                placeholder={t('cmp.reenter_pass_ph')}
                 mismatch={!!confirmPassword && confirmPassword !== newPassword}
               />
 
@@ -208,7 +215,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                     className="rounded border-[var(--border)] accent-[var(--accent)]"
                   />
                   <KeyRound size={13} className="text-[var(--text-tertiary)]" />
-                  <span>Require Key File for new key</span>
+                  <span>{t('cmp.req_new_keyfile')}</span>
                 </label>
                 {useNewKeyFile && (
                   <div className="flex gap-1.5">
@@ -216,18 +223,20 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                       type="text"
                       value={newKeyFile}
                       onChange={(e) => setNewKeyFile(e.target.value)}
-                      placeholder="New .key file path"
+                      placeholder={t('cmp.new_keyfile_ph')}
                       className="h-8 flex-1 rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                     />
                     {isTauri() && (
-                      <button
-                        type="button"
-                        onClick={() => handleBrowseKeyFile(setNewKeyFile)}
-                        className="flex h-8 items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                      >
-                        <FolderOpen size={12} />
-                        Browse
-                      </button>
+                      <ActionTooltip content={t('common.browse')}>
+                        <button
+                          type="button"
+                          onClick={() => handleBrowseKeyFile(setNewKeyFile)}
+                          className="flex h-8 items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        >
+                          <FolderOpen size={12} />
+                          {t('common.browse')}
+                        </button>
+                      </ActionTooltip>
                     )}
                   </div>
                 )}
@@ -240,7 +249,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                   onChange={(e) => setShowPasswords(e.target.checked)}
                   className="accent-[var(--accent)] h-3.5 w-3.5"
                 />
-                Show passwords
+                {t('login.show_passwords')}
               </label>
 
               {error && (
@@ -249,10 +258,10 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
 
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" onClick={onClose} className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button type="submit" disabled={loading} className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-4 text-[13px] font-semibold text-[var(--bg-base)] hover:opacity-90 disabled:opacity-50">
-                  {loading ? <><Loader2 size={14} className="animate-spin" /> Changing...</> : 'Change Password'}
+                  {loading ? <><Loader2 size={14} className="animate-spin" /> {t('cmp.changing')}</> : t('settings.change_password')}
                 </button>
               </div>
             </form>

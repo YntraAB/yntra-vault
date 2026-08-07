@@ -3,12 +3,15 @@ import { motion } from 'framer-motion';
 import { Database, Plus, Download, Clock, AlertTriangle, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import CreateVaultModal from '@/components/CreateVaultModal';
 import { isTauri, getBackend } from '@/lib/backend';
 import type { Vault } from '@/types';
+import { ActionTooltip } from '@/components/ui/tooltip';
 
 export default function VaultSelect() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { setCurrentVault, setIsLocked } = useAppState();
   const [showCreate, setShowCreate] = useState(false);
   const [recentVaults, setRecentVaults] = useState<Vault[]>([]);
@@ -105,10 +108,10 @@ export default function VaultSelect() {
             className="h-24 w-24 rounded-xl object-cover"
           />
           <h1 className="text-[20px] font-semibold tracking-tight text-[var(--text-primary)]">
-            Yntra Vault
+            {t('vault_select.title')}
           </h1>
           <p className="text-[13px] text-[var(--text-secondary)]">
-            Secure password manager
+            {t('vault_select.subtitle')}
           </p>
         </div>
 
@@ -116,10 +119,10 @@ export default function VaultSelect() {
           <div className="mt-6 flex flex-col gap-2 rounded-[3px] border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] text-amber-400">
             <div className="flex items-center gap-2 font-medium">
               <AlertTriangle size={14} className="shrink-0 animate-pulse" />
-              <span>Web Browser Mode (Limited)</span>
+              <span>{t('vault_select.web_warning_title')}</span>
             </div>
             <p className="text-[11px] leading-relaxed text-amber-500/80 dark:text-amber-400/80">
-              Local vault files, imports, and cryptographic operations require running as a local desktop app. Please launch the app using:
+              {t('vault_select.web_warning_desc')}
               <code className="mt-1.5 block rounded border border-amber-500/20 bg-black/30 px-2 py-1 font-mono text-[10px] text-amber-300">
                 bun tauri dev
               </code>
@@ -133,7 +136,7 @@ export default function VaultSelect() {
             <div className="mb-2 flex items-center gap-1.5 px-1">
               <Clock size={12} className="text-[var(--text-tertiary)]" />
               <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                Recent Vaults
+                {t('vault_select.recent_vaults')}
               </span>
             </div>
             <div className="flex flex-col gap-1 max-h-[176px] overflow-y-auto pr-1">
@@ -161,26 +164,29 @@ export default function VaultSelect() {
                           {vault.name}
                         </span>
                         {missingVaults.has(vault.id) && (
-                          <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-400 border border-red-500/20">
-                            <AlertTriangle size={10} />
-                            File Not Found
-                          </span>
+                          <ActionTooltip content={t('vault_select.file_not_found')}>
+                            <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-400 border border-red-500/20">
+                              <AlertTriangle size={10} />
+                              {t('vault_select.file_not_found')}
+                            </span>
+                          </ActionTooltip>
                         )}
                       </div>
                       <div className="truncate text-[12px] text-[var(--text-tertiary)]">{vault.path}</div>
                     </div>
                   </button>
 
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeRecent(vault.id);
-                    }}
-                    className="shrink-0 flex h-8 w-8 items-center justify-center rounded-[3px] text-[var(--text-tertiary)] hover:bg-red-500/10 hover:text-red-400 transition-colors"
-                    title="Remove from recent vaults"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <ActionTooltip content={t('vault_select.remove_recent')}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeRecent(vault.id);
+                      }}
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-[3px] text-[var(--text-tertiary)] hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </ActionTooltip>
                 </motion.div>
               ))}
             </div>
@@ -189,27 +195,31 @@ export default function VaultSelect() {
 
         {/* Actions */}
         <div className={`flex gap-2 ${recentVaults.length > 0 ? 'mt-4' : 'mt-8'}`}>
-          <button
-            onClick={() => setShowCreate(true)}
-            disabled={!isTauri()}
-            className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)]"
-          >
-            <Plus size={15} />
-            New Vault
-          </button>
-          <button
-            onClick={handleImport}
-            disabled={!isTauri()}
-            className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)]"
-          >
-            <Download size={15} />
-            Open File
-          </button>
+          <ActionTooltip content="Create a new encrypted vault file" side="top">
+            <button
+              onClick={() => setShowCreate(true)}
+              disabled={!isTauri()}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)]"
+            >
+              <Plus size={15} />
+              {t('vault_select.new_vault')}
+            </button>
+          </ActionTooltip>
+          <ActionTooltip content="Open an existing vault file (.vdb)" side="top">
+            <button
+              onClick={handleImport}
+              disabled={!isTauri()}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)]"
+            >
+              <Download size={15} />
+              {t('vault_select.open_file')}
+            </button>
+          </ActionTooltip>
         </div>
 
         {/* Version */}
         <p className="mt-6 text-center text-[11px] text-[var(--text-tertiary)]">
-          Yntra Vault v0.1.0 — Encrypted with Argon2id + XChaCha20-Poly1305
+          {t('vault_select.crypto_info')}
         </p>
       </div>
 

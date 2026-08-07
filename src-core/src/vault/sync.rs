@@ -234,7 +234,7 @@ mod tests {
                 salt: [42u8; 32],
                 kdf_params: KdfParams::default(),
             },
-            hmac: [0xAB; 64],
+            hmac: None,
             encrypted_payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
         let client_data = vault_file.to_bytes().unwrap();

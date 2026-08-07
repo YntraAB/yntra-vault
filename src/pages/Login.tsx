@@ -3,13 +3,16 @@ import { motion } from 'framer-motion';
 import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { isTauri, getBackend } from '@/lib/backend';
+import { ActionTooltip } from '@/components/ui/tooltip';
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_DELAYS = [0, 0, 0, 5000, 15000, 30000]; // ms delay per attempt
 
 export default function Login() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { currentVault, setIsLocked, setCurrentVault } = useAppState();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -152,7 +155,7 @@ export default function Login() {
             {currentVault?.name || 'Vault'}
           </h1>
           <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
-            Enter master password to unlock
+            {t('login.enter_master')}
           </p>
         </div>
 
@@ -171,7 +174,7 @@ export default function Login() {
                   setPassword(e.target.value);
                   setError('');
                 }}
-                placeholder="Master password"
+                placeholder={t('login.master_password')}
                 autoFocus
                 disabled={loading || isLockedOut}
                 className={`h-11 w-full rounded-[3px] border bg-[var(--bg-elevated)] px-3 pr-10 font-mono text-[14px] tracking-wider text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] placeholder:font-sans placeholder:tracking-normal disabled:opacity-50 ${
@@ -180,13 +183,15 @@ export default function Login() {
                     : 'border-[var(--border)] focus:border-[var(--border-focus)]'
                 }`}
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+              <ActionTooltip content={showPassword ? t('login.hide_password') : t('login.show_password')}>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </ActionTooltip>
             </div>
 
             {/* Key File Toggle & Input */}
@@ -202,7 +207,7 @@ export default function Login() {
                   className="rounded border-[var(--border)] text-[var(--text-primary)] accent-[var(--accent)]"
                 />
                 <KeyRound size={13} className="text-[var(--text-tertiary)]" />
-                <span>Use Key File</span>
+                <span>{t('login.use_key_file')}</span>
               </label>
 
               {useKeyFile && (
@@ -214,18 +219,20 @@ export default function Login() {
                       setKeyFilePath(e.target.value);
                       setError('');
                     }}
-                    placeholder="Path to .key file"
+                    placeholder={t('login.key_file_path')}
                     className="h-9 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                   />
                   {isTauri() && (
-                    <button
-                      type="button"
-                      onClick={handleBrowseKeyFile}
-                      className="flex h-9 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
-                    >
-                      <FolderOpen size={13} />
-                      Browse
-                    </button>
+                    <ActionTooltip content={t('login.browse_key_file')}>
+                      <button
+                        type="button"
+                        onClick={handleBrowseKeyFile}
+                        className="flex h-9 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
+                      >
+                        <FolderOpen size={13} />
+                        {t('common.browse')}
+                      </button>
+                    </ActionTooltip>
                   )}
                 </div>
               )}
@@ -247,12 +254,12 @@ export default function Login() {
             {loading ? (
               <>
                 <Loader2 size={14} className="animate-spin" />
-                Unlocking...
+                {t('login.unlocking')}
               </>
             ) : isLockedOut ? (
-              `Locked (${lockoutRemaining}s)`
+              t('login.locked_status', { remaining: lockoutRemaining })
             ) : (
-              'Unlock Vault'
+              t('login.unlock_btn')
             )}
           </button>
         </form>
@@ -260,7 +267,7 @@ export default function Login() {
         {/* Attempts warning */}
         {attempts >= 3 && (
           <div className="mt-3 rounded-md bg-[var(--destructive)]/10 px-3 py-2 text-center text-[11px] text-[var(--destructive)]">
-            {MAX_ATTEMPTS - attempts} attempts remaining before extended lockout
+            {t('login.attempts_left', { remaining: MAX_ATTEMPTS - attempts })}
           </div>
         )}
 
@@ -269,7 +276,7 @@ export default function Login() {
           onClick={() => navigate('/')}
           className="mx-auto mt-4 block text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
         >
-          &larr; Back to vaults
+          {t('login.back_to_vaults')}
         </button>
       </div>
     </motion.div>

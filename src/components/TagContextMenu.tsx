@@ -8,6 +8,7 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { useTranslation } from '@/contexts/LanguageContext';
 
 interface TagContextMenuProps {
   open: boolean;
@@ -20,6 +21,7 @@ interface TagContextMenuProps {
 }
 
 export default function TagContextMenu({ open, x, y, onClose, onAddPassword, onEdit, onDelete }: TagContextMenuProps) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on click outside
@@ -80,7 +82,7 @@ export default function TagContextMenu({ open, x, y, onClose, onAddPassword, onE
               className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               <Plus size={13} />
-              Add password
+              {t('menu.add_password')}
             </button>
           )}
           <button
@@ -91,7 +93,7 @@ export default function TagContextMenu({ open, x, y, onClose, onAddPassword, onE
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Pencil size={13} />
-            Edit Tag
+            {t('menu.edit_tag')}
           </button>
           <button
             onClick={() => {
@@ -101,7 +103,7 @@ export default function TagContextMenu({ open, x, y, onClose, onAddPassword, onE
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8"
           >
             <Trash2 size={13} />
-            Delete Tag
+            {t('menu.delete_tag')}
           </button>
         </motion.div>
       )}

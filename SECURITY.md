@@ -11,10 +11,10 @@
 Yntra Vault operates under an **offline-first, zero-knowledge** security posture.
 
 ### 1. Cryptographic Isolation
-* **Key Derivation**: Master Password → Argon2id (256MB RAM, 4 iterations, 4 parallelism) → HKDF-SHA512 → 4 derived SubKeys (`Vault Key`, `Entry Key`, `HMAC Key`, `Search Key`).
-* **Vault Encryption**: XChaCha20-Poly1305 for full vault payload structure.
-* **Entry Field Encryption**: AES-256-GCM for sensitive fields within individual entries.
-* **Integrity Guarantee**: HMAC-SHA512 verification executed *prior* to payload parsing or decryption.
+* **Key Derivation**: Master Password → Argon2id (256MB RAM, 4 iterations, 4 parallelism) → HKDF-SHA512 → Derived SubKeys (`Vault Key`, `Entry Key`, `Search Key`, `P2P Auth Key`).
+* **Vault Encryption**: XChaCha20-Poly1305 with unencrypted `FileHeader` bound as Additional Authenticated Data (`AAD`).
+* **Entry Field Encryption**: XChaCha20-Poly1305 / AES-256-GCM for sensitive fields within individual entries.
+* **Integrity Guarantee**: Single-pass Poly1305 AEAD tag authentication over header AAD + payload (rejecting tampered headers or payloads before payload deserialization; legacy v1/v2 files verify outer HMAC-SHA512 first).
 
 ### 2. Memory Hygiene
 * All key buffers (`SubKeys`), temporary secrets (`LockedBuffer`), and scrambled UI memory (`ScrambledString`) implement `ZeroizeOnDrop` via the `zeroize` crate.

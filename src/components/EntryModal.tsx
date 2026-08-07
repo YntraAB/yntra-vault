@@ -12,6 +12,7 @@ import {
   Globe, User, Mail, Key, FileText, ShieldCheck, Loader2, Fingerprint,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { PasswordStrength } from './PasswordStrength';
 import { PasswordGenerator } from './PasswordGenerator';
 import { BreachIndicator } from './BreachIndicator';
@@ -55,14 +56,15 @@ const EMPTY_ENTRY: Omit<PasswordEntry, 'id' | 'createdAt' | 'updatedAt'> = {
 type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret' | 'passkey';
 
 const PRESETS = [
-  { id: 'login-user', name: 'Login (Username)', fields: ['username', 'password', 'url'] as StandardFieldKey[] },
-  { id: 'login-email', name: 'Login (Email)', fields: ['email', 'password', 'url'] as StandardFieldKey[] },
-  { id: 'note', name: 'Secure Note', fields: ['notes'] as StandardFieldKey[] },
-  { id: 'password-only', name: 'Password Only', fields: ['password'] as StandardFieldKey[] },
-  { id: 'custom', name: 'Custom', fields: [] as StandardFieldKey[] },
+  { id: 'login-user', nameKey: 'preset.login_user', fields: ['username', 'password', 'url'] as StandardFieldKey[] },
+  { id: 'login-email', nameKey: 'preset.login_email', fields: ['email', 'password', 'url'] as StandardFieldKey[] },
+  { id: 'note', nameKey: 'preset.secure_note', fields: ['notes'] as StandardFieldKey[] },
+  { id: 'password-only', nameKey: 'preset.password_only', fields: ['password'] as StandardFieldKey[] },
+  { id: 'custom', nameKey: 'preset.custom', fields: [] as StandardFieldKey[] },
 ];
 
 export default function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
+  const { t } = useTranslation();
   const { addEntry, updateEntry, tags: allTags, filterCategory, addToast } = useAppState();
   const isEdit = !!editEntry;
 
@@ -189,22 +191,25 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
 
   const getFieldSuffix = useCallback((type: FieldType): string => {
     switch (type) {
-      case 'password': return 'Password';
-      case 'email': return 'Email';
-      case 'username': return 'Username';
-      case 'url': return 'Website';
-      case 'totp': return 'TOTP';
-      case 'notes': return 'Note';
-      default: return 'Field';
+      case 'password': return t('detail.password');
+      case 'email': return t('detail.email');
+      case 'username': return t('detail.username');
+      case 'url': return t('detail.url');
+      case 'totp': return t('detail.totp');
+      case 'notes': return t('preset.secure_note');
+      default: return t('entry.custom_field');
     }
-  }, []);
+  }, [t]);
 
   const getOrdinal = useCallback((count: number): string => {
-    const ordinals = ['Secondary', 'Tertiary', 'Quaternary', 'Quinary', 'Senary', 'Septenary', 'Octonary', 'Nonary', 'Denary'];
+    const ordinalKeys = [
+      'ordinal.1', 'ordinal.2', 'ordinal.3', 'ordinal.4', 'ordinal.5',
+      'ordinal.6', 'ordinal.7', 'ordinal.8', 'ordinal.9'
+    ];
     if (count <= 0) return '';
-    if (count - 1 < ordinals.length) return ordinals[count - 1];
-    return `${count + 1}th`;
-  }, []);
+    if (count - 1 < ordinalKeys.length) return t(ordinalKeys[count - 1]);
+    return `${count + 1}`;
+  }, [t]);
 
   const getFieldCount = useCallback((type: FieldType | StandardFieldKey): number => {
     let count = 0;
@@ -433,7 +438,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
               <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">
-                {isEdit ? 'Edit Entry' : 'New Entry'}
+                {isEdit ? t('common.edit') : t('list.new_entry')}
               </h2>
               <button
                 onClick={onClose}
@@ -448,7 +453,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
               {/* Presets / Templates */}
               <div className="flex flex-col gap-1.5 pb-2 border-b border-[var(--border-subtle)] mb-1">
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                  Template
+                  {t('entry.template')}
                 </label>
                 <div className="flex flex-wrap gap-1.5">
                   {PRESETS.map((p) => {
@@ -482,7 +487,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                             : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)]'
                         }`}
                       >
-                        {p.name}
+                        {t(p.nameKey)}
                       </button>
                     );
                   })}
@@ -492,7 +497,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
               {/* Title (Locked at the top) */}
               <div className="flex flex-col gap-1.5">
                 <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
-                  <Globe size={14} /> Title
+                  <Globe size={14} /> {t('entry.title')}
                   <span className="text-[var(--destructive)]">*</span>
                 </label>
                 <input
@@ -522,7 +527,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     onRemove = () => removeField(id as StandardFieldKey);
                     if (id === 'username') {
                       icon = <User size={13} />;
-                      label = 'Username';
+                      label = t('detail.username');
                       content = (
                         <input
                           type="text"
@@ -534,7 +539,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       );
                     } else if (id === 'email') {
                       icon = <Mail size={13} />;
-                      label = 'Email';
+                      label = t('detail.email');
                       content = (
                         <input
                           type="text"
@@ -546,7 +551,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       );
                     } else if (id === 'url') {
                       icon = <Globe size={13} />;
-                      label = 'Website (URL)';
+                      label = t('detail.url');
                       content = (
                         <input
                           type="text"
@@ -558,14 +563,14 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       );
                     } else if (id === 'totpSecret') {
                       icon = <ShieldCheck size={13} />;
-                      label = 'Two-Factor Auth (TOTP)';
+                      label = t('detail.totp');
                       content = (
                         <div className="flex flex-col gap-3">
                           <input
                             type="text"
                             value={form.totpSecret || ''}
                             onChange={(e) => updateField('totpSecret', e.target.value || undefined)}
-                            placeholder="TOTP secret or otpauth:// URI"
+                            placeholder={t('entry.totp_placeholder')}
                             className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 font-mono text-[13px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                           />
                           <div className="flex flex-col gap-1">
@@ -575,7 +580,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                             <textarea
                               value={form.recoveryCodes || ''}
                               onChange={(e) => updateField('recoveryCodes', e.target.value || undefined)}
-                              placeholder="Enter recovery codes (one per line, space or comma separated)..."
+                              placeholder={t('entry.recovery_placeholder')}
                               rows={3}
                               className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                             />
@@ -584,19 +589,19 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       );
                     } else if (id === 'notes') {
                       icon = <FileText size={13} />;
-                      label = 'Secure Note';
+                      label = t('preset.secure_note');
                       content = (
                         <textarea
                           value={form.notes}
                           onChange={(e) => updateField('notes', e.target.value)}
-                          placeholder="Optional notes..."
+                          placeholder={t('entry.notes_placeholder')}
                           rows={2}
                           className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                         />
                       );
                     } else if (id === 'password') {
                       icon = <Key size={13} />;
-                      label = 'Password';
+                      label = t('detail.password');
                       content = (
                         <div className="flex flex-col gap-1.5">
                           <div className="flex gap-1.5">
@@ -605,7 +610,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                 type={showPassword ? 'text' : 'password'}
                                 value={form.password}
                                 onChange={(e) => updateField('password', e.target.value)}
-                                placeholder="Enter or generate a password"
+                                placeholder={t('entry.password_placeholder')}
                                 className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 pr-9 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
                                   errors.password ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
                                 }`}
@@ -671,12 +676,12 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                           {isEdit && form.hasPasskey ? (
                             <div className="flex items-center gap-2">
                               <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                              <span>Passkey is active. Removing this field will delete the passkey upon saving.</span>
+                              <span>{t('entry.passkey_active_desc')}</span>
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
                               <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                              <span>A new ES256 keypair will be generated and saved upon saving this entry.</span>
+                              <span>{t('entry.passkey_new_desc')}</span>
                             </div>
                           )}
                         </div>
@@ -695,7 +700,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     else if (cf.type === 'totp') cfIcon = <ShieldCheck size={13} />;
 
                     icon = cfIcon;
-                    label = cf.name || 'Custom Field';
+                    label = cf.name || t('entry.custom_field');
 
                     const suffix = getFieldSuffix(cf.type);
                     const currentPrefix = getPrefix(cf.name, suffix);
@@ -730,13 +735,13 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                           }}
                           className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--border-focus)] shrink-0"
                         >
-                          <option value="password">Password</option>
-                          <option value="email">Email</option>
-                          <option value="username">Username</option>
-                          <option value="url">URL</option>
-                          <option value="notes">Notes</option>
-                          <option value="totp">TOTP</option>
-                          <option value="text">Text</option>
+                          <option value="password">{t('detail.password')}</option>
+                          <option value="email">{t('detail.email')}</option>
+                          <option value="username">{t('detail.username')}</option>
+                          <option value="url">{t('detail.url')}</option>
+                          <option value="notes">{t('preset.secure_note')}</option>
+                          <option value="totp">{t('detail.totp')}</option>
+                          <option value="text">{t('entry.custom_field')}</option>
                         </select>
                         <div className="relative flex-1 min-w-0">
                           <input
@@ -747,14 +752,15 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                             className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] pl-2.5 pr-8 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                           />
                           {isPasswordType && (
-                            <button
-                              type="button"
-                              onClick={() => setShowCustomPasswords(prev => ({ ...prev, [cf.id]: !prev[cf.id] }))}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-0.5"
-                              title={showCustomPasswords[cf.id] ? 'Hide password' : 'Show password'}
-                            >
-                              {showCustomPasswords[cf.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                            </button>
+                            <ActionTooltip content={showCustomPasswords[cf.id] ? t('login.hide_password') : t('login.show_password')}>
+                              <button
+                                type="button"
+                                onClick={() => setShowCustomPasswords(prev => ({ ...prev, [cf.id]: !prev[cf.id] }))}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-0.5"
+                              >
+                                {showCustomPasswords[cf.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                              </button>
+                            </ActionTooltip>
                           )}
                         </div>
                       </div>
@@ -776,14 +782,15 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                             {icon} {label}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={onRemove}
-                          className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
-                          title={`Remove ${label}`}
-                        >
-                          <X size={12} />
-                        </button>
+                        <ActionTooltip content={t('common.delete')}>
+                          <button
+                            type="button"
+                            onClick={onRemove}
+                            className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </ActionTooltip>
                       </div>
 
                       {content}
@@ -794,7 +801,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
 
               {/* Tags */}
               <div className="flex flex-col gap-1.5 mt-1">
-                <label className="text-[12px] font-medium text-[var(--text-secondary)]">Tags</label>
+                <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('sidebar.tags')}</label>
                 <div className="flex flex-wrap gap-1.5">
                   {allTags.map((tag: Tag) => {
                     const active = form.tags.includes(tag.name);
@@ -839,7 +846,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       type="button"
                       className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
                     >
-                      <Plus size={13} /> Add field
+                      <Plus size={13} /> {t('entry.add_field')}
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-[220px] max-h-[340px] overflow-y-auto z-50">
@@ -848,42 +855,42 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <User size={13} />
-                      <span>{getDropdownLabel('username', 'Username')}</span>
+                      <span>{getDropdownLabel('username', t('detail.username'))}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('password')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <Key size={13} />
-                      <span>{getDropdownLabel('password', 'Password')}</span>
+                      <span>{getDropdownLabel('password', t('detail.password'))}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('email')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <Mail size={13} />
-                      <span>{getDropdownLabel('email', 'Email')}</span>
+                      <span>{getDropdownLabel('email', t('detail.email'))}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('url')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <Globe size={13} />
-                      <span>{getDropdownLabel('url', 'Website (URL)')}</span>
+                      <span>{getDropdownLabel('url', t('detail.url'))}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('totpSecret')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <ShieldCheck size={13} />
-                      <span>{getDropdownLabel('totpSecret', 'Two-Factor Auth (TOTP)')}</span>
+                      <span>{getDropdownLabel('totpSecret', t('detail.totp'))}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('notes')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <FileText size={13} />
-                      <span>{getDropdownLabel('notes', 'Secure Note')}</span>
+                      <span>{getDropdownLabel('notes', t('preset.secure_note'))}</span>
                     </DropdownMenuItem>
                     {!fieldsOrder.includes('passkey') && (
                       <DropdownMenuItem
@@ -902,7 +909,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <Plus size={13} />
-                      <span>Custom Field</span>
+                      <span>{t('entry.custom_field')}</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -917,7 +924,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     onChange={(e) => updateField('favorite', e.target.checked)}
                     className="accent-[var(--accent)] h-3.5 w-3.5 cursor-pointer"
                   />
-                  Favorite
+                  {t('detail.favorite')}
                 </label>
 
                 <div className="flex gap-2">
@@ -926,7 +933,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     onClick={onClose}
                     className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <button
                     type="submit"
@@ -936,12 +943,12 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     {loading ? (
                       <>
                         <Loader2 size={14} className="animate-spin" />
-                        Saving...
+                        {t('common.loading')}
                       </>
                     ) : isEdit ? (
-                      'Save Changes'
+                      t('common.save')
                     ) : (
-                      'Create Entry'
+                      t('list.new_entry')
                     )}
                   </button>
                 </div>
@@ -983,14 +990,15 @@ const Field = React.forwardRef<HTMLInputElement, FieldProps>(
           {required && <span className="text-[var(--destructive)]">*</span>}
         </span>
         {onRemove && (
-          <button
-            type="button"
-            onClick={onRemove}
-            className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
-            title={`Remove ${label}`}
-          >
-            <X size={12} />
-          </button>
+          <ActionTooltip content={`Remove ${label}`}>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </ActionTooltip>
         )}
       </div>
       <input

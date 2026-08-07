@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Keyboard } from 'lucide-react';
 import { useBackend } from '@/lib/useBackend';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { ActionTooltip } from './ui/tooltip';
 
 interface AutotypeButtonProps {
@@ -11,6 +12,7 @@ interface AutotypeButtonProps {
 }
 
 export default function AutotypeButton({ value, className = '', size = 14 }: AutotypeButtonProps) {
+  const { t } = useTranslation();
   const { backend } = useBackend();
   const { addToast, settings } = useAppState();
   const [autotyping, setAutotyping] = useState(false);
@@ -38,7 +40,7 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
   );
 
   return (
-    <ActionTooltip content={autotyping ? 'Autotyping...' : 'Autotype field'}>
+    <ActionTooltip content={autotyping ? t('autotype.autotyping') : t('autotype.tooltip')}>
       <button
         type="button"
         onClick={handleAutotype}

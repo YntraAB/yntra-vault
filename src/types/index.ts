@@ -57,6 +57,7 @@ export interface Vault {
 
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system';
+  language: string;
   sidebarWidth: number;
   passwordListWidth: number;
   fontSize: number;

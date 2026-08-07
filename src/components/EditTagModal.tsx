@@ -9,7 +9,9 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Tag as TagIcon, Check, Trash2, AlertTriangle } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import type { Tag } from '@/types';
+import { ActionTooltip } from './ui/tooltip';
 
 interface EditTagModalProps {
   open: boolean;
@@ -23,6 +25,7 @@ const PRESET_COLORS = [
 ];
 
 export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) {
+  const { t } = useTranslation();
   const { updateTag, removeTag, tags, addToast } = useAppState();
   const [name, setName] = useState('');
   const [color, setColor] = useState(PRESET_COLORS[0]);
@@ -63,30 +66,30 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
 
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Name is required');
+      setError(t('tags.err_name_req'));
       return;
     }
     if (trimmed.length < 2) {
-      setError('Name must be at least 2 characters');
+      setError(t('tags.err_min_length'));
       return;
     }
     if (
       trimmed.toLowerCase() !== tag.name.toLowerCase() &&
       tags.some((t) => t.name.toLowerCase() === trimmed.toLowerCase())
     ) {
-      setError('A tag with this name already exists');
+      setError(t('tags.err_exists'));
       return;
     }
 
     updateTag(tag.id, { name: trimmed, color });
-    addToast({ message: `Tag updated`, type: 'success' });
+    addToast({ message: t('tags.toast_updated'), type: 'success' });
     onClose();
   };
 
   const handleDelete = () => {
     if (!tag) return;
     removeTag(tag.id);
-    addToast({ message: `Tag "${tag.name}" deleted`, type: 'info' });
+    addToast({ message: t('tags.toast_deleted', { name: tag.name }), type: 'info' });
     onClose();
   };
 
@@ -115,15 +118,17 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
               <div className="flex items-center gap-2.5">
                 <TagIcon size={16} className="text-[var(--text-primary)]" />
                 <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">
-                  Edit Tag
+                  {t('menu.edit_tag')}
                 </h2>
               </div>
-              <button
-                onClick={onClose}
-                className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <X size={16} />
-              </button>
+              <ActionTooltip content={t('common.close')}>
+                <button
+                  onClick={onClose}
+                  className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <X size={16} />
+                </button>
+              </ActionTooltip>
             </div>
 
             {/* Delete confirmation */}
@@ -141,10 +146,12 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
                       <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-400" />
                       <div>
                         <p className="text-[13px] font-medium text-[var(--text-primary)]">
-                          Delete "{tag.name}"?
+                          {t('tags.delete_confirm', { name: tag.name })}
                         </p>
                         <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                          This will remove the tag from {tag.count} {tag.count === 1 ? 'entry' : 'entries'}. Entries themselves will not be deleted.
+                          {tag.count === 1
+                            ? t('tags.delete_desc_1', { count: tag.count })
+                            : t('tags.delete_desc_other', { count: tag.count })}
                         </p>
                       </div>
                     </div>
@@ -153,13 +160,13 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
                         onClick={() => setShowDelete(false)}
                         className="h-8 rounded-md px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
                       >
-                        Cancel
+                        {t('common.cancel')}
                       </button>
                       <button
                         onClick={handleDelete}
                         className="h-8 rounded-md bg-[var(--destructive)] px-3 text-[12px] font-medium text-white transition-colors hover:opacity-90"
                       >
-                        Delete Tag
+                        {t('tags.delete_tag_btn')}
                       </button>
                     </div>
                   </div>
@@ -172,7 +179,7 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
               {/* Name */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">
-                  Tag Name
+                  {t('tags.tag_name')}
                 </label>
                 <input
                   ref={nameRef}
@@ -182,7 +189,7 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
                     setName(e.target.value);
                     setError('');
                   }}
-                  placeholder="e.g. Work, Personal, Finance..."
+                  placeholder={t('tag.name_ph')}
                   className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
                     error ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
                   }`}
@@ -195,7 +202,7 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
               {/* Color */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">
-                  Color
+                  {t('tags.color')}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_COLORS.map((c) => (
@@ -222,7 +229,7 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
                   style={{ backgroundColor: color }}
                 />
                 <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                  {name.trim() || 'Tag Name'}
+                  {name.trim() || t('tags.tag_name')}
                 </span>
                 <span className="ml-auto text-[11px] tabular-nums text-[var(--text-tertiary)]">
                   {tag.count}
@@ -237,7 +244,7 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
                   className="flex h-9 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8"
                 >
                   <Trash2 size={14} />
-                  Delete
+                  {t('menu.delete')}
                 </button>
                 <div className="flex gap-2">
                   <button
@@ -245,13 +252,13 @@ export default function EditTagModal({ open, onClose, tag }: EditTagModalProps) 
                     onClick={onClose}
                     className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <button
                     type="submit"
                     className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-4 text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90"
                   >
-                    Save Changes
+                    {t('common.save_changes')}
                   </button>
                 </div>
               </div>

@@ -33,17 +33,26 @@ pub fn generate_nonce_24() -> [u8; 24] {
     nonce
 }
 
-// ─── Layer 1: XChaCha20-Poly1305 (Vault-level) ─────────────────────────
+// ─── Layer 1: XChaCha20-Poly1305 (Vault-level with AAD Header Binding) ─────────
 
-pub fn encrypt_vault(plaintext: &[u8], key: &VaultKey) -> crate::Result<EncryptedBlob> {
+pub fn encrypt_vault_with_aad(
+    plaintext: &[u8],
+    key: &VaultKey,
+    aad: &[u8],
+) -> crate::Result<EncryptedBlob> {
     let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
         .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 key init: {}", e)))?;
 
     let nonce_bytes = generate_nonce_24();
     let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
 
+    let payload = Payload {
+        msg: plaintext,
+        aad,
+    };
+
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(nonce, payload)
         .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 encrypt: {}", e)))?;
 
     Ok(EncryptedBlob {
@@ -52,7 +61,15 @@ pub fn encrypt_vault(plaintext: &[u8], key: &VaultKey) -> crate::Result<Encrypte
     })
 }
 
-pub fn decrypt_vault(blob: &EncryptedBlob, key: &VaultKey) -> crate::Result<Zeroizing<Vec<u8>>> {
+pub fn encrypt_vault(plaintext: &[u8], key: &VaultKey) -> crate::Result<EncryptedBlob> {
+    encrypt_vault_with_aad(plaintext, key, b"")
+}
+
+pub fn decrypt_vault_with_aad(
+    blob: &EncryptedBlob,
+    key: &VaultKey,
+    aad: &[u8],
+) -> crate::Result<Zeroizing<Vec<u8>>> {
     let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
         .map_err(|e| VaultError::DecryptionError(format!("XChaCha20 key init: {}", e)))?;
 
@@ -63,11 +80,20 @@ pub fn decrypt_vault(blob: &EncryptedBlob, key: &VaultKey) -> crate::Result<Zero
     }
 
     let nonce = chacha20poly1305::XNonce::from_slice(&blob.nonce);
+    let payload = Payload {
+        msg: blob.ciphertext.as_ref(),
+        aad,
+    };
+
     let plaintext = cipher
-        .decrypt(nonce, blob.ciphertext.as_ref())
+        .decrypt(nonce, payload)
         .map_err(|_| VaultError::InvalidPassword)?;
 
     Ok(Zeroizing::new(plaintext))
+}
+
+pub fn decrypt_vault(blob: &EncryptedBlob, key: &VaultKey) -> crate::Result<Zeroizing<Vec<u8>>> {
+    decrypt_vault_with_aad(blob, key, b"")
 }
 
 // ─── Layer 2: XChaCha20-Poly1305 (Per-entry, 24-byte Hedged Nonce + AAD Binding) ──────

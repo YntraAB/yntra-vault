@@ -6,6 +6,7 @@ import { isTauri, getBackend, type YntraVaultBackend, type EntryPreview, type De
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
+  language: 'en',
   sidebarWidth: 220,
   passwordListWidth: 320,
   fontSize: 13,

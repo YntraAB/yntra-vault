@@ -10,6 +10,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useBackend } from '../lib/useBackend';
 import { useAppState } from '../contexts/AppStateContext';
 import type { BreachStatus } from '../lib/backend';
+import { ActionTooltip } from './ui/tooltip';
 
 interface BreachIndicatorProps {
   /** Pre-fetched breach status from entry data */
@@ -105,9 +106,11 @@ export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
 
   if (compact) {
     return (
-      <span className={`text-[10px] font-medium tracking-wide ${config.textColor}`} title={config.tooltip}>
-        {config.shortLabel}
-      </span>
+      <ActionTooltip content={config.tooltip}>
+        <span className={`text-[10px] font-medium tracking-wide ${config.textColor}`}>
+          {config.shortLabel}
+        </span>
+      </ActionTooltip>
     );
   }
 

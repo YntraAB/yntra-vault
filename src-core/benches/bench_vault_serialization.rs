@@ -99,7 +99,7 @@ pub fn bench_vault_serialization(c: &mut Criterion) {
                 salt: [1u8; 32],
                 kdf_params: KdfParams::default(),
             },
-            hmac: [7u8; 64],
+            hmac: Some([7u8; 64]),
             encrypted_payload: serialized_bincode.clone(),
         };
 

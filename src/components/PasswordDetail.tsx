@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import CopyButton from './CopyButton';
 import AutotypeButton from './AutotypeButton';
 import PasswordInput from './PasswordInput';
@@ -36,6 +37,7 @@ import { ActionTooltip } from './ui/tooltip';
 
 
 export default function PasswordDetail() {
+  const { t } = useTranslation();
   const { selectedEntry, setIsEditing, isEditing, deleteEntry, updateEntry, tags, togglePin, toggleFavorite, isLoadingDetail, addToast, settings, refreshEntries, selectEntryById, setFilterCategory } = useAppState();
   const { backend } = useBackend();
   const [editData, setEditData] = useState(selectedEntry);
@@ -207,9 +209,9 @@ export default function PasswordDetail() {
             className="flex h-[80vh] flex-col items-center justify-center"
           >
             <div className="text-center">
-              <p className="text-[16px] font-semibold text-[var(--text-tertiary)]">Select an entry</p>
+              <p className="text-[16px] font-semibold text-[var(--text-tertiary)]">{t('detail.select_entry')}</p>
               <p className="mt-1 text-[13px] text-[var(--text-tertiary)]">
-                Choose a password from the list to view details
+                {t('detail.select_entry_desc')}
               </p>
             </div>
           </motion.div>
@@ -272,21 +274,21 @@ export default function PasswordDetail() {
                   {/* Tags */}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {entryTags.map((tag) => (
-                      <button
-                        key={tag.id}
-                        type="button"
-                        onClick={() => setFilterCategory(tag.name)}
-                        className="inline-flex items-center gap-1 rounded-[2px] px-1.5 py-0.5 text-[11px] cursor-pointer transition-opacity hover:opacity-80 focus:outline-none"
-                        style={{
-                          backgroundColor: `${tag.color}14`,
-                          color: tag.color,
-                          border: `1px solid ${tag.color}33`,
-                        }}
-                        title={`Filter by ${tag.name}`}
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: tag.color }} />
-                        {tag.name}
-                      </button>
+                      <ActionTooltip key={tag.id} content={t('detail.filter_by', { tag: tag.name })}>
+                        <button
+                          type="button"
+                          onClick={() => setFilterCategory(tag.name)}
+                          className="inline-flex items-center gap-1 rounded-[2px] px-1.5 py-0.5 text-[11px] cursor-pointer transition-opacity hover:opacity-80 focus:outline-none"
+                          style={{
+                            backgroundColor: `${tag.color}14`,
+                            color: tag.color,
+                            border: `1px solid ${tag.color}33`,
+                          }}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: tag.color }} />
+                          {tag.name}
+                        </button>
+                      </ActionTooltip>
                     ))}
                   </div>
                 </div>
@@ -300,19 +302,19 @@ export default function PasswordDetail() {
                       onClick={handleSave}
                       className="h-8 rounded-[3px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)]"
                     >
-                      Save
+                      {t('common.save')}
                     </button>
                     <button
                       onClick={() => setIsEditing(false)}
                       className="h-8 rounded-[3px] px-3 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </>
                 ) : (
                   <>
                     {/* Pin toggle */}
-                    <ActionTooltip content={data.pinned ? 'Unpin entry' : 'Pin entry'}>
+                    <ActionTooltip content={data.pinned ? t('menu.unpin') : t('menu.pin')}>
                       <button
                         onClick={() => togglePin(data.id)}
                         className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors ${data.pinned
@@ -325,7 +327,7 @@ export default function PasswordDetail() {
                     </ActionTooltip>
 
                     {/* Favorite toggle */}
-                    <ActionTooltip content={data.favorite ? 'Remove from favorites' : 'Add to favorites'}>
+                    <ActionTooltip content={data.favorite ? t('detail.fav_remove') : t('detail.fav_add')}>
                       <button
                         onClick={() => toggleFavorite(data.id)}
                         className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors ${data.favorite
@@ -339,29 +341,33 @@ export default function PasswordDetail() {
 
                     <div className="w-[1px] h-4 bg-[var(--border-subtle)] mx-1" />
 
-                    <ActionTooltip content="Run Smart Login">
+                    <ActionTooltip content={t('detail.run_smart_login')}>
                       <button
                         onClick={handleSmartLoginClick}
                         className="inline-flex h-8 items-center rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       >
-                        <span>Smart Login</span>
+                        <span>{t('detail.smart_login')}</span>
                       </button>
                     </ActionTooltip>
 
-                    <button
-                      onClick={() => setShowEditModal(true)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    >
-                      <Pencil size={14} />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => setShowDelConfirm(true)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8"
-                    >
-                      <Trash2 size={14} />
-                      Delete
-                    </button>
+                    <ActionTooltip content={t('common.edit')}>
+                      <button
+                        onClick={() => setShowEditModal(true)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      >
+                        <Pencil size={14} />
+                        {t('common.edit')}
+                      </button>
+                    </ActionTooltip>
+                    <ActionTooltip content={t('common.delete')}>
+                      <button
+                        onClick={() => setShowDelConfirm(true)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8"
+                      >
+                        <Trash2 size={14} />
+                        {t('common.delete')}
+                      </button>
+                    </ActionTooltip>
                   </>
                 )}
               </div>
@@ -387,7 +393,7 @@ export default function PasswordDetail() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
-                            Username
+                            {t('detail.username')}
                           </div>
                           {isEditing && editData ? (
                             <input
@@ -426,7 +432,7 @@ export default function PasswordDetail() {
                           </span>
                           <div className="min-w-0 flex-1">
                             <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
-                              Password
+                              {t('detail.password')}
                             </div>
                             {isEditing && editData ? (
                               <PasswordInput
@@ -441,7 +447,7 @@ export default function PasswordDetail() {
                           </div>
                           {!isEditing && (
                             <div className="flex items-center gap-1 shrink-0">
-                              <ActionTooltip content={showPassword ? 'Hide password' : 'Show password'}>
+                              <ActionTooltip content={showPassword ? t('login.hide_password') : t('login.show_password')}>
                                 <button
                                   type="button"
                                   onClick={() => setShowPassword(!showPassword)}
@@ -480,7 +486,7 @@ export default function PasswordDetail() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
-                            URL
+                            {t('detail.url')}
                           </div>
                           {isEditing && editData ? (
                             <input
@@ -498,7 +504,7 @@ export default function PasswordDetail() {
                         {!isEditing && (
                           <div className="flex items-center gap-1">
                             {data.url && (
-                              <ActionTooltip content="Open website in browser">
+                              <ActionTooltip content={t('detail.open_website')}>
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -533,7 +539,7 @@ export default function PasswordDetail() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
-                            Email
+                            {t('detail.email')}
                           </div>
                           {isEditing && editData ? (
                             <input
@@ -572,7 +578,7 @@ export default function PasswordDetail() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
-                            Notes
+                            {t('detail.notes')}
                           </div>
                           {isEditing && editData ? (
                             <textarea
@@ -604,7 +610,7 @@ export default function PasswordDetail() {
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                                  Recovery Codes
+                                  {t('detail.recovery_codes')}
                                 </span>
                                 <span className="text-[10px] text-[var(--text-tertiary)]/70">
                                   ({data.recoveryCodes.split(/[\s,;\n]+/).filter(Boolean).length} keys)
@@ -614,7 +620,7 @@ export default function PasswordDetail() {
                                 onClick={() => setShowRecovery(!showRecovery)}
                                 className="text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                               >
-                                {showRecovery ? 'Hide Codes' : 'Show Codes'}
+                                {showRecovery ? t('detail.hide_codes') : t('detail.show_codes')}
                               </button>
                             </div>
 
@@ -643,7 +649,7 @@ export default function PasswordDetail() {
                                     }}
                                     className="rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                                   >
-                                    Copy All
+                                    {t('detail.copy_all_codes')}
                                   </button>
                                 </div>
                               </motion.div>
@@ -701,7 +707,7 @@ export default function PasswordDetail() {
                       {!isEditing && (
                         <div className="flex items-center gap-1">
                           {isPassword && (
-                            <ActionTooltip content={showCustomPasswords[cf.id] ? 'Hide password' : 'Show password'}>
+                            <ActionTooltip content={showCustomPasswords[cf.id] ? t('login.hide_password') : t('login.show_password')}>
                               <button
                                 type="button"
                                 onClick={() => setShowCustomPasswords(prev => ({ ...prev, [cf.id]: !prev[cf.id] }))}
@@ -776,10 +782,10 @@ export default function PasswordDetail() {
             {/* Footer */}
             <div className="mt-auto flex gap-6 border-t border-[var(--border-subtle)] px-4 py-3">
               <span className="text-[12px] text-[var(--text-tertiary)]">
-                Created: {formatDate(data.createdAt)}
+                {t('detail.created')}: {formatDate(data.createdAt)}
               </span>
               <span className="text-[12px] text-[var(--text-tertiary)]">
-                Modified: {formatDate(data.updatedAt)}
+                {t('detail.updated')}: {formatDate(data.updatedAt)}
               </span>
             </div>
           </motion.div>
@@ -916,20 +922,21 @@ function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number
   };
 
   return (
-    <button
-      onClick={handleCopy}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="flex items-center justify-between rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-left transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] active:scale-[0.98] group cursor-pointer w-full outline-none"
-      title="Click to copy"
-    >
-      <span className="truncate text-[var(--text-primary)] font-medium font-mono tracking-wide">
-        {hovered ? code : '••••••••'}
-      </span>
-      <span className="text-[9px] text-[var(--text-tertiary)] shrink-0 select-none group-hover:text-[var(--text-secondary)] transition-colors ml-2">
-        {copied ? 'Copied' : `#${index + 1}`}
-      </span>
-    </button>
+    <ActionTooltip content={copied ? 'Copied code!' : 'Click to copy recovery code'}>
+      <button
+        onClick={handleCopy}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className="flex items-center justify-between rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-left transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] active:scale-[0.98] group cursor-pointer w-full outline-none"
+      >
+        <span className="truncate text-[var(--text-primary)] font-medium font-mono tracking-wide">
+          {hovered ? code : '••••••••'}
+        </span>
+        <span className="text-[9px] text-[var(--text-tertiary)] shrink-0 select-none group-hover:text-[var(--text-secondary)] transition-colors ml-2">
+          {copied ? 'Copied' : `#${index + 1}`}
+        </span>
+      </button>
+    </ActionTooltip>
   );
 }
 

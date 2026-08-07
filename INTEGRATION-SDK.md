@@ -11,15 +11,14 @@
 ```
 ┌──────────────────────────────────┐
 │  Magic: "YNTR" (4 bytes)        │
-│  Version: u16 LE (2 bytes)      │
+│  Version: u16 LE (2 bytes) -> 3 │
 │  Flags: u16 LE (2 bytes)        │
 │  Salt: [u8; 32] (32 bytes)      │
-│  HMAC-SHA512: [u8; 64]          │
-│  KDF Params Length: u32 LE      │
+│  KDF Params Length: u32 LE      │  (Header bound as AAD)
 │  KDF Params (bincode)           │
 │  Payload Length: u64 LE         │
 │  ────────────────────────────── │
-│  Encrypted Payload              │
+│  Encrypted Payload (MessagePack)│  (XChaCha20-Poly1305 + Tag)
 └──────────────────────────────────┘
 ```
 
@@ -28,9 +27,10 @@
 | Version | Payload Encoding | Status |
 |---------|-----------------|--------|
 | `1` | bincode (positional, legacy) | Read-only — auto-upgraded on save |
-| `2` | MessagePack (self-describing) | Current — all writes use v2 |
+| `2` | MessagePack + Outer HMAC | Read-only — auto-upgraded to v3 on save |
+| `3` | MessagePack + AAD Header Binding | Current — single-pass SOTA format |
 
-**Migration behavior**: Opening a v1 vault deserializes via bincode with legacy struct fallback, then re-saves as v2 MessagePack on next write. No user action required.
+**Migration behavior**: Opening a v1 or v2 vault deserializes legacy data and verifies legacy HMACs where applicable, then re-saves as v3 MessagePack with AAD header binding on next write. No user action required.
 
 ### Encryption Pipeline
 
@@ -41,18 +41,18 @@ Master Password
 Argon2id (256 MB, 4 passes, 4 threads)
     │
     ▼
-HKDF-SHA512 ──┬── Vault Key (XChaCha20-Poly1305)
-               ├── Entry Key (AES-256-GCM)
-               ├── HMAC Key (HMAC-SHA512)
+HKDF-SHA512 ──┬── Vault Key (XChaCha20-Poly1305 + Header AAD)
+               ├── Entry Key (XChaCha20-Poly1305 / AES-256-GCM)
+               ├── P2P Auth Key (HMAC-SHA512)
                └── Search Key (trigram hashing)
 ```
 
 **Decryption order**:
 1. Parse header → extract salt + KDF params
 2. Derive keys from password + salt
-3. **Verify HMAC-SHA512** over encrypted payload (reject tampered files before decryption)
+3. **Verify Authenticated Header & Payload** via single-pass XChaCha20-Poly1305 using header AAD (reject tampered files; legacy v1/v2 files verify outer HMAC first)
 4. Decrypt outer layer (XChaCha20-Poly1305 → VaultData)
-5. Per-entry fields decrypted on-demand (AES-256-GCM)
+5. Per-entry fields decrypted on-demand (XChaCha20-Poly1305 / AES-256-GCM)
 
 ### Adding Fields to `Entry` (v2+ rules)
 

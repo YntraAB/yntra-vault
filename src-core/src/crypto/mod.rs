@@ -8,6 +8,7 @@ pub mod passkey;
 pub use kdf::{MasterKey, SubKeys, EntryKey, derive_master_key, derive_master_key_with_keyfile, derive_subkeys, derive_per_entry_key};
 pub use cipher::{
     encrypt_vault, decrypt_vault,
+    encrypt_vault_with_aad, decrypt_vault_with_aad,
     encrypt_entry, decrypt_entry,
     encrypt_entry_with_aad, decrypt_entry_with_aad,
     compute_hmac, verify_hmac,

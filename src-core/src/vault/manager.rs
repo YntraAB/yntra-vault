@@ -5,13 +5,13 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 use chrono::Utc;
-use serde::{Serialize, Deserialize};
 use uuid::Uuid;
-
+use serde::{Serialize, Deserialize};
 use crate::crypto::{
     derive_master_key_with_keyfile, derive_subkeys,
-    encrypt_vault, decrypt_vault,
-    compute_hmac, verify_hmac,
+    decrypt_vault,
+    encrypt_vault_with_aad, decrypt_vault_with_aad,
+    verify_hmac,
     SubKeys, EntryKey, cipher::EncryptedBlob,
 };
 use crate::crypto::kdf::generate_salt;
@@ -150,12 +150,20 @@ impl VaultManager {
         )?;
         let subkeys = derive_subkeys(&master_key)?;
 
-        // Verify HMAC integrity FIRST (detect tampering before decryption)
-        verify_hmac(
-            &vault_file.encrypted_payload,
-            &vault_file.hmac,
-            &subkeys.hmac_key,
-        )?;
+        // Verify HMAC integrity for legacy v1/v2 files
+        if vault_file.header.version <= 2 {
+            if let Some(expected_hmac) = &vault_file.hmac {
+                verify_hmac(
+                    &vault_file.encrypted_payload,
+                    expected_hmac,
+                    &subkeys.hmac_key,
+                )?;
+            } else {
+                return Err(VaultError::InvalidFormat(
+                    "Missing expected HMAC in legacy v1/v2 file format".into(),
+                ));
+            }
+        }
 
         if vault_file.encrypted_payload.len() < 24 {
             return Err(VaultError::InvalidFormat(
@@ -163,13 +171,18 @@ impl VaultManager {
             ));
         }
 
-        // Decrypt vault payload (Layer 1: XChaCha20-Poly1305)
+        // Decrypt vault payload (Layer 1: XChaCha20-Poly1305 with AAD for v3+)
         let encrypted_blob = crate::crypto::cipher::EncryptedBlob {
             nonce: vault_file.encrypted_payload[..24].to_vec(),
             ciphertext: vault_file.encrypted_payload[24..].to_vec(),
         };
 
-        let decrypted = decrypt_vault(&encrypted_blob, &subkeys.vault_key)?;
+        let decrypted = if vault_file.header.version >= 3 {
+            let aad = vault_file.header.aad_bytes()?;
+            decrypt_vault_with_aad(&encrypted_blob, &subkeys.vault_key, &aad)?
+        } else {
+            decrypt_vault(&encrypted_blob, &subkeys.vault_key)?
+        };
 
         // Deserialize vault data based on file format version
         let data: VaultData = match vault_file.header.version {
@@ -219,32 +232,30 @@ impl VaultManager {
         let cutoff = Utc::now() - chrono::Duration::days(30);
         self.data.trash.retain(|t| t.deleted_at > cutoff);
 
-        // Serialize vault data as MessagePack (v2 format — self-describing)
+        // Serialize vault data as MessagePack (self-describing)
         let serialized = rmp_serde::to_vec(&self.data)
             .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {}", e)))?;
 
-        // Encrypt (Layer 1: XChaCha20-Poly1305)
-        let encrypted = encrypt_vault(&serialized, &keys.vault_key)?;
+        let header = FileHeader {
+            version: FORMAT_VERSION,
+            flags: 0,
+            salt: self.salt,
+            kdf_params: KdfParams::default(),
+        };
+        let aad = header.aad_bytes()?;
+
+        // Encrypt with Authenticated Header AAD binding (Layer 1: XChaCha20-Poly1305)
+        let encrypted = encrypt_vault_with_aad(&serialized, &keys.vault_key, &aad)?;
 
         // Combine nonce + ciphertext as the payload
         let mut payload = Vec::with_capacity(encrypted.nonce.len() + encrypted.ciphertext.len());
         payload.extend_from_slice(&encrypted.nonce);
         payload.extend_from_slice(&encrypted.ciphertext);
 
-        // Compute HMAC (Layer 3: integrity)
-        let hmac = compute_hmac(&payload, &keys.hmac_key);
-        let mut hmac_bytes = [0u8; 64];
-        hmac_bytes.copy_from_slice(&hmac);
-
-        // Build vault file
+        // Build vault file (v3 has no outer HMAC)
         let vault_file = VaultFile {
-            header: FileHeader {
-                version: FORMAT_VERSION,
-                flags: 0,
-                salt: self.salt,
-                kdf_params: KdfParams::default(),
-            },
-            hmac: hmac_bytes,
+            header,
+            hmac: None,
             encrypted_payload: payload,
         };
 
@@ -1318,7 +1329,7 @@ mod tests {
         };
         let file = VaultFile {
             header,
-            hmac: [0u8; 64],
+            hmac: None,
             encrypted_payload: vec![1, 2, 3], // Payload < 24 bytes
         };
         let corrupted_bytes = file.to_bytes().unwrap();

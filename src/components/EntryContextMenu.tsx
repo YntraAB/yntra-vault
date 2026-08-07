@@ -7,6 +7,7 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Trash2, Zap, Star, Pin } from 'lucide-react';
+import { useTranslation } from '@/contexts/LanguageContext';
 import type { PasswordEntry } from '@/types';
 
 interface EntryContextMenuProps {
@@ -34,6 +35,7 @@ export default function EntryContextMenu({
   onToggleFavorite,
   onTogglePin,
 }: EntryContextMenuProps) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on click outside
@@ -94,7 +96,7 @@ export default function EntryContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Pencil size={13} />
-            Rename
+            {t('menu.rename')}
           </button>
 
           <button
@@ -105,7 +107,7 @@ export default function EntryContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Zap size={13} />
-            Autotype
+            {t('menu.autotype')}
           </button>
 
           <button
@@ -116,7 +118,7 @@ export default function EntryContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Star size={13} className={entry.favorite ? 'fill-current text-orange-500' : ''} />
-            {entry.favorite ? 'Unfavorite' : 'Favorite'}
+            {entry.favorite ? t('menu.unfavorite') : t('menu.favorite')}
           </button>
 
           <button
@@ -127,7 +129,7 @@ export default function EntryContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Pin size={13} className={entry.pinned ? 'fill-current text-yellow-500' : ''} />
-            {entry.pinned ? 'Unpin' : 'Pin'}
+            {entry.pinned ? t('menu.unpin') : t('menu.pin')}
           </button>
 
           <div className="my-1 border-t border-[var(--border-subtle)]" />
@@ -140,7 +142,7 @@ export default function EntryContextMenu({
             className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8"
           >
             <Trash2 size={13} />
-            Delete
+            {t('menu.delete')}
           </button>
         </motion.div>
       )}

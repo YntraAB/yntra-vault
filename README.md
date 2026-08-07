@@ -24,13 +24,13 @@ All credentials remain fully local on your device. Yntra Vault operates with zer
 graph TD
     PWD["Master Password"] --> ARG["Argon2id KDF<br/>(256 MB RAM, 4 Iterations)"]
     ARG --> HKDF["HKDF-SHA512"]
-    HKDF --> VK["Vault Key<br/>(XChaCha20-Poly1305)"]
-    HKDF --> EK["Entry Key<br/>(AES-256-GCM)"]
-    HKDF --> HK["HMAC Key<br/>(HMAC-SHA512 Integrity)"]
+    HKDF --> VK["Vault Key<br/>(XChaCha20-Poly1305 + Header AAD)"]
+    HKDF --> EK["Entry Key<br/>(XChaCha20-Poly1305 / AES-256-GCM)"]
+    HKDF --> HK["P2P Auth Key<br/>(HMAC-SHA512)"]
     HKDF --> SK["Search Key<br/>(Encrypted Index)"]
 ```
 
-* **HMAC-SHA512 Verification**: Vault integrity is verified *before* attempting decryption, protecting against ciphertext tampering.
+* **Single-Pass Authenticated Header**: Header metadata (magic, version, salt, KDF params) is bound as AAD into `XChaCha20-Poly1305`, authenticating header and payload before deserialization.
 * **Passkey Support**: Native ES256 (ECDSA P-256) keypair generation and signing per entry.
 * **Zeroize Memory Protection**: Critical keys and decrypted fields implement `zeroize::ZeroizeOnDrop`. Memory pages are protected against process dump inspection via platform flags (`prctl` / `SetProcessMitigationPolicy`).
 

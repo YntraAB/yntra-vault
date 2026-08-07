@@ -1,6 +1,7 @@
 import { Search, X, Plus, Star, Pin, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
 import EntryModal from './EntryModal';
 import EntryContextMenu from './EntryContextMenu';
@@ -22,6 +23,7 @@ interface Section {
 }
 
 export default function PasswordList({ onResizeStart }: PasswordListProps) {
+  const { t } = useTranslation();
   const { backend } = useBackend();
   const {
     filteredEntries,
@@ -145,18 +147,18 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
     const earlier = filteredEntries.filter((e) => !e.pinned && !isToday(e.updatedAt) && !isYesterday(e.updatedAt));
 
     const result: Section[] = [];
-    if (pinned.length) result.push({ title: 'Pinned', items: pinned });
-    if (today.length) result.push({ title: 'Today', items: today });
-    if (yesterday.length) result.push({ title: 'Yesterday', items: yesterday });
-    if (earlier.length) result.push({ title: 'Earlier', items: earlier });
+    if (pinned.length) result.push({ title: t('detail.pin'), items: pinned });
+    if (today.length) result.push({ title: t('time.today'), items: today });
+    if (yesterday.length) result.push({ title: t('time.yesterday'), items: yesterday });
+    if (earlier.length) result.push({ title: t('time.earlier'), items: earlier });
     return result;
-  }, [filteredEntries]);
+  }, [filteredEntries, t]);
 
   const headerTitle = useMemo(() => {
-    if (filterCategory === 'all') return 'All Items';
-    if (filterCategory === 'favorites') return 'Favorites';
+    if (filterCategory === 'all') return t('sidebar.all_items');
+    if (filterCategory === 'favorites') return t('sidebar.favorites');
     return filterCategory;
-  }, [filterCategory]);
+  }, [filterCategory, t]);
 
   return (
     <div
@@ -169,7 +171,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
           {headerTitle}
         </h1>
         <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
-          {filteredEntries.length} {filteredEntries.length === 1 ? 'item' : 'items'}
+          {t('list.items_count', { count: filteredEntries.length })}
         </span>
       </div>
 
@@ -180,18 +182,20 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
           <Search size={14} className="shrink-0 text-[var(--text-tertiary)]" />
           <input
             type="text"
-            placeholder="Search passwords..."
+            placeholder={t('app.search_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1 bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
           {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
-              className="inline-flex shrink-0 items-center justify-center rounded-[3px] p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-            >
-              <X size={14} />
-            </button>
+            <ActionTooltip content={t('list.clear_search')}>
+              <button
+                onClick={() => setSearchTerm('')}
+                className="inline-flex shrink-0 items-center justify-center rounded-[3px] p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                <X size={14} />
+              </button>
+            </ActionTooltip>
           )}
         </div>
 
@@ -201,7 +205,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
           className="flex h-8 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <Plus size={14} />
-          Add Entry
+          {t('list.new_entry')}
         </button>
       </div>
 
@@ -233,7 +237,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
               transition={{ duration: 0.1, ease: 'easeInOut' }}
               className="flex flex-col items-center justify-center py-16"
             >
-              <p className="text-[13px] text-[var(--text-tertiary)]">No entries found</p>
+              <p className="text-[13px] text-[var(--text-tertiary)]">{t('list.empty_title')}</p>
             </motion.div>
           ) : (
             <motion.div

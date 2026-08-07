@@ -3,6 +3,7 @@ import { Globe, Star, Plus, Settings, Lock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 import CreateTagModal from './CreateTagModal';
 import EditTagModal from './EditTagModal';
 import TagContextMenu from './TagContextMenu';
@@ -26,6 +27,7 @@ const itemVariants = {
 
 export default function Sidebar({ onResizeStart }: SidebarProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const {
     tags,
     filterCategory,
@@ -107,7 +109,7 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
       <nav className="flex flex-col gap-[2px] p-2 mt-2">
         <NavItem
           icon={<Globe size={16} />}
-          label="All Items"
+          label={t('sidebar.all_items')}
           count={allCount}
           active={filterCategory === 'all'}
           density={settings.density}
@@ -115,7 +117,7 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
         />
         <NavItem
           icon={<Star size={16} />}
-          label="Favorites"
+          label={t('sidebar.favorites')}
           count={favCount}
           active={filterCategory === 'favorites'}
           density={settings.density}
@@ -127,9 +129,9 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
       <div className="mt-2 flex flex-1 flex-col overflow-hidden">
         <div className="flex h-7 items-center justify-between px-3">
           <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
-            Vault
+            {t('sidebar.tags')}
           </span>
-          <ActionTooltip content="Create new tag" side="right">
+          <ActionTooltip content={t('sidebar.new_tag')} side="right">
             <button
               onClick={() => setShowCreateTag(true)}
               className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
@@ -176,18 +178,20 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
 
       {/* Footer: Settings + Lock */}
       <div className="flex shrink-0 gap-1 border-t border-[var(--border-subtle)] p-2">
-        <button
-          onClick={() => setSettingsOpen(!settingsOpen)}
-          className={`flex h-9 flex-1 items-center gap-2 rounded-[3px] px-2.5 text-[13px] font-medium transition-colors ${
-            settingsOpen
-              ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-              : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <Settings size={16} />
-          <span>Settings</span>
-        </button>
-        <ActionTooltip content="Lock vault" side="top">
+        <ActionTooltip content={t('sidebar.settings')} side="top" className="flex-1">
+          <button
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            className={`flex h-9 w-full items-center gap-2 rounded-[3px] px-2.5 text-[13px] font-medium transition-colors ${
+              settingsOpen
+                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <Settings size={16} />
+            <span>{t('sidebar.settings')}</span>
+          </button>
+        </ActionTooltip>
+        <ActionTooltip content={t('sidebar.lock_vault')} side="top">
           <button
             onClick={() => {
               setIsLocked(true);
