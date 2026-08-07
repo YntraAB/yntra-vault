@@ -7,7 +7,7 @@
 use chacha20poly1305::{XChaCha20Poly1305, aead::{Aead, KeyInit, Payload}};
 use aes_gcm::{Aes256Gcm, Nonce as AesNonce, aead::Payload as AesPayload};
 use hmac::{Hmac, Mac};
-use sha2::{Sha512, Digest};
+use sha2::Sha512;
 use rand::Rng;
 use zeroize::Zeroizing;
 
@@ -23,21 +23,13 @@ pub struct EncryptedBlob {
     pub ciphertext: Vec<u8>,
 }
 
-/// Generate a 24-byte hedged nonce by digesting CSPRNG entropy, plaintext, and AAD context.
+/// Generate a 24-byte (192-bit) CSPRNG nonce for XChaCha20-Poly1305.
 ///
-/// Provides fault tolerance against OS CSPRNG entropy starvation, stuck RNGs, or VM snapshot rollbacks.
-pub fn generate_hedged_nonce_24(plaintext: &[u8], aad: &[u8]) -> [u8; 24] {
-    let mut csprng_bytes = [0u8; 32];
-    rand::rng().fill(&mut csprng_bytes);
-
-    let mut hasher = Sha512::new();
-    hasher.update(&csprng_bytes);
-    hasher.update(plaintext);
-    hasher.update(aad);
-    let hash_output = hasher.finalize();
-
+/// Follows SOTA RFC 8439 / libsodium standard. Extended 192-bit nonces have a collision
+/// bound of 2^-96, eliminating birthday collision risks under random generation.
+pub fn generate_nonce_24() -> [u8; 24] {
     let mut nonce = [0u8; 24];
-    nonce.copy_from_slice(&hash_output[..24]);
+    rand::rng().fill(&mut nonce);
     nonce
 }
 
@@ -47,7 +39,7 @@ pub fn encrypt_vault(plaintext: &[u8], key: &VaultKey) -> crate::Result<Encrypte
     let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
         .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 key init: {}", e)))?;
 
-    let nonce_bytes = generate_hedged_nonce_24(plaintext, b"yntra-vault-container-v2");
+    let nonce_bytes = generate_nonce_24();
     let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
@@ -88,7 +80,7 @@ pub fn encrypt_entry_with_aad(
     let cipher = XChaCha20Poly1305::new_from_slice(&key.bytes)
         .map_err(|e| VaultError::EncryptionError(format!("XChaCha20 key init: {}", e)))?;
 
-    let nonce_bytes = generate_hedged_nonce_24(plaintext, aad);
+    let nonce_bytes = generate_nonce_24();
     let nonce = chacha20poly1305::XNonce::from_slice(&nonce_bytes);
 
     let payload = Payload {
@@ -312,19 +304,12 @@ mod tests {
     }
 
     #[test]
-    fn test_hedged_nonce_generation() {
-        let plaintext_a = b"password_a";
-        let plaintext_b = b"password_b";
-        let aad = b"test-aad-scope";
-
-        let n1 = generate_hedged_nonce_24(plaintext_a, aad);
-        let n2 = generate_hedged_nonce_24(plaintext_b, aad);
-        let n1_repeat = generate_hedged_nonce_24(plaintext_a, aad);
+    fn test_random_nonce_generation() {
+        let n1 = generate_nonce_24();
+        let n2 = generate_nonce_24();
 
         assert_eq!(n1.len(), 24);
         assert_ne!(n1, n2);
-        // Due to 32 bytes of CSPRNG entropy mixed into SHA-512, sequential calls get fresh nonces
-        assert_ne!(n1, n1_repeat);
     }
 
     #[test]
