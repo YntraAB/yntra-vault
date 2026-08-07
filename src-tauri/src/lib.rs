@@ -88,6 +88,8 @@ pub fn run() {
             commands::set_minimize_to_tray,
             commands::webdav_upload,
             commands::webdav_download,
+            commands::webdav_sync,
+            commands::webdav_test_connection,
             commands::run_p2p_sync_listener,
             commands::run_p2p_sync_client,
             commands::split_master_password,

@@ -26,7 +26,7 @@ impl MasterKey {
     }
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct SubKeys {
     pub vault_key: VaultKey,
     pub entry_key: EntryKey,
@@ -34,7 +34,7 @@ pub struct SubKeys {
     pub search_key: SearchKey,
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct VaultKey {
     pub bytes: [u8; 32],
 }
@@ -44,12 +44,12 @@ pub struct EntryKey {
     pub bytes: [u8; 32],
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct HmacKey {
     pub bytes: [u8; 64],
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct SearchKey {
     pub bytes: [u8; 32],
 }

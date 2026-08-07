@@ -74,7 +74,7 @@ graph TD
 | Master Password Re-keying | `manager.rs` | `ChangeMasterPasswordModal.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Password History & Rollback | `vault/history.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Shamir Secret Sharing | `crypto/sharing.rs` | — | Cross-Platform | ⚙️ Core Only |
-| P2P Vault Synchronization | `vault/sync.rs` | — | Cross-Platform | ⚙️ Core Only |
+| WebDAV Cloud & P2P Vault Sync | `vault/sync.rs` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
 
 ---
 

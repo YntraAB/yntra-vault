@@ -47,9 +47,13 @@ export default function SettingsPanel() {
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
 
   // WebDAV settings state
+  const [webdavEnabled, setWebdavEnabled] = useState(false);
+  const [autoSyncOnSave, setAutoSyncOnSave] = useState(false);
   const [webdavUrl, setWebdavUrl] = useState('');
   const [webdavUser, setWebdavUser] = useState('');
   const [webdavPass, setWebdavPass] = useState('');
+  const [isTestingWebdav, setIsTestingWebdav] = useState(false);
+  const [isSyncingWebdav, setIsSyncingWebdav] = useState(false);
 
   // P2P settings state
   const [p2pAddr, setP2pAddr] = useState('127.0.0.1:5322');
@@ -598,61 +602,141 @@ export default function SettingsPanel() {
                     <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
                       {t('settings.cloud_sync_desc')}
                     </p>
-                    <div className="flex flex-col gap-2">
-                      <input
-                        type="text"
-                        placeholder="WebDAV Server URL"
-                        value={webdavUrl}
-                        onChange={(e) => setWebdavUrl(e.target.value)}
-                        className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-                      />
-                      <div className="flex gap-2">
+                    <div className="flex flex-col gap-4">
+                      {/* Opt-In Master Toggle */}
+                      <div className="flex items-center justify-between rounded-[4px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[13px] font-medium text-[var(--text-primary)]">
+                            {t('settings.enable_webdav')}
+                          </span>
+                          <span className="text-[11px] text-[var(--text-secondary)]">
+                            {t('settings.enable_webdav_desc')}
+                          </span>
+                        </div>
                         <input
-                          type="text"
-                          placeholder={t('detail.username')}
-                          value={webdavUser}
-                          onChange={(e) => setWebdavUser(e.target.value)}
-                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-                        />
-                        <input
-                          type="password"
-                          placeholder={t('detail.password')}
-                          value={webdavPass}
-                          onChange={(e) => setWebdavPass(e.target.value)}
-                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                          type="checkbox"
+                          checked={webdavEnabled}
+                          onChange={(e) => setWebdavEnabled(e.target.checked)}
+                          className="h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)] cursor-pointer"
                         />
                       </div>
-                      <div className="flex gap-2 mt-1">
-                        <button
-                          onClick={async () => {
-                            if (!backend || !currentVault) return;
-                            try {
-                              await backend.webdavUpload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
-                              addToast({ message: 'Backup uploaded successfully!', type: 'success' });
-                            } catch (err) {
-                              addToast({ message: `Upload failed: ${err}`, type: 'error' });
-                            }
-                          }}
-                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-                        >
-                          {t('settings.upload_backup')}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!backend || !currentVault) return;
-                            try {
-                              await backend.webdavDownload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
-                              addToast({ message: 'Database restored from backup!', type: 'success' });
-                              await refreshEntries();
-                            } catch (err) {
-                              addToast({ message: `Download failed: ${err}`, type: 'error' });
-                            }
-                          }}
-                          className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-                        >
-                          {t('settings.download_restore')}
-                        </button>
-                      </div>
+
+                      {webdavEnabled && (
+                        <div className="flex flex-col gap-3 rounded-[4px] border border-[var(--border)] bg-[var(--bg-card)] p-3">
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                              Server Configuration
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="https://nextcloud.example.com/remote.php/dav/files/user/vault.vdb"
+                              value={webdavUrl}
+                              onChange={(e) => setWebdavUrl(e.target.value)}
+                              className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                            />
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder={t('detail.username')}
+                                value={webdavUser}
+                                onChange={(e) => setWebdavUser(e.target.value)}
+                                className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                              />
+                              <input
+                                type="password"
+                                placeholder="App Password / Token"
+                                value={webdavPass}
+                                onChange={(e) => setWebdavPass(e.target.value)}
+                                className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-[var(--border)]">
+                            <div className="flex flex-col">
+                              <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                                {t('settings.auto_sync_on_save')}
+                              </span>
+                              <span className="text-[10px] text-[var(--text-secondary)]">
+                                {t('settings.auto_sync_on_save_desc')}
+                              </span>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={autoSyncOnSave}
+                              onChange={(e) => setAutoSyncOnSave(e.target.checked)}
+                              className="h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)] cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="flex gap-2 pt-2 border-t border-[var(--border)]">
+                            <button
+                              disabled={isTestingWebdav}
+                              onClick={async () => {
+                                if (!backend) return;
+                                setIsTestingWebdav(true);
+                                try {
+                                  await backend.webdavTestConnection(webdavUrl, webdavUser, webdavPass || null);
+                                  addToast({ message: t('settings.connection_successful'), type: 'success' });
+                                } catch (err) {
+                                  addToast({ message: `${t('settings.connection_failed')}: ${err}`, type: 'error' });
+                                } finally {
+                                  setIsTestingWebdav(false);
+                                }
+                              }}
+                              className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                            >
+                              {isTestingWebdav ? t('settings.testing_connection') : t('settings.test_connection')}
+                            </button>
+                            <button
+                              disabled={isSyncingWebdav}
+                              onClick={async () => {
+                                if (!backend || !currentVault) return;
+                                setIsSyncingWebdav(true);
+                                try {
+                                  const stats = await backend.webdavSync(
+                                    webdavUrl,
+                                    webdavUser,
+                                    webdavPass || null
+                                  );
+                                  await refreshEntries();
+                                  if (stats.entries_added > 0 || stats.entries_updated > 0 || stats.trash_merged > 0) {
+                                    addToast({
+                                      message: `Cloud sync merged: ${stats.entries_added} added, ${stats.entries_updated} updated, ${stats.trash_merged} trashed.`,
+                                      type: 'success'
+                                    });
+                                  } else {
+                                    addToast({ message: t('settings.upload_backup'), type: 'success' });
+                                  }
+                                } catch (err: any) {
+                                  addToast({ message: `Sync failed: ${err}`, type: 'error' });
+                                } finally {
+                                  setIsSyncingWebdav(false);
+                                }
+                              }}
+                              className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                            >
+                              {t('settings.sync_now')}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!backend || !currentVault) return;
+                                if (!confirm(t('settings.restore_warning'))) return;
+                                try {
+                                  await backend.webdavDownload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
+                                  addToast({ message: 'Database restored from backup! Safety backup created (.vdb.bak)', type: 'success' });
+                                  await refreshEntries();
+                                } catch (err) {
+                                  addToast({ message: `Download failed: ${err}`, type: 'error' });
+                                }
+                              }}
+                              className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] text-amber-500"
+                            >
+                              {t('settings.download_restore')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </SettingSection>
 

@@ -422,17 +422,32 @@ pub async fn is_autostart_enabled() -> Result<bool, String> {
 // ─── Sync Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
+pub async fn webdav_test_connection(
+    url: String,
+    username: String,
+    password: Option<String>,
+) -> Result<(), String> {
+    yntra_vault_core::vault::sync::webdav_test_connection(
+        &url,
+        &username,
+        password.as_deref(),
+    ).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn webdav_upload(
     url: String,
     username: String,
     password: Option<String>,
     db_path: String,
-) -> Result<(), String> {
+    if_match_etag: Option<String>,
+) -> Result<Option<String>, String> {
     yntra_vault_core::vault::sync::webdav_upload(
         &url,
         &username,
         password.as_deref(),
         std::path::Path::new(&db_path),
+        if_match_etag.as_deref(),
     ).await.map_err(|e| e.to_string())
 }
 
@@ -449,6 +464,95 @@ pub async fn webdav_download(
         password.as_deref(),
         std::path::Path::new(&dest_db_path),
     ).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn webdav_sync(
+    url: String,
+    username: String,
+    password: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::vault::sync::MergeStats, String> {
+    const MAX_RETRIES: usize = 3;
+
+    let (subkeys, db_path, mut current_etag) = {
+        let mut vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
+        let mgr = vault_guard.as_mut().ok_or("Vault is locked")?;
+        mgr.save().map_err(|e| e.to_string())?;
+        let subkeys = (*mgr.get_subkeys().map_err(|e| e.to_string())?).clone();
+        let db_path = mgr.path.clone();
+        let current_etag = mgr.data.settings.webdav.last_etag.clone();
+        (subkeys, db_path, current_etag)
+    };
+
+    let mut accumulated_stats = yntra_vault_core::vault::sync::MergeStats::default();
+
+    for attempt in 0..MAX_RETRIES {
+        let upload_res = yntra_vault_core::vault::sync::webdav_upload(
+            &url,
+            &username,
+            password.as_deref(),
+            &db_path,
+            current_etag.as_deref(),
+        ).await;
+
+        match upload_res {
+            Ok(new_etag_opt) => {
+                let mut vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
+                if let Some(mgr) = vault_guard.as_mut() {
+                    if let Some(new_etag) = new_etag_opt {
+                        mgr.data.settings.webdav.last_etag = Some(new_etag);
+                    }
+                    mgr.data.settings.webdav.last_sync_at = Some(chrono::Utc::now());
+                    let _ = mgr.save();
+                }
+                return Ok(accumulated_stats);
+            }
+            Err(e) if e.to_string().contains("412 Precondition Failed") || e.to_string().contains("modified on server") => {
+                // Conflict detected!
+                // 1. Fetch remote ETag first to get the latest server version
+                let remote_etag = yntra_vault_core::vault::sync::webdav_get_etag(
+                    &url,
+                    &username,
+                    password.as_deref(),
+                ).await.unwrap_or(None);
+
+                // 2. Download remote bytes into memory
+                let remote_bytes = yntra_vault_core::vault::sync::webdav_download_bytes(
+                    &url,
+                    &username,
+                    password.as_deref(),
+                ).await.map_err(|err| format!("Failed downloading remote vault for merge (attempt {}): {}", attempt + 1, err))?;
+
+                // 3. Decrypt remote payload
+                let remote_data = yntra_vault_core::vault::sync::decrypt_remote_vault_bytes(
+                    &remote_bytes,
+                    &subkeys,
+                ).map_err(|err| format!("Failed decrypting remote vault payload (attempt {}): {}", attempt + 1, err))?;
+
+                // 4. Perform 3-way merge in memory & save local database file
+                let stats = {
+                    let mut vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
+                    let mgr = vault_guard.as_mut().ok_or("Vault is locked")?;
+                    let stats = yntra_vault_core::vault::sync::merge_vault_data(&mut mgr.data, remote_data);
+                    mgr.save().map_err(|e| e.to_string())?;
+                    stats
+                };
+
+                accumulated_stats.entries_added += stats.entries_added;
+                accumulated_stats.entries_updated += stats.entries_updated;
+                accumulated_stats.entries_kept_local += stats.entries_kept_local;
+                accumulated_stats.tags_merged += stats.tags_merged;
+                accumulated_stats.trash_merged += stats.trash_merged;
+
+                // Set current_etag to the acquired remote_etag so the next loop iteration attempts conditional PUT against it
+                current_etag = remote_etag;
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    Err("WebDAV sync failed after maximum retry attempts due to high remote contention".into())
 }
 
 #[tauri::command]

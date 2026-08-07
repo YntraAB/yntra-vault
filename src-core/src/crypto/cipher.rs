@@ -17,7 +17,7 @@ use crate::error::VaultError;
 type HmacSha512 = Hmac<Sha512>;
 
 /// Encrypted data with its nonce, ready for storage
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct EncryptedBlob {
     pub nonce: Vec<u8>,
     pub ciphertext: Vec<u8>,

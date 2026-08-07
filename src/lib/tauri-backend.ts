@@ -22,6 +22,7 @@ import type {
   SecurityAudit,
   Tag,
   BreachStatus,
+  MergeStats,
 } from './backend';
 
 export class TauriBackend implements YntraVaultBackend {
@@ -228,12 +229,20 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('set_minimize_to_tray', { enabled });
   }
 
-  async webdavUpload(url: string, username: string, password: string | null, dbPath: string): Promise<void> {
-    return invoke('webdav_upload', { url, username, password, dbPath });
+  async webdavTestConnection(url: string, username: string, password: string | null): Promise<void> {
+    return invoke('webdav_test_connection', { url, username, password });
+  }
+
+  async webdavUpload(url: string, username: string, password: string | null, dbPath: string, ifMatchEtag?: string | null): Promise<string | null> {
+    return invoke('webdav_upload', { url, username, password, dbPath, ifMatchEtag: ifMatchEtag || null });
   }
 
   async webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void> {
     return invoke('webdav_download', { url, username, password, destDbPath });
+  }
+
+  async webdavSync(url: string, username: string, password: string | null): Promise<MergeStats> {
+    return invoke('webdav_sync', { url, username, password });
   }
 
   async runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void> {

@@ -21,6 +21,14 @@ export interface VaultInfo {
   last_opened: string | null;
 }
 
+export interface MergeStats {
+  entries_added: number;
+  entries_updated: number;
+  entries_kept_local: number;
+  tags_merged: number;
+  trash_merged: number;
+}
+
 export interface EntryPreview {
   id: string;
   title: string;
@@ -272,8 +280,10 @@ export interface YntraVaultBackend {
   disableAutostart(): Promise<void>;
   isAutostartEnabled(): Promise<boolean>;
   setMinimizeToTray(enabled: boolean): Promise<void>;
-  webdavUpload(url: string, username: string, password: string | null, dbPath: string): Promise<void>;
+  webdavTestConnection(url: string, username: string, password: string | null): Promise<void>;
+  webdavUpload(url: string, username: string, password: string | null, dbPath: string, ifMatchEtag?: string | null): Promise<string | null>;
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
+  webdavSync(url: string, username: string, password: string | null): Promise<MergeStats>;
   runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void>;
   runP2pSyncClient(serverAddr: string, dbPath: string): Promise<void>;
   splitMasterPassword(password: string): Promise<string[]>;

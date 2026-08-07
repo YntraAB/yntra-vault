@@ -205,6 +205,29 @@ pub struct VaultData {
     pub tags: Vec<Tag>,
     /// Deleted entries kept for 30 days
     pub trash: Vec<TrashedEntry>,
+    /// Vault-wide user settings (WebDAV config, sync options)
+    #[serde(default)]
+    pub settings: VaultSettings,
+}
+
+/// Vault settings stored securely inside the encrypted payload.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct VaultSettings {
+    #[serde(default)]
+    pub webdav: WebdavConfig,
+}
+
+/// Configuration for WebDAV cloud synchronization.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct WebdavConfig {
+    pub enabled: bool,
+    pub auto_sync_on_save: bool,
+    pub url: String,
+    pub username: String,
+    /// Encrypted with vault key when stored at rest in vault payload
+    pub encrypted_password: Option<EncryptedBlob>,
+    pub last_sync_at: Option<DateTime<Utc>>,
+    pub last_etag: Option<String>,
 }
 
 /// Entry in the trash — auto-deleted after 30 days.

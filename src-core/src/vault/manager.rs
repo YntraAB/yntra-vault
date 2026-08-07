@@ -24,9 +24,9 @@ use crate::error::VaultError;
 /// Active vault state — holds decrypted data + derived keys.
 pub struct VaultManager {
     /// Path to the .vdb file
-    pub(crate) path: PathBuf,
+    pub path: PathBuf,
     /// Decrypted vault contents
-    pub(crate) data: VaultData,
+    pub data: VaultData,
     /// Derived subkeys (zeroed on lock)
     pub(crate) keys: Option<SubKeys>,
     /// Salt from the file header
@@ -100,6 +100,7 @@ impl VaultManager {
             entries: Vec::new(),
             tags: Vec::new(),
             trash: Vec::new(),
+            settings: VaultSettings::default(),
         };
 
         let mut manager = VaultManager {
@@ -1119,7 +1120,7 @@ pub struct DecryptedEntry {
 // are migrated to the current format and re-saved on next write.
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct LegacyEntry {
+pub(crate) struct LegacyEntry {
     pub id: Uuid,
     pub title: String,
     pub username: String,
@@ -1170,13 +1171,13 @@ impl LegacyEntry {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct LegacyTrashedEntry {
+pub(crate) struct LegacyTrashedEntry {
     pub entry: LegacyEntry,
     pub deleted_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct LegacyVaultData {
+pub(crate) struct LegacyVaultData {
     pub metadata: VaultMetadata,
     pub entries: Vec<LegacyEntry>,
     pub tags: Vec<Tag>,
@@ -1184,7 +1185,7 @@ struct LegacyVaultData {
 }
 
 impl LegacyVaultData {
-    fn into_current(self) -> VaultData {
+    pub(crate) fn into_current(self) -> VaultData {
         VaultData {
             metadata: self.metadata,
             entries: self.entries.into_iter().map(|e| e.into_current()).collect(),
@@ -1193,6 +1194,7 @@ impl LegacyVaultData {
                 entry: t.entry.into_current(),
                 deleted_at: t.deleted_at,
             }).collect(),
+            settings: VaultSettings::default(),
         }
     }
 }
