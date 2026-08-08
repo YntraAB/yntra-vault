@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Globe, Star, Plus, Settings, Lock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { useTranslation } from '@/contexts/LanguageContext';
 import CreateTagModal from './CreateTagModal';
 import EditTagModal from './EditTagModal';
 import TagContextMenu from './TagContextMenu';
+import TagsAreaContextMenu from './TagsAreaContextMenu';
 import type { Tag } from '@/types';
 import { Skeleton } from './ui/skeleton';
 import { ActionTooltip } from './ui/tooltip';
@@ -41,10 +42,20 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
     isLoadingEntries,
     setIsEntryModalOpen,
     settings,
+    updateSettings,
   } = useAppState();
 
   const allCount = entries.length;
   const favCount = entries.filter((e) => e.favorite).length;
+
+  const sortedTags = useMemo(() => {
+    const list = [...tags];
+    const order = settings.tagSortOrder ?? 'name';
+    if (order === 'count') {
+      return list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [tags, settings.tagSortOrder]);
 
   // Modal state
   const [showCreateTag, setShowCreateTag] = useState(false);
@@ -61,6 +72,28 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
 
   // Delete confirmation state
   const [deleteConfirmTag, setDeleteConfirmTag] = useState<Tag | null>(null);
+
+  // Tags area context menu state
+  const [areaContextMenu, setAreaContextMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+  }>({ open: false, x: 0, y: 0 });
+
+  const handleTagsAreaContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setAreaContextMenu({ open: true, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleDeleteUnusedTags = useCallback(() => {
+    const unused = tags.filter((t) => t.count === 0);
+    if (unused.length === 0) return;
+    unused.forEach((t) => removeTag(t.id));
+    addToast({
+      message: `Deleted ${unused.length} unused tag${unused.length > 1 ? 's' : ''}`,
+      type: 'info',
+    });
+  }, [tags, removeTag, addToast]);
 
   const handleTagContextMenu = useCallback((e: React.MouseEvent, tag: Tag) => {
     e.preventDefault();
@@ -126,7 +159,10 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
       </nav>
 
       {/* Tags */}
-      <div className="mt-2 flex flex-1 flex-col overflow-hidden">
+      <div
+        className="mt-2 flex flex-1 flex-col overflow-hidden"
+        onContextMenu={handleTagsAreaContextMenu}
+      >
         <div className="flex h-7 items-center justify-between px-3">
           <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
             {t('sidebar.tags')}
@@ -142,7 +178,7 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
         </div>
 
         <motion.div
-          className="flex flex-col gap-[2px] overflow-y-auto p-2 pt-0"
+          className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0"
           variants={containerVariants}
           initial="hidden"
           animate="show"
@@ -157,12 +193,13 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
               ))}
             </div>
           ) : (
-            tags.map((tag) => (
+            sortedTags.map((tag: Tag) => (
               <motion.div key={tag.id} variants={itemVariants}>
                 <TagItem
                   tag={tag}
                   active={filterCategory === tag.name}
                   density={settings.density}
+                  showCount={settings.showTagCounts !== false}
                   onClick={() => setFilterCategory(tag.name)}
                   onContextMenu={(e) => handleTagContextMenu(e, tag)}
                   onDoubleClick={() => {
@@ -237,6 +274,22 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
         onAddPassword={handleContextAddPassword}
         onEdit={handleContextEdit}
         onDelete={handleContextDelete}
+      />
+
+      {/* Tags Area Context Menu (Empty Space) */}
+      <TagsAreaContextMenu
+        open={areaContextMenu.open}
+        x={areaContextMenu.x}
+        y={areaContextMenu.y}
+        onClose={() => setAreaContextMenu((prev) => ({ ...prev, open: false }))}
+        onNewTag={() => setShowCreateTag(true)}
+        onDeselectAll={() => setFilterCategory('all')}
+        sortOrder={settings.tagSortOrder ?? 'name'}
+        onSetSortOrder={(tagSortOrder) => updateSettings({ tagSortOrder })}
+        showTagCounts={settings.showTagCounts !== false}
+        onToggleShowTagCounts={() => updateSettings({ showTagCounts: !settings.showTagCounts })}
+        onDeleteUnusedTags={handleDeleteUnusedTags}
+        hasUnusedTags={tags.some((t) => t.count === 0)}
       />
 
       {/* Delete Confirmation Overlay */}
@@ -323,6 +376,7 @@ function TagItem({
   tag,
   active,
   density = 'normal',
+  showCount = true,
   onClick,
   onContextMenu,
   onDoubleClick,
@@ -330,6 +384,7 @@ function TagItem({
   tag: Tag;
   active: boolean;
   density?: 'compact' | 'normal' | 'comfortable';
+  showCount?: boolean;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
@@ -354,7 +409,9 @@ function TagItem({
         style={{ backgroundColor: tag.color }}
       />
       <span className="flex-1 truncate text-left">{tag.name}</span>
-      <span className="text-[11px] tabular-nums text-[var(--text-tertiary)]">{tag.count}</span>
+      {showCount && (
+        <span className="text-[11px] tabular-nums text-[var(--text-tertiary)]">{tag.count}</span>
+      )}
     </button>
   );
 }

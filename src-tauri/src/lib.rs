@@ -66,6 +66,10 @@ pub fn run() {
             commands::delete_entry,
             commands::toggle_favorite,
             commands::toggle_pin,
+            // Attachments
+            commands::get_attachment_data,
+            commands::add_attachment,
+            commands::delete_attachment,
             // Trash
             commands::list_trash,
             commands::restore_from_trash,

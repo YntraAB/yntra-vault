@@ -46,6 +46,39 @@ pub struct Entry {
     /// Passkey public key — SEC1 uncompressed format (65 bytes for P-256)
     #[serde(default)]
     pub passkey_public_key: Option<Vec<u8>>,
+    /// File attachments encrypted with per-entry XChaCha20-Poly1305
+    #[serde(default)]
+    pub attachments: Vec<FileAttachment>,
+}
+
+/// Encrypted file attachment stored inside an entry.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FileAttachment {
+    pub id: Uuid,
+    pub name: String,
+    pub size: u64,
+    pub mime_type: String,
+    pub created_at: DateTime<Utc>,
+    /// File data encrypted with per-entry XChaCha20-Poly1305
+    pub encrypted_blob: EncryptedBlob,
+}
+
+/// Metadata summary of an attachment for list/detail views without raw bytes.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AttachmentInfo {
+    pub id: Uuid,
+    pub name: String,
+    pub size: u64,
+    pub mime_type: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Staged raw file attachment payload received from frontend.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NewAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
 }
 
 /// Lightweight entry preview for list views — no decryption needed.
@@ -66,6 +99,8 @@ pub struct EntryPreview {
     pub strength_score: Option<StrengthScore>,
     pub password_age_days: i64,
     pub has_passkey: bool,
+    #[serde(default)]
+    pub attachment_count: usize,
 }
 
 /// Pre-built entry templates for common account types.
@@ -299,6 +334,7 @@ pub enum FieldScope<'a> {
     History,
     Totp,
     Passkey,
+    Attachment { attachment_id: &'a Uuid },
     CustomField { field_id: &'a Uuid, name: &'a str },
     Custom(&'a str),
 }
@@ -311,6 +347,7 @@ impl<'a> FieldScope<'a> {
             Self::History => Cow::Borrowed("history"),
             Self::Totp => Cow::Borrowed("totp"),
             Self::Passkey => Cow::Borrowed("passkey"),
+            Self::Attachment { attachment_id } => Cow::Owned(format!("attachment:{attachment_id}")),
             Self::CustomField { field_id, name } => Cow::Owned(format!("custom:{field_id}:{name}")),
             Self::Custom(name) => Cow::Borrowed(name),
         }

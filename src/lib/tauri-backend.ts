@@ -28,6 +28,7 @@ import type {
   BiometricInfo,
   Hardware2FaInfo,
   HardwareKeyInfo,
+  AttachmentInfo,
   Hardware2FaProtocol,
 } from './backend';
 
@@ -103,6 +104,20 @@ export class TauriBackend implements YntraVaultBackend {
 
   async togglePin(id: string): Promise<boolean> {
     return invoke('toggle_pin', { id });
+  }
+
+  // ─── Attachments ────────────────────────────────────────────────
+
+  async getAttachmentData(entryId: string, attachmentId: string): Promise<number[]> {
+    return invoke('get_attachment_data', { entryId, attachmentId });
+  }
+
+  async addAttachment(entryId: string, name: string, mimeType: string, data: number[]): Promise<AttachmentInfo> {
+    return invoke('add_attachment', { entryId, name, mimeType, data });
+  }
+
+  async deleteAttachment(entryId: string, attachmentId: string): Promise<void> {
+    return invoke('delete_attachment', { entryId, attachmentId });
   }
 
   // ─── Trash ──────────────────────────────────────────────────────

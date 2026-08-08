@@ -716,6 +716,7 @@ mod tests {
             password_changed_at: old_time,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: vec![],
         };
 
         let entry_local_only = Entry {
@@ -740,6 +741,7 @@ mod tests {
             password_changed_at: now,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: vec![],
         };
 
         let mut local = VaultData {
@@ -773,6 +775,7 @@ mod tests {
             password_changed_at: new_time,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: vec![],
         };
 
         let entry_remote_only = Entry {
@@ -797,6 +800,7 @@ mod tests {
             password_changed_at: now,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: vec![],
         };
 
         let remote = VaultData {
@@ -853,6 +857,7 @@ mod tests {
             password_changed_at: old_time,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: vec![],
         };
 
         let mut local = VaultData {

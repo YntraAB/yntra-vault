@@ -16,6 +16,11 @@ import {
   EyeOff,
   ExternalLink,
   X,
+  Paperclip,
+  Download,
+  Image,
+  FileArchive,
+  Loader2,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -30,10 +35,33 @@ import { useTotp, useBackend } from '@/lib/useBackend';
 import EntryModal from './EntryModal';
 import Favicon from './Favicon';
 import { formatDate, getFieldLayout, openExternalUrl } from '@/lib/utils';
-import type { Tag } from '@/types';
+import type { Tag, AttachmentInfo } from '@/types';
 import { Skeleton } from './ui/skeleton';
 import { ActionTooltip } from './ui/tooltip';
 import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
+
+function formatBytes(bytes: number, decimals = 1): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+function getAttachmentIcon(mimeType: string, fileName: string) {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (mimeType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
+    return <Image size={14} className="text-blue-400 shrink-0" />;
+  }
+  if (mimeType.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
+    return <FileText size={14} className="text-emerald-400 shrink-0" />;
+  }
+  if (mimeType.includes('zip') || mimeType.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
+    return <FileArchive size={14} className="text-amber-400 shrink-0" />;
+  }
+  return <Paperclip size={14} className="text-indigo-400 shrink-0" />;
+}
 
 export default function PasswordDetail() {
   const { t } = useTranslation();
@@ -51,8 +79,6 @@ export default function PasswordDetail() {
     settings,
     settingsOpen,
     isEntryModalOpen,
-    refreshEntries,
-    selectEntryById,
     setFilterCategory,
   } = useAppState();
   const { backend } = useBackend();
@@ -66,6 +92,44 @@ export default function PasswordDetail() {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [warningTimer, setWarningTimer] = useState(0);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
+
+  const handleDownloadAttachment = useCallback(async (attachment: AttachmentInfo) => {
+    if (!backend || !selectedEntry) return;
+    setDownloadingAttId(attachment.id);
+    try {
+      const data = await backend.getAttachmentData(selectedEntry.id, attachment.id);
+      const uint8 = new Uint8Array(data);
+      const blob = new Blob([uint8], { type: attachment.mime_type || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      uint8.fill(0);
+      addToast({ message: `Downloaded ${attachment.name}`, type: 'success' });
+    } catch (err) {
+      addToast({ message: `Failed to download attachment: ${err}`, type: 'error' });
+    } finally {
+      setDownloadingAttId(null);
+    }
+  }, [backend, selectedEntry, addToast]);
+
+  const handleDeleteAttachment = useCallback(async (attachment: AttachmentInfo) => {
+    if (!backend || !selectedEntry) return;
+    if (!window.confirm(`Delete attachment "${attachment.name}"?`)) return;
+    try {
+      await backend.deleteAttachment(selectedEntry.id, attachment.id);
+      const updatedAttachments = (selectedEntry.attachments || []).filter(a => a.id !== attachment.id);
+      await updateEntry({ ...selectedEntry, attachments: updatedAttachments });
+      addToast({ message: 'Attachment deleted', type: 'success' });
+    } catch (err) {
+      addToast({ message: `Failed to delete attachment: ${err}`, type: 'error' });
+    }
+  }, [backend, selectedEntry, updateEntry, addToast]);
 
   const runSmartLoginAction = useCallback(async () => {
     if (!backend || !selectedEntry) return;
@@ -917,6 +981,68 @@ export default function PasswordDetail() {
                       Remove
                     </button>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Attachments section */}
+            {data.attachments && data.attachments.length > 0 && (
+              <div className="px-4 py-3 border-t border-[var(--border-subtle)]">
+                <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)] mb-2">
+                  <Paperclip size={13} /> Attachments
+                  <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] border border-[var(--border)]">
+                    {data.attachments.length}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {data.attachments.map((att: AttachmentInfo) => (
+                    <div
+                      key={att.id}
+                      className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 shadow-sm hover:border-[var(--border)] transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                        {getAttachmentIcon(att.mime_type, att.name)}
+                        <div className="flex flex-col min-w-0">
+                          <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)]">
+                            {att.name}
+                          </span>
+                          <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono">
+                            {formatBytes(att.size)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <ActionTooltip content="Download attachment">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAttachment(att)}
+                            disabled={downloadingAttId === att.id}
+                            className="flex items-center gap-1 rounded-md bg-[var(--bg-base)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-hover)] transition-all disabled:opacity-50"
+                          >
+                            {downloadingAttId === att.id ? (
+                              <Loader2 size={13} className="animate-spin text-[var(--text-secondary)]" />
+                            ) : (
+                              <Download size={13} className="text-[var(--text-secondary)]" />
+                            )}
+                            <span>Save</span>
+                          </button>
+                        </ActionTooltip>
+
+                        {!isEditing && (
+                          <ActionTooltip content="Delete attachment">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAttachment(att)}
+                              className="rounded-md p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </ActionTooltip>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

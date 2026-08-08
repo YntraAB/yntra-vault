@@ -19,6 +19,24 @@ export interface PasswordEntry {
   passkeyPublicKey?: number[];
   generatePasskey?: boolean;
   passkeyAction?: 'generate' | 'remove';
+  attachments?: AttachmentInfo[];
+  newAttachments?: NewAttachment[];
+  deleteAttachmentIds?: string[];
+  attachmentCount?: number;
+}
+
+export interface AttachmentInfo {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  createdAt: string;
+}
+
+export interface NewAttachment {
+  name: string;
+  mimeType: string;
+  data: Uint8Array | number[];
 }
 
 export interface CustomField {
@@ -95,6 +113,9 @@ export interface AppSettings {
   autotypeFieldDelayMs: number;
   autotypeSettleDelayMs: number;
   autotypeLaunchBrowser: boolean;
+  tagSortOrder?: 'name' | 'count';
+  showTagCounts?: boolean;
+  entrySortOrder?: 'title' | 'updated' | 'created';
   keybinds?: KeybindsConfig;
 }
 

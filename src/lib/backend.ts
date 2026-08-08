@@ -51,6 +51,20 @@ export interface MergeStats {
   trash_merged: number;
 }
 
+export interface AttachmentInfo {
+  id: string;
+  name: string;
+  size: number;
+  mime_type: string;
+  created_at: string;
+}
+
+export interface NewAttachment {
+  name: string;
+  mime_type: string;
+  data: Uint8Array | number[];
+}
+
 export interface EntryPreview {
   id: string;
   title: string;
@@ -67,6 +81,7 @@ export interface EntryPreview {
   strength_score: StrengthScore | null;
   password_age_days: number;
   has_passkey: boolean;
+  attachment_count?: number;
 }
 
 export interface DecryptedEntry {
@@ -91,6 +106,7 @@ export interface DecryptedEntry {
   password_history_count: number;
   has_passkey: boolean;
   passkey_public_key: number[] | null;
+  attachments?: AttachmentInfo[];
 }
 
 export interface NewEntry {
@@ -105,6 +121,7 @@ export interface NewEntry {
   custom_fields: CustomField[];
   entry_type: EntryType | null;
   generate_passkey?: boolean;
+  attachments?: NewAttachment[];
 }
 
 export interface UpdateEntry {
@@ -121,6 +138,8 @@ export interface UpdateEntry {
   custom_fields?: CustomField[];
   breach_status?: BreachStatus;
   passkey_action?: 'generate' | 'remove';
+  new_attachments?: NewAttachment[];
+  delete_attachment_ids?: string[];
 }
 
 export interface CustomField {
@@ -282,6 +301,11 @@ export interface YntraVaultBackend {
   deleteEntry(id: string): Promise<void>;
   toggleFavorite(id: string): Promise<boolean>;
   togglePin(id: string): Promise<boolean>;
+
+  // Attachments
+  getAttachmentData(entryId: string, attachmentId: string): Promise<number[]>;
+  addAttachment(entryId: string, name: string, mimeType: string, data: number[]): Promise<AttachmentInfo>;
+  deleteAttachment(entryId: string, attachmentId: string): Promise<void>;
 
   // Trash
   listTrash(): Promise<TrashedEntryPreview[]>;

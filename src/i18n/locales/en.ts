@@ -295,6 +295,7 @@ export const en = {
   'detail.filter_by': 'Filter by {tag}',
 
   // Context Menus
+  'menu.edit': 'Edit Entry',
   'menu.rename': 'Rename',
   'menu.autotype': 'Autotype',
   'menu.favorite': 'Favorite',
@@ -305,6 +306,19 @@ export const en = {
   'menu.add_password': 'Add password',
   'menu.edit_tag': 'Edit Tag',
   'menu.delete_tag': 'Delete Tag',
+  'menu.select_all': 'Select All Items',
+  'menu.deselect_all': 'Deselect Tag Filter',
+  'menu.sort_name': 'Sort Alphabetically (A–Z)',
+  'menu.sort_count': 'Sort by Entry Count',
+  'menu.sort_title': 'Sort by Title (A–Z)',
+  'menu.sort_updated': 'Sort by Last Modified',
+  'menu.sort_created': 'Sort by Date Created',
+  'menu.density_compact': 'Compact Density',
+  'menu.density_normal': 'Normal Density',
+  'menu.density_comfortable': 'Comfortable Density',
+  'menu.clear_search': 'Clear Search',
+  'menu.toggle_tag_counts': 'Show Tag Counts',
+  'menu.delete_unused_tags': 'Delete Unused Tags',
 
   // Change Master Password Modal
   'cmp.title': 'Change Master Password',

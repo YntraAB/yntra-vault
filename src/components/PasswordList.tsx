@@ -1,10 +1,12 @@
-import { Search, X, Plus, Star, Pin, ShieldAlert } from 'lucide-react';
+import { Search, X, Plus, Star, Pin, ShieldAlert, Paperclip } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
 import EntryModal from './EntryModal';
+import BulkEditModal from './BulkEditModal';
 import EntryContextMenu from './EntryContextMenu';
+import PasswordListAreaContextMenu from './PasswordListAreaContextMenu';
 import DeleteEntryModal from './DeleteEntryModal';
 import Favicon from './Favicon';
 import type { PasswordEntry, Tag } from '@/types';
@@ -45,7 +47,13 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
     toggleFavorite,
     togglePin,
     addToast,
+    updateSettings,
+    selectedEntryIds,
+    toggleEntrySelection,
+    bulkDeleteEntries,
   } = useAppState();
+
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
 
   const [contextMenu, setContextMenu] = useState<{
     open: boolean;
@@ -53,6 +61,18 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
     y: number;
     entry: PasswordEntry | null;
   }>({ open: false, x: 0, y: 0, entry: null });
+
+  // Area context menu (right click empty space)
+  const [areaContextMenu, setAreaContextMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+  }>({ open: false, x: 0, y: 0 });
+
+  const handleListAreaContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setAreaContextMenu({ open: true, x: e.clientX, y: e.clientY });
+  }, []);
 
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<PasswordEntry | null>(null);
   const [editEntryForModal, setEditEntryForModal] = useState<PasswordEntry | null>(null);
@@ -92,6 +112,20 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [settings.keybinds, settingsOpen, isEntryModalOpen, deleteConfirmEntry]);
 
+  // Listen for Ctrl+E / Cmd+E for bulk edit when multiple items are selected
+  useEffect(() => {
+    const handleBulkEditShortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+        if (selectedEntryIds.length >= 2) {
+          e.preventDefault();
+          setShowBulkEditModal(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleBulkEditShortcut);
+    return () => window.removeEventListener('keydown', handleBulkEditShortcut);
+  }, [selectedEntryIds]);
+
   // Auto-focus and focus trap for delete confirmation dialog
   useEffect(() => {
     if (deleteConfirmEntry) {
@@ -123,8 +157,11 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
   const handleEntryContextMenu = useCallback((e: React.MouseEvent, entry: PasswordEntry) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!selectedEntryIds.includes(entry.id)) {
+      toggleEntrySelection(entry.id, false, false);
+    }
     setContextMenu({ open: true, x: e.clientX, y: e.clientY, entry });
-  }, []);
+  }, [selectedEntryIds, toggleEntrySelection]);
 
   const handleAddEntryClick = useCallback(() => {
     setEditEntryForModal(null);
@@ -195,6 +232,21 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
     return filterCategory;
   }, [filterCategory, t]);
 
+  const handleItemClick = useCallback(
+    (e: React.MouseEvent, entry: PasswordEntry) => {
+      const isMulti = e.ctrlKey || e.metaKey;
+      const isRange = e.shiftKey;
+      if (isMulti || isRange) {
+        toggleEntrySelection(entry.id, isMulti, isRange);
+      } else {
+        selectEntryById(entry.id);
+        toggleEntrySelection(entry.id, false, false);
+        setIsEditing(false);
+      }
+    },
+    [toggleEntrySelection, selectEntryById, setIsEditing]
+  );
+
   return (
     <div
       className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]"
@@ -206,7 +258,9 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
           {headerTitle}
         </h1>
         <span className="text-[12px] font-medium text-[var(--text-tertiary)]">
-          {t('list.items_count', { count: filteredEntries.length })}
+          {selectedEntryIds.length > 1
+            ? `${selectedEntryIds.length} selected`
+            : t('list.items_count', { count: filteredEntries.length })}
         </span>
       </div>
 
@@ -235,18 +289,30 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
           )}
         </div>
 
-        {/* Add button */}
-        <button
-          onClick={handleAddEntryClick}
-          className="flex h-8 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <Plus size={14} />
-          {t('list.new_entry')}
-        </button>
+        {/* Add button / Bulk edit bar */}
+        {selectedEntryIds.length >= 2 ? (
+          <button
+            onClick={() => setShowBulkEditModal(true)}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--accent-primary)]/40 bg-[var(--accent-primary)]/10 text-[13px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+          >
+            Edit {selectedEntryIds.length} Selected Entries (Ctrl+E)
+          </button>
+        ) : (
+          <button
+            onClick={handleAddEntryClick}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <Plus size={14} />
+            {t('list.new_entry')}
+          </button>
+        )}
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className="flex flex-1 flex-col overflow-y-auto"
+        onContextMenu={handleListAreaContextMenu}
+      >
         <AnimatePresence mode="wait">
           {isLoadingEntries ? (
             <motion.div
@@ -254,7 +320,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-col"
+              className="flex flex-1 flex-col"
             >
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="flex h-12 w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3">
@@ -271,7 +337,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-col items-center justify-center py-16"
+              className="flex flex-1 flex-col items-center justify-center py-16"
             >
               <p className="text-[13px] text-[var(--text-tertiary)]">{t('list.empty_title')}</p>
             </motion.div>
@@ -281,7 +347,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-col"
+              className="flex flex-1 flex-col min-h-full"
             >
               {sections.map((section) => (
                 <div key={section.title}>
@@ -294,16 +360,11 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
                     <ListItem
                       key={entry.id}
                       entry={entry}
-                      selected={selectedEntry?.id === entry.id}
+                      selected={selectedEntryIds.includes(entry.id) || selectedEntry?.id === entry.id}
                       tags={tags}
                       showBreach={settings.showBreachInList}
                       density={settings.density}
-                      onClick={() => {
-                        if (selectedEntry?.id !== entry.id) {
-                          selectEntryById(entry.id);
-                          setIsEditing(false);
-                        }
-                      }}
+                      onClick={(e) => handleItemClick(e, entry)}
                       onContextMenu={(e) => handleEntryContextMenu(e, entry)}
                     />
                   ))}
@@ -331,18 +392,40 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
         }}
       />
 
+      <BulkEditModal
+        open={showBulkEditModal}
+        selectedIds={selectedEntryIds}
+        onClose={() => setShowBulkEditModal(false)}
+      />
+
       {/* Entry Context Menu */}
       <EntryContextMenu
         open={contextMenu.open}
         x={contextMenu.x}
         y={contextMenu.y}
         entry={contextMenu.entry}
+        selectedCount={selectedEntryIds.length}
         onClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
         onRename={handleRename}
         onDelete={handleDelete}
         onAutotype={handleAutotype}
         onToggleFavorite={handleToggleFavorite}
         onTogglePin={handleTogglePin}
+        onBulkEdit={() => setShowBulkEditModal(true)}
+        onBulkDelete={() => bulkDeleteEntries(selectedEntryIds)}
+      />
+
+      {/* Password List Area Context Menu (Empty Background) */}
+      <PasswordListAreaContextMenu
+        open={areaContextMenu.open}
+        x={areaContextMenu.x}
+        y={areaContextMenu.y}
+        onClose={() => setAreaContextMenu((prev) => ({ ...prev, open: false }))}
+        onNewEntry={handleAddEntryClick}
+        searchTerm={searchTerm}
+        onClearSearch={() => setSearchTerm('')}
+        sortOrder={settings.entrySortOrder ?? 'updated'}
+        onSetSortOrder={(entrySortOrder) => updateSettings({ entrySortOrder })}
       />
 
       {/* Delete Entry Confirmation Overlay */}
@@ -369,7 +452,7 @@ function ListItem({
   tags: Tag[];
   showBreach: boolean;
   density?: 'compact' | 'normal' | 'comfortable';
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const tagColors = entry.tags
@@ -471,6 +554,15 @@ function ListItem({
           <ActionTooltip content="Leaked in data breach">
             <span>
               <ShieldAlert size={12} className="text-red-500 shrink-0 animate-pulse" />
+            </span>
+          </ActionTooltip>
+        )}
+
+        {/* Attachment indicator */}
+        {((entry.attachmentCount || 0) > 0 || (entry.attachments && entry.attachments.length > 0)) && (
+          <ActionTooltip content="Has file attachments">
+            <span>
+              <Paperclip size={11} className="text-indigo-400" />
             </span>
           </ActionTooltip>
         )}

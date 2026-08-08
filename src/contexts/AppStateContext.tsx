@@ -24,6 +24,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   autotypeFieldDelayMs: 300,
   autotypeSettleDelayMs: 3000,
   autotypeLaunchBrowser: true,
+  tagSortOrder: 'name',
+  showTagCounts: true,
+  entrySortOrder: 'updated',
   keybinds: DEFAULT_KEYBINDS,
 };
 
@@ -47,6 +50,7 @@ function entryPreviewToPasswordEntry(preview: EntryPreview, password = '••�
     updatedAt: preview.updated_at,
     breachStatus: preview.breach_status,
     hasPasskey: preview.has_passkey || false,
+    attachmentCount: preview.attachment_count || 0,
   };
 }
 
@@ -67,6 +71,14 @@ function decryptedEntryToPasswordEntry(entry: DecryptedEntry): PasswordEntry {
       value: f.value,
     }));
 
+  const attachments = (entry.attachments || []).map(a => ({
+    id: a.id,
+    name: a.name,
+    size: a.size,
+    mimeType: a.mime_type,
+    createdAt: a.created_at,
+  }));
+
   return {
     id: entry.id,
     title: entry.title,
@@ -86,6 +98,7 @@ function decryptedEntryToPasswordEntry(entry: DecryptedEntry): PasswordEntry {
     breachStatus: entry.breach_status,
     hasPasskey: entry.has_passkey || false,
     passkeyPublicKey: entry.passkey_public_key || undefined,
+    attachments,
   };
 }
 
@@ -96,6 +109,18 @@ interface AppStateContextType {
   filteredEntries: PasswordEntry[];
   tags: Tag[];
   selectedEntry: PasswordEntry | null;
+  selectedEntryIds: string[];
+  setSelectedEntryIds: (ids: string[]) => void;
+  toggleEntrySelection: (id: string, isMulti?: boolean, isRange?: boolean) => void;
+  clearSelection: () => void;
+  bulkUpdateEntries: (
+    ids: string[],
+    updates: Partial<PasswordEntry>,
+    tagsToAdd?: string[],
+    tagsToRemove?: string[],
+    notesMode?: 'append' | 'overwrite'
+  ) => Promise<void>;
+  bulkDeleteEntries: (ids: string[]) => Promise<void>;
   searchTerm: string;
   filterCategory: FilterCategory;
   settings: AppSettings;
@@ -147,6 +172,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [entries, setEntries] = useState<PasswordEntry[]>([]);
   const [rawTags, setRawTags] = useState<Tag[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<PasswordEntry | null>(null);
+  const [selectedEntryIds, setSelectedEntryIds] = useState<string[]>([]);
   const [decryptedCache, setDecryptedCache] = useState<Record<string, PasswordEntry>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState<FilterCategory>('all');
@@ -416,11 +442,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     result.sort((a, b) => {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
+
+      const sortOrder = settings.entrySortOrder ?? 'updated';
+      if (sortOrder === 'title') {
+        return a.title.localeCompare(b.title);
+      } else if (sortOrder === 'created') {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
 
     return result;
-  }, [entries, filterCategory, searchTerm]);
+  }, [entries, filterCategory, searchTerm, settings.entrySortOrder]);
 
   // ─── CRUD Operations (backend-aware) ────────────────────────────
 
@@ -465,6 +498,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
         if (entry.passkeyAction) {
           updatePayload.passkey_action = entry.passkeyAction;
+        }
+
+        if (entry.newAttachments && entry.newAttachments.length > 0) {
+          updatePayload.new_attachments = entry.newAttachments;
+        }
+
+        if (entry.deleteAttachmentIds && entry.deleteAttachmentIds.length > 0) {
+          updatePayload.delete_attachment_ids = entry.deleteAttachmentIds;
         }
 
         await backend.updateEntry(entry.id, updatePayload);
@@ -516,6 +557,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           custom_fields: customFieldsToSend,
           entry_type: null,
           generate_passkey: entry.generatePasskey,
+          attachments: entry.newAttachments,
         });
         await refreshEntries();
         addToast({ message: 'Entry created', type: 'success' });
@@ -606,6 +648,201 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
     setSelectedEntry((prev) => (prev?.id === id ? { ...prev, pinned: !prev.pinned } : prev));
   }, [backend, refreshEntries]);
+
+  // ─── Multi-selection & Bulk operations ─────────────────────────────
+
+  const toggleEntrySelection = useCallback(
+    (id: string, isMulti = false, isRange = false) => {
+      if (isRange && selectedEntryIds.length > 0) {
+        const lastSelectedId = selectedEntryIds[selectedEntryIds.length - 1];
+        const lastIndex = filteredEntries.findIndex((e) => e.id === lastSelectedId);
+        const currentIndex = filteredEntries.findIndex((e) => e.id === id);
+        if (lastIndex !== -1 && currentIndex !== -1) {
+          const start = Math.min(lastIndex, currentIndex);
+          const end = Math.max(lastIndex, currentIndex);
+          const rangeIds = filteredEntries.slice(start, end + 1).map((e) => e.id);
+          const merged = Array.from(new Set([...selectedEntryIds, ...rangeIds]));
+          setSelectedEntryIds(merged);
+          return;
+        }
+      }
+
+      if (isMulti) {
+        setSelectedEntryIds((prev) =>
+          prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+        );
+      } else {
+        setSelectedEntryIds([id]);
+      }
+    },
+    [filteredEntries, selectedEntryIds]
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectedEntryIds([]);
+  }, []);
+
+  const bulkUpdateEntries = useCallback(
+    async (
+      ids: string[],
+      updates: Partial<PasswordEntry>,
+      tagsToAdd: string[] = [],
+      tagsToRemove: string[] = [],
+      notesMode: 'append' | 'overwrite' = 'append'
+    ) => {
+      if (ids.length === 0) return;
+
+      if (backend) {
+        try {
+          for (const id of ids) {
+            const entry = entries.find((e) => e.id === id);
+            if (!entry) continue;
+
+            const patchData: any = {};
+
+            if (updates.title !== undefined) patchData.title = updates.title;
+            if (updates.username !== undefined) patchData.username = updates.username;
+            if (updates.url !== undefined) patchData.url = updates.url;
+            if (updates.favorite !== undefined) patchData.favorite = updates.favorite;
+            if (updates.pinned !== undefined) patchData.pinned = updates.pinned;
+
+            if (tagsToAdd.length > 0 || tagsToRemove.length > 0) {
+              let updatedTags = [...entry.tags];
+              tagsToAdd.forEach((t) => {
+                if (!updatedTags.includes(t)) updatedTags.push(t);
+              });
+              tagsToRemove.forEach((t) => {
+                updatedTags = updatedTags.filter((tag) => tag !== t);
+              });
+              patchData.tags = updatedTags;
+            }
+
+            if (updates.notes !== undefined) {
+              if (notesMode === 'append') {
+                const fullEntry = decryptedCache[id] || (await backend.getEntry(id).catch(() => null));
+                const currentNotes = fullEntry?.notes || '';
+                patchData.notes = currentNotes ? `${currentNotes}\n${updates.notes}` : updates.notes;
+              } else {
+                patchData.notes = updates.notes;
+              }
+            }
+
+            await backend.updateEntry(id, patchData);
+          }
+
+          // Invalidate cache for all edited IDs
+          setDecryptedCache((prev) => {
+            const next = { ...prev };
+            ids.forEach((id) => delete next[id]);
+            return next;
+          });
+
+          await refreshEntries();
+          await refreshTags();
+
+          // Refresh selectedEntry if it was updated
+          if (selectedEntry && ids.includes(selectedEntry.id)) {
+            const updatedDetail = await backend.getEntry(selectedEntry.id).catch(() => null);
+            if (updatedDetail) {
+              setSelectedEntry({
+                id: updatedDetail.id,
+                title: updatedDetail.title,
+                username: updatedDetail.username,
+                password: updatedDetail.password,
+                url: updatedDetail.url,
+                email: updatedDetail.email,
+                notes: updatedDetail.notes,
+                tags: updatedDetail.tags,
+                favorite: updatedDetail.favorite,
+                pinned: updatedDetail.pinned,
+                totpSecret: updatedDetail.totp_secret ?? undefined,
+                customFields: (updatedDetail.custom_fields || []).map((f: any) => ({
+                  id: f.id,
+                  name: f.name,
+                  type: (f.field_type.toLowerCase() as any),
+                  value: f.value,
+                })),
+                hasPasskey: updatedDetail.has_passkey,
+                passkeyPublicKey: updatedDetail.passkey_public_key ?? undefined,
+                createdAt: updatedDetail.created_at,
+                updatedAt: updatedDetail.updated_at,
+              });
+            }
+          }
+
+          addToast({ message: `Updated ${ids.length} entries`, type: 'info' });
+        } catch (e) {
+          addToast({ message: `Bulk update failed: ${e}`, type: 'error' });
+        }
+      } else {
+        setEntries((prev) =>
+          prev.map((e) => {
+            if (!ids.includes(e.id)) return e;
+
+            let updatedTags = [...e.tags];
+            tagsToAdd.forEach((t) => {
+              if (!updatedTags.includes(t)) updatedTags.push(t);
+            });
+            tagsToRemove.forEach((t) => {
+              updatedTags = updatedTags.filter((tag) => tag !== t);
+            });
+
+            let updatedNotes = e.notes;
+            if (updates.notes !== undefined) {
+              updatedNotes = notesMode === 'append' && e.notes ? `${e.notes}\n${updates.notes}` : updates.notes;
+            }
+
+            return {
+              ...e,
+              ...updates,
+              tags: updatedTags,
+              notes: updatedNotes,
+              updatedAt: new Date().toISOString(),
+            };
+          })
+        );
+
+        setDecryptedCache((prev) => {
+          const next = { ...prev };
+          ids.forEach((id) => delete next[id]);
+          return next;
+        });
+        addToast({ message: `Updated ${ids.length} entries`, type: 'info' });
+      }
+    },
+    [backend, entries, decryptedCache, selectedEntry, refreshEntries, refreshTags, addToast]
+  );
+
+  const bulkDeleteEntries = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      if (backend) {
+        try {
+          for (const id of ids) {
+            await backend.deleteEntry(id);
+          }
+          if (selectedEntry && ids.includes(selectedEntry.id)) {
+            setSelectedEntry(null);
+          }
+          setSelectedEntryIds([]);
+          await refreshEntries();
+          await refreshTags();
+          addToast({ message: `Deleted ${ids.length} entries`, type: 'info' });
+        } catch (e) {
+          addToast({ message: `Bulk delete failed: ${e}`, type: 'error' });
+        }
+      } else {
+        setEntries((prev) => prev.filter((e) => !ids.includes(e.id)));
+        if (selectedEntry && ids.includes(selectedEntry.id)) {
+          setSelectedEntry(null);
+        }
+        setSelectedEntryIds([]);
+        addToast({ message: `Deleted ${ids.length} entries`, type: 'info' });
+      }
+    },
+    [backend, selectedEntry, refreshEntries, refreshTags, addToast]
+  );
 
   // ─── Tag CRUD ───────────────────────────────────────────────────
 
@@ -830,6 +1067,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         filteredEntries,
         tags,
         selectedEntry,
+        selectedEntryIds,
+        setSelectedEntryIds,
+        toggleEntrySelection,
+        clearSelection,
+        bulkUpdateEntries,
+        bulkDeleteEntries,
         searchTerm,
         filterCategory,
         settings,

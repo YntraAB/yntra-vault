@@ -582,6 +582,7 @@ impl VaultManager {
                 strength_score: e.strength_score.clone(),
                 password_age_days: age,
                 has_passkey: e.encrypted_passkey.is_some(),
+                attachment_count: e.attachments.len(),
             }
         }).collect())
     }
@@ -720,6 +721,14 @@ impl VaultManager {
             None
         };
 
+        let attachments = entry.attachments.iter().map(|att| AttachmentInfo {
+            id: att.id,
+            name: att.name.clone(),
+            size: att.size,
+            mime_type: att.mime_type.clone(),
+            created_at: att.created_at,
+        }).collect();
+
         Ok(DecryptedEntry {
             id: entry.id,
             title: entry.title.clone(),
@@ -742,6 +751,7 @@ impl VaultManager {
             password_history_count: entry.password_history.len(),
             has_passkey: entry.encrypted_passkey.is_some(),
             passkey_public_key: entry.passkey_public_key.clone(),
+            attachments,
         })
     }
 
@@ -767,6 +777,28 @@ impl VaultManager {
             None
         };
 
+        // Encrypt staged file attachments if provided
+        let mut attachments = Vec::new();
+        if let Some(new_atts) = new.attachments {
+            for att in new_atts {
+                let att_id = Uuid::new_v4();
+                let encrypted_blob = Self::encrypt_entry_field(
+                    &att.data,
+                    &keys.entry_key,
+                    &id,
+                    FieldScope::Attachment { attachment_id: &att_id },
+                )?;
+                attachments.push(FileAttachment {
+                    id: att_id,
+                    name: att.name,
+                    size: att.data.len() as u64,
+                    mime_type: att.mime_type,
+                    created_at: now,
+                    encrypted_blob,
+                });
+            }
+        }
+
         let mut entry = Entry {
             id,
             title: new.title,
@@ -789,6 +821,7 @@ impl VaultManager {
             password_changed_at: now,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments,
         };
 
         // Generate passkey if requested (single keypair for both fields)
@@ -910,6 +943,7 @@ impl VaultManager {
                 custom_fields: item.custom_fields,
                 entry_type: Some(item.entry_type.clone()),
                 generate_passkey: None,
+                attachments: None,
             };
 
             let now = Utc::now();
@@ -950,6 +984,7 @@ impl VaultManager {
                 password_changed_at: now,
                 encrypted_passkey: None,
                 passkey_public_key: None,
+                attachments: Vec::new(),
             };
 
             self.data.entries.push(entry);
@@ -1094,6 +1129,32 @@ impl VaultManager {
                 }
             }
 
+            // Handle deleting attachments if requested
+            if let Some(ref del_ids) = update.delete_attachment_ids {
+                entry.attachments.retain(|att| !del_ids.contains(&att.id));
+            }
+
+            // Handle adding new staged attachments if requested
+            if let Some(new_atts) = update.new_attachments {
+                for att in new_atts {
+                    let att_id = Uuid::new_v4();
+                    let encrypted_blob = Self::encrypt_entry_field(
+                        &att.data,
+                        &entry_key,
+                        &id,
+                        FieldScope::Attachment { attachment_id: &att_id },
+                    )?;
+                    entry.attachments.push(FileAttachment {
+                        id: att_id,
+                        name: att.name,
+                        size: att.data.len() as u64,
+                        mime_type: att.mime_type,
+                        created_at: now,
+                        encrypted_blob,
+                    });
+                }
+            }
+
             entry.updated_at = now;
         }
 
@@ -1109,6 +1170,84 @@ impl VaultManager {
 
         self.add_entry_to_index(id, &title, &username, &url, &email, &tags);
 
+        self.save()?;
+
+        Ok(())
+    }
+
+    /// Decrypt and return the raw byte payload of a file attachment.
+    pub fn get_attachment_data(&self, entry_id: Uuid, attachment_id: Uuid) -> crate::Result<Vec<u8>> {
+        let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        let entry = self.data.entries.iter()
+            .find(|e| e.id == entry_id)
+            .ok_or(VaultError::EntryNotFound(entry_id.to_string()))?;
+
+        let attachment = entry.attachments.iter()
+            .find(|a| a.id == attachment_id)
+            .ok_or(VaultError::InvalidFormat(format!("Attachment {} not found", attachment_id)))?;
+
+        let data = Self::decrypt_entry_field(
+            &attachment.encrypted_blob,
+            &keys.entry_key,
+            &entry_id,
+            FieldScope::Attachment { attachment_id: &attachment_id },
+        )?;
+
+        Ok(data.to_vec())
+    }
+
+    /// Add an attachment directly to an existing unlocked entry.
+    pub fn add_attachment(&mut self, entry_id: Uuid, name: &str, mime_type: &str, data: &[u8]) -> crate::Result<AttachmentInfo> {
+        let entry_key = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();
+        let now = Utc::now();
+        let attachment_id = Uuid::new_v4();
+
+        let encrypted_blob = Self::encrypt_entry_field(
+            data,
+            &entry_key,
+            &entry_id,
+            FieldScope::Attachment { attachment_id: &attachment_id },
+        )?;
+
+        let attachment = FileAttachment {
+            id: attachment_id,
+            name: name.to_string(),
+            size: data.len() as u64,
+            mime_type: mime_type.to_string(),
+            created_at: now,
+            encrypted_blob,
+        };
+
+        let info = AttachmentInfo {
+            id: attachment_id,
+            name: name.to_string(),
+            size: data.len() as u64,
+            mime_type: mime_type.to_string(),
+            created_at: now,
+        };
+
+        let entry = self.data.entries.iter_mut()
+            .find(|e| e.id == entry_id)
+            .ok_or(VaultError::EntryNotFound(entry_id.to_string()))?;
+
+        entry.attachments.push(attachment);
+        entry.updated_at = now;
+        self.save()?;
+
+        Ok(info)
+    }
+
+    /// Delete an attachment from an existing unlocked entry.
+    pub fn delete_attachment(&mut self, entry_id: Uuid, attachment_id: Uuid) -> crate::Result<()> {
+        let entry = self.data.entries.iter_mut()
+            .find(|e| e.id == entry_id)
+            .ok_or(VaultError::EntryNotFound(entry_id.to_string()))?;
+
+        let pos = entry.attachments.iter().position(|a| a.id == attachment_id)
+            .ok_or(VaultError::InvalidFormat(format!("Attachment {} not found", attachment_id)))?;
+
+        entry.attachments.remove(pos);
+        entry.updated_at = Utc::now();
         self.save()?;
 
         Ok(())
@@ -1525,6 +1664,9 @@ pub struct NewEntry {
     pub entry_type: Option<EntryType>,
     /// If true, auto-generate an ES256 passkey keypair for this entry
     pub generate_passkey: Option<bool>,
+    /// Optional file attachments to create along with entry
+    #[serde(default)]
+    pub attachments: Option<Vec<NewAttachment>>,
 }
 
 /// Data for updating an existing entry (all fields optional).
@@ -1544,6 +1686,12 @@ pub struct UpdateEntry {
     pub breach_status: Option<BreachStatus>,
     /// "generate" to create new passkey, "remove" to delete existing
     pub passkey_action: Option<String>,
+    /// Staged new file attachments to encrypt and add
+    #[serde(default)]
+    pub new_attachments: Option<Vec<NewAttachment>>,
+    /// Attachment IDs to delete from the entry
+    #[serde(default)]
+    pub delete_attachment_ids: Option<Vec<Uuid>>,
 }
 
 /// Fully decrypted entry for the detail view.
@@ -1570,6 +1718,8 @@ pub struct DecryptedEntry {
     pub password_history_count: usize,
     pub has_passkey: bool,
     pub passkey_public_key: Option<Vec<u8>>,
+    #[serde(default)]
+    pub attachments: Vec<AttachmentInfo>,
 }
 
 // ─── Legacy Migration Types ─────────────────────────────────────────────
@@ -1624,6 +1774,7 @@ impl LegacyEntry {
             password_changed_at: self.password_changed_at,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: Vec::new(),
         }
     }
 }
@@ -1692,6 +1843,7 @@ mod tests {
         assert_eq!(manager.metadata().name, "my-test-vault");
         
         // 2. Add an entry
+        // 2. Add an entry
         let entry1 = NewEntry {
             title: "Service A".to_string(),
             username: "userA".to_string(),
@@ -1704,6 +1856,7 @@ mod tests {
             custom_fields: Vec::new(),
             entry_type: Some(EntryType::Login),
             generate_passkey: None,
+            attachments: None,
         };
         
         let id1 = manager.add_entry(entry1).unwrap();
@@ -1738,6 +1891,7 @@ mod tests {
             custom_fields: Vec::new(),
             entry_type: Some(EntryType::Login),
             generate_passkey: None,
+            attachments: None,
         };
         let id2 = manager.add_entry(entry2).unwrap();
         
@@ -1824,27 +1978,104 @@ mod tests {
             custom_fields: Vec::new(),
             entry_type: None,
             generate_passkey: None,
+            attachments: None,
         };
         let id = manager.add_entry(entry).unwrap();
 
-        // Update password to populate history
+        // Change password to generate history item
         manager.update_entry(id, UpdateEntry {
             password: Some("active-password-v2".to_string()),
             ..Default::default()
         }).unwrap();
 
+        // Verify active password decrypts under Scope::Password
+        let dec = manager.get_entry(id).unwrap();
+        assert_eq!(dec.password, "active-password-v2");
+
+        // Verify history item decrypts under Scope::History
         let history = manager.get_password_history(id).unwrap();
-        assert_eq!(history.len(), 1);
         assert_eq!(history[0].password, "active-password-v1");
 
-        // Attempt substitution attack: overwrite active password blob with history password blob
-        let entry_ref = manager.data.entries.iter_mut().find(|e| e.id == id).unwrap();
-        let history_blob = entry_ref.password_history[0].encrypted_password.clone();
-        entry_ref.encrypted_password = history_blob; // Transmit history blob into active password field
+        // Now attempt to swap encrypted_password with history item's encrypted_password in memory
+        let entry_mut = manager.data_mut().entries.iter_mut().find(|e| e.id == id).unwrap();
+        entry_mut.encrypted_password = entry_mut.password_history[0].encrypted_password.clone();
 
-        // Decrypting active entry MUST fail because history blob uses "history" AAD scope, not "password" AAD scope!
-        let decrypted_res = manager.get_entry(id);
-        assert!(decrypted_res.is_err(), "Substitution attack must fail AEAD tag check due to AAD scope isolation");
+        // Attempting to decrypt the history blob under Scope::Password MUST fail due to AAD mismatch
+        let result = manager.get_entry(id);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_attachment_encryption_decryption() {
+        let test_vault = TestVault::new();
+        let password = "attachment-test-password";
+        let mut manager = VaultManager::create("attachment-vault", password, &test_vault.path).unwrap();
+
+        // Staged attachment
+        let raw_bytes = b"SECRET ENCRYPTED FILE PAYLOAD 1234567890".to_vec();
+        let new_att = NewAttachment {
+            name: "test_doc.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            data: raw_bytes.clone(),
+        };
+
+        let new_entry = NewEntry {
+            title: "Attachment Entry".to_string(),
+            username: "user".to_string(),
+            password: "password123".to_string(),
+            url: "".to_string(),
+            email: "".to_string(),
+            notes: "".to_string(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: Vec::new(),
+            entry_type: None,
+            generate_passkey: None,
+            attachments: Some(vec![new_att]),
+        };
+
+        let entry_id = manager.add_entry(new_entry).unwrap();
+
+        // Verify entry preview reports 1 attachment
+        let previews = manager.list_entries().unwrap();
+        assert_eq!(previews[0].attachment_count, 1);
+
+        // Verify get_entry lists attachment metadata
+        let dec_entry = manager.get_entry(entry_id).unwrap();
+        assert_eq!(dec_entry.attachments.len(), 1);
+        assert_eq!(dec_entry.attachments[0].name, "test_doc.txt");
+        assert_eq!(dec_entry.attachments[0].size, raw_bytes.len() as u64);
+
+        let att_id = dec_entry.attachments[0].id;
+
+        // Decrypt attachment raw bytes and verify match
+        let decrypted_bytes = manager.get_attachment_data(entry_id, att_id).unwrap();
+        assert_eq!(decrypted_bytes, raw_bytes);
+
+        // Add second attachment via add_attachment method
+        let raw_bytes_2 = b"SECOND FILE PAYLOAD PNG DATA".to_vec();
+        let info2 = manager.add_attachment(entry_id, "image.png", "image/png", &raw_bytes_2).unwrap();
+        assert_eq!(info2.name, "image.png");
+
+        let dec_entry2 = manager.get_entry(entry_id).unwrap();
+        assert_eq!(dec_entry2.attachments.len(), 2);
+
+        // Delete first attachment
+        manager.delete_attachment(entry_id, att_id).unwrap();
+        let dec_entry3 = manager.get_entry(entry_id).unwrap();
+        assert_eq!(dec_entry3.attachments.len(), 1);
+        assert_eq!(dec_entry3.attachments[0].name, "image.png");
+
+        // Save and lock
+        manager.save().unwrap();
+        manager.lock();
+
+        // Re-open vault and verify attachment persists and decrypts correctly
+        let reopened = VaultManager::open(&test_vault.path, password).unwrap();
+        let dec_reopened = reopened.get_entry(entry_id).unwrap();
+        assert_eq!(dec_reopened.attachments.len(), 1);
+        let reopened_bytes = reopened.get_attachment_data(entry_id, info2.id).unwrap();
+        assert_eq!(reopened_bytes, raw_bytes_2);
     }
 
     #[test]

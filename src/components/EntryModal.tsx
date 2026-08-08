@@ -10,6 +10,7 @@ import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import {
   X, Plus, Eye, EyeOff, Wand2, GripVertical,
   Globe, User, Mail, Key, FileText, ShieldCheck, Loader2, Fingerprint,
+  Paperclip, File, Image, FileArchive, Upload, Trash2,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -17,9 +18,32 @@ import { PasswordStrength } from './PasswordStrength';
 import { PasswordGenerator } from './PasswordGenerator';
 import { BreachIndicator } from './BreachIndicator';
 import CreateTagModal from './CreateTagModal';
-import type { PasswordEntry, CustomField, Tag, FieldType } from '@/types';
+import type { PasswordEntry, CustomField, Tag, FieldType, AttachmentInfo } from '@/types';
 import { getFieldLayout } from '@/lib/utils';
 import { ActionTooltip } from './ui/tooltip';
+
+function formatBytes(bytes: number, decimals = 1): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+function getAttachmentIcon(mimeType: string, fileName: string) {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (mimeType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
+    return <Image size={14} className="text-blue-400 shrink-0" />;
+  }
+  if (mimeType.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
+    return <FileText size={14} className="text-emerald-400 shrink-0" />;
+  }
+  if (mimeType.includes('zip') || mimeType.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
+    return <FileArchive size={14} className="text-amber-400 shrink-0" />;
+  }
+  return <Paperclip size={14} className="text-indigo-400 shrink-0" />;
+}
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -77,6 +101,37 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
   const [fieldsOrder, setFieldsOrder] = useState<string[]>(['username', 'password', 'url']);
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
 
+  const [stagedAttachments, setStagedAttachments] = useState<{ name: string; mimeType: string; data: Uint8Array; size: number }[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<AttachmentInfo[]>([]);
+  const [deleteAttachmentIds, setDeleteAttachmentIds] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = useCallback(async (files: FileList | File[]) => {
+    const newStaged: { name: string; mimeType: string; data: Uint8Array; size: number }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 25 * 1024 * 1024) {
+        addToast({ message: `File "${file.name}" exceeds 25 MB size limit`, type: 'error' });
+        continue;
+      }
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        newStaged.push({
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          data: bytes,
+          size: file.size,
+        });
+      } catch (err) {
+        addToast({ message: `Failed to read file "${file.name}": ${err}`, type: 'error' });
+      }
+    }
+    if (newStaged.length > 0) {
+      setStagedAttachments(prev => [...prev, ...newStaged]);
+    }
+  }, [addToast]);
+
   const prevTagsRef = useRef<Tag[]>(allTags);
   useEffect(() => {
     if (allTags.length > prevTagsRef.current.length) {
@@ -130,6 +185,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
           generatePasskey: undefined,
           passkeyAction: undefined,
         });
+        setExistingAttachments(editEntry.attachments || []);
       } else {
         setFieldsOrder(['username', 'password', 'url']);
         const initialTags: string[] = [];
@@ -147,20 +203,25 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
           favorite: initialFavorite,
           customFields: [],
         });
+        setExistingAttachments([]);
       }
+      setStagedAttachments([]);
+      setDeleteAttachmentIds([]);
       setErrors({});
       setShowGenerator(false);
       setTimeout(() => titleRef.current?.focus(), 100);
     }
   }, [open, editEntry, filterCategory]);
 
-  // Clear sensitive data on close
+  // Clear sensitive data on close and zeroize staged attachment buffers in RAM
   useEffect(() => {
     if (!open) {
       setForm(prev => ({ ...prev, password: '' }));
       setShowPassword(false);
+      stagedAttachments.forEach(att => att.data.fill(0));
+      setStagedAttachments([]);
     }
-  }, [open]);
+  }, [open, stagedAttachments]);
 
   // Esc to close
   useEffect(() => {
@@ -390,6 +451,17 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
         value: fieldsOrder.join(','),
       });
       cleanedForm.customFields = customFields;
+
+      if (stagedAttachments.length > 0) {
+        cleanedForm.newAttachments = stagedAttachments.map(a => ({
+          name: a.name,
+          mimeType: a.mimeType,
+          data: a.data,
+        }));
+      }
+      if (deleteAttachmentIds.length > 0) {
+        cleanedForm.deleteAttachmentIds = deleteAttachmentIds;
+      }
 
       if (isEdit && editEntry) {
         const updated: PasswordEntry = {
@@ -838,6 +910,105 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                 </div>
               </div>
 
+              {/* File Attachments */}
+              <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-[var(--border-subtle)]">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      handleFileSelect(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                    <Paperclip size={13} /> Attachments
+                    {(existingAttachments.filter(a => !deleteAttachmentIds.includes(a.id)).length + stagedAttachments.length) > 0 && (
+                      <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] border border-[var(--border)]">
+                        {existingAttachments.filter(a => !deleteAttachmentIds.includes(a.id)).length + stagedAttachments.length}
+                      </span>
+                    )}
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)]"
+                  >
+                    <Upload size={12} /> Add File
+                  </button>
+                </div>
+
+                {/* Staged & Existing Attachment Items */}
+                {(existingAttachments.some(a => !deleteAttachmentIds.includes(a.id)) || stagedAttachments.length > 0) ? (
+                  <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto pr-1">
+                    {/* Existing saved attachments */}
+                    {existingAttachments
+                      .filter(att => !deleteAttachmentIds.includes(att.id))
+                      .map(att => (
+                        <div
+                          key={att.id}
+                          className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2 text-[12px]"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {getAttachmentIcon(att.mime_type, att.name)}
+                            <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                            <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
+                          </div>
+                          <ActionTooltip content="Remove attachment">
+                            <button
+                              type="button"
+                              onClick={() => setDeleteAttachmentIds(prev => [...prev, att.id])}
+                              className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                            >
+                              <X size={13} />
+                            </button>
+                          </ActionTooltip>
+                        </div>
+                      ))}
+
+                    {/* Staged new attachments */}
+                    {stagedAttachments.map((att, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[12px]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {getAttachmentIcon(att.mimeType, att.name)}
+                          <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                          <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
+                          <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
+                        </div>
+                        <ActionTooltip content="Remove file">
+                          <button
+                            type="button"
+                            onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
+                            className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                          >
+                            <X size={13} />
+                          </button>
+                        </ActionTooltip>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    <Upload size={16} className="text-[var(--text-tertiary)]" />
+                    <span className="text-[11px] font-medium text-[var(--text-secondary)]">Click or drop files to attach</span>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">Files are encrypted with per-entry key (max 25 MB)</span>
+                  </button>
+                )}
+              </div>
+
               {/* Add Field Button & Dropdown */}
               <div className="relative mt-1 self-start">
                 <DropdownMenu>
@@ -850,6 +1021,13 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-[220px] max-h-[340px] overflow-y-auto z-50">
+                    <DropdownMenuItem
+                      onSelect={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 text-[12px] cursor-pointer"
+                    >
+                      <Paperclip size={13} />
+                      <span>File Attachment</span>
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('username')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
