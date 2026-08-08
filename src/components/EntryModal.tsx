@@ -77,7 +77,7 @@ const EMPTY_ENTRY: Omit<PasswordEntry, 'id' | 'createdAt' | 'updatedAt'> = {
   passkeyAction: undefined,
 };
 
-type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret' | 'passkey';
+type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret' | 'passkey' | 'attachments';
 
 const PRESETS = [
   { id: 'login-user', nameKey: 'preset.login_user', fields: ['username', 'password', 'url'] as StandardFieldKey[] },
@@ -129,6 +129,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
     }
     if (newStaged.length > 0) {
       setStagedAttachments(prev => [...prev, ...newStaged]);
+      setFieldsOrder(prev => prev.includes('attachments') ? prev : [...prev, 'attachments']);
     }
   }, [addToast]);
 
@@ -146,7 +147,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
   const titleRef = useRef<HTMLInputElement>(null);
 
   const activeFields = fieldsOrder.filter((f): f is StandardFieldKey =>
-    ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey'].includes(f)
+    ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(f)
   );
 
   // Populate form on open
@@ -161,6 +162,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
         if (editEntry.notes) standardActive.push('notes');
         if (editEntry.totpSecret) standardActive.push('totpSecret');
         if (editEntry.hasPasskey) standardActive.push('passkey');
+        if (editEntry.attachments && editEntry.attachments.length > 0) standardActive.push('attachments');
         if (standardActive.length === 0) {
           standardActive.push('username', 'password', 'url');
         }
@@ -280,6 +282,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
     if (type === 'url' && fieldsOrder.includes('url')) count++;
     if ((type === 'totpSecret' || type === 'totp') && fieldsOrder.includes('totpSecret')) count++;
     if (type === 'notes' && fieldsOrder.includes('notes')) count++;
+    if (type === 'attachments' && fieldsOrder.includes('attachments')) count++;
 
     const targetType = type === 'totpSecret' ? 'totp' : type;
     count += form.customFields.filter(f => f.type === targetType).length;
@@ -340,7 +343,15 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
   }, []);
 
   const handleAddField = useCallback((key: StandardFieldKey | FieldType | 'custom') => {
-    const isStandardKey = ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey'].includes(key);
+    if (key === 'attachments') {
+      if (!fieldsOrder.includes('attachments')) {
+        setFieldsOrder(prev => [...prev, 'attachments']);
+      }
+      setTimeout(() => fileInputRef.current?.click(), 50);
+      return;
+    }
+
+    const isStandardKey = ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(key);
 
     if (isStandardKey && !fieldsOrder.includes(key)) {
       setFieldsOrder(prev => [...prev, key]);
@@ -740,21 +751,99 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                           </AnimatePresence>
                         </div>
                       );
-                    } else if (id === 'passkey') {
-                      icon = <Fingerprint size={13} />;
-                      label = 'Passkey (ES256)';
+                    } else if (id === 'attachments') {
+                      icon = <Paperclip size={13} />;
+                      label = 'Attachments';
+                      onRemove = () => {
+                        setFieldsOrder(prev => prev.filter(f => f !== 'attachments'));
+                        stagedAttachments.forEach(att => att.data.fill(0));
+                        setStagedAttachments([]);
+                        if (existingAttachments.length > 0) {
+                          setDeleteAttachmentIds(existingAttachments.map(a => a.id));
+                        }
+                      };
                       content = (
-                        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 text-[12px] text-[var(--text-secondary)]">
-                          {isEdit && form.hasPasskey ? (
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                              <span>{t('entry.passkey_active_desc')}</span>
+                        <div className="flex flex-col gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                handleFileSelect(e.target.files);
+                                e.target.value = '';
+                              }
+                            }}
+                          />
+
+                          {(existingAttachments.some(a => !deleteAttachmentIds.includes(a.id)) || stagedAttachments.length > 0) ? (
+                            <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto pr-1">
+                              {existingAttachments
+                                .filter(att => !deleteAttachmentIds.includes(att.id))
+                                .map(att => (
+                                  <div
+                                    key={att.id}
+                                    className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      {getAttachmentIcon(att.mime_type, att.name)}
+                                      <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                                      <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
+                                    </div>
+                                    <ActionTooltip content="Remove attachment">
+                                      <button
+                                        type="button"
+                                        onClick={() => setDeleteAttachmentIds(prev => [...prev, att.id])}
+                                        className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                      >
+                                        <X size={13} />
+                                      </button>
+                                    </ActionTooltip>
+                                  </div>
+                                ))}
+
+                              {stagedAttachments.map((att, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[12px]"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    {getAttachmentIcon(att.mimeType, att.name)}
+                                    <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                                    <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
+                                    <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
+                                  </div>
+                                  <ActionTooltip content="Remove file">
+                                    <button
+                                      type="button"
+                                      onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
+                                      className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                    >
+                                      <X size={13} />
+                                    </button>
+                                  </ActionTooltip>
+                                </div>
+                              ))}
+
+                              <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border)] py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] mt-1"
+                              >
+                                <Upload size={12} /> Add More Files
+                              </button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                              <span>{t('entry.passkey_new_desc')}</span>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                            >
+                              <Upload size={16} className="text-[var(--text-tertiary)]" />
+                              <span className="text-[11px] font-medium text-[var(--text-secondary)]">Click or drop files to attach</span>
+                              <span className="text-[10px] text-[var(--text-tertiary)]">Files are encrypted with per-entry key (max 25 MB)</span>
+                            </button>
                           )}
                         </div>
                       );
@@ -910,105 +999,6 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                 </div>
               </div>
 
-              {/* File Attachments */}
-              <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-[var(--border-subtle)]">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      handleFileSelect(e.target.files);
-                      e.target.value = '';
-                    }
-                  }}
-                />
-
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
-                    <Paperclip size={13} /> Attachments
-                    {(existingAttachments.filter(a => !deleteAttachmentIds.includes(a.id)).length + stagedAttachments.length) > 0 && (
-                      <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] border border-[var(--border)]">
-                        {existingAttachments.filter(a => !deleteAttachmentIds.includes(a.id)).length + stagedAttachments.length}
-                      </span>
-                    )}
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)]"
-                  >
-                    <Upload size={12} /> Add File
-                  </button>
-                </div>
-
-                {/* Staged & Existing Attachment Items */}
-                {(existingAttachments.some(a => !deleteAttachmentIds.includes(a.id)) || stagedAttachments.length > 0) ? (
-                  <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto pr-1">
-                    {/* Existing saved attachments */}
-                    {existingAttachments
-                      .filter(att => !deleteAttachmentIds.includes(att.id))
-                      .map(att => (
-                        <div
-                          key={att.id}
-                          className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2 text-[12px]"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {getAttachmentIcon(att.mime_type, att.name)}
-                            <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
-                            <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
-                          </div>
-                          <ActionTooltip content="Remove attachment">
-                            <button
-                              type="button"
-                              onClick={() => setDeleteAttachmentIds(prev => [...prev, att.id])}
-                              className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
-                            >
-                              <X size={13} />
-                            </button>
-                          </ActionTooltip>
-                        </div>
-                      ))}
-
-                    {/* Staged new attachments */}
-                    {stagedAttachments.map((att, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[12px]"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {getAttachmentIcon(att.mimeType, att.name)}
-                          <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
-                          <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
-                          <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
-                        </div>
-                        <ActionTooltip content="Remove file">
-                          <button
-                            type="button"
-                            onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
-                            className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
-                          >
-                            <X size={13} />
-                          </button>
-                        </ActionTooltip>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
-                  >
-                    <Upload size={16} className="text-[var(--text-tertiary)]" />
-                    <span className="text-[11px] font-medium text-[var(--text-secondary)]">Click or drop files to attach</span>
-                    <span className="text-[10px] text-[var(--text-tertiary)]">Files are encrypted with per-entry key (max 25 MB)</span>
-                  </button>
-                )}
-              </div>
-
               {/* Add Field Button & Dropdown */}
               <div className="relative mt-1 self-start">
                 <DropdownMenu>
@@ -1022,11 +1012,11 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-[220px] max-h-[340px] overflow-y-auto z-50">
                     <DropdownMenuItem
-                      onSelect={() => fileInputRef.current?.click()}
+                      onSelect={() => handleAddField('attachments')}
                       className="flex items-center gap-2 text-[12px] cursor-pointer"
                     >
                       <Paperclip size={13} />
-                      <span>File Attachment</span>
+                      <span>{getDropdownLabel('attachments', 'File Attachment')}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => handleAddField('username')}
