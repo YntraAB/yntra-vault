@@ -1,0 +1,7 @@
+# Yntra Vault Git Attributes - Reproducible Build Line Ending Standardization
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.vdb binary

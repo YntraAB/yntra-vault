@@ -8,6 +8,9 @@ use tauri::{Manager, Emitter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Disable core dumps and debugger attachment at process startup
+    yntra_vault_core::crypto::prevent_core_dumps();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -74,6 +77,7 @@ pub fn run() {
             commands::list_trash,
             commands::restore_from_trash,
             commands::permanent_delete,
+            commands::empty_trash,
             // Password History
             commands::get_password_history,
             // TOTP

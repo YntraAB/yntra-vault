@@ -358,6 +358,13 @@ pub async fn permanent_delete(
     manager.permanent_delete(uuid).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.empty_trash().map_err(|e| e.to_string())
+}
+
 // ─── Password History Commands ──────────────────────────────────────────
 
 #[tauri::command]

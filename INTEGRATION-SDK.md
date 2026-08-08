@@ -9,17 +9,20 @@
 ### Binary Layout
 
 ```
-┌──────────────────────────────────┐
-│  Magic: "YNTR" (4 bytes)        │
-│  Version: u16 LE (2 bytes) -> 3 │
-│  Flags: u16 LE (2 bytes)        │
-│  Salt: [u8; 32] (32 bytes)      │
-│  KDF Params Length: u32 LE      │  (Header bound as AAD)
-│  KDF Params (bincode)           │
-│  Payload Length: u64 LE         │
-│  ────────────────────────────── │
-│  Encrypted Payload (MessagePack)│  (XChaCha20-Poly1305 + Tag)
-└──────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Magic: "YNTR" (4 bytes)                 │
+│ Version: u16 LE (2 bytes) -> 4          │
+│ Flags: u16 LE (2 bytes)                 │  (0x0001 = Biometric, 0x0002 = HW2FA)
+│ Salt: [u8; 32] (32 bytes)               │
+│ [HMAC: 64 bytes (v1/v2 legacy only)]    │
+│ KDF Params Length: u32 LE (4 bytes)     │  (Header bound as AAD)
+│ KDF Params (bincode)                    │
+│ [Biometric Block Length + Payload]      │  (Optional: if FLAG_HAS_BIOMETRIC)
+│ [Hardware 2FA Block Length + Payload]   │  (Optional: if FLAG_HAS_HARDWARE_2FA)
+│ Payload Length: u64 LE (8 bytes)        │
+│ ─────────────────────────────────────── │
+│ Encrypted Payload (MessagePack)         │  (XChaCha20-Poly1305 + Tag)
+└─────────────────────────────────────────┘
 ```
 
 ### Format Versions
@@ -27,15 +30,16 @@
 | Version | Payload Encoding | Status |
 |---------|-----------------|--------|
 | `1` | bincode (positional, legacy) | Read-only — auto-upgraded on save |
-| `2` | MessagePack + Outer HMAC | Read-only — auto-upgraded to v3 on save |
-| `3` | MessagePack + AAD Header Binding | Current — single-pass SOTA format |
+| `2` | MessagePack + Outer HMAC | Read-only — auto-upgraded on save |
+| `3` | MessagePack + AAD Header Binding | Supported legacy format |
+| `4` | MessagePack + AAD Header Binding + Biometric/HW2FA Header | Current — single-pass SOTA format |
 
-**Migration behavior**: Opening a v1 or v2 vault deserializes legacy data and verifies legacy HMACs where applicable, then re-saves as v3 MessagePack with AAD header binding on next write. No user action required.
+**Migration behavior**: Opening a v1, v2, or v3 vault deserializes legacy data and verifies legacy signatures where applicable, then re-saves as v4 MessagePack with AAD header binding on next write. No user action required.
 
 ### Encryption Pipeline
 
 ```
-Master Password
+Master Password [+ Optional Keyfile]
     │
     ▼
 Argon2id (256 MB, 4 passes, 4 threads)
@@ -43,13 +47,13 @@ Argon2id (256 MB, 4 passes, 4 threads)
     ▼
 HKDF-SHA512 ──┬── Vault Key (XChaCha20-Poly1305 + Header AAD)
                ├── Entry Key (XChaCha20-Poly1305 / AES-256-GCM)
-               ├── P2P Auth Key (HMAC-SHA512)
-               └── Search Key (trigram hashing)
+               ├── HMAC Key (HMAC-SHA512 / P2P Auth)
+               └── Search Key (trigram HMAC hashing)
 ```
 
 **Decryption order**:
-1. Parse header → extract salt + KDF params
-2. Derive keys from password + salt
+1. Parse header → extract salt + KDF params (validate minimum KDF parameter bounds)
+2. Derive keys from password/keyfile + salt
 3. **Verify Authenticated Header & Payload** via single-pass XChaCha20-Poly1305 using header AAD (reject tampered files; legacy v1/v2 files verify outer HMAC first)
 4. Decrypt outer layer (XChaCha20-Poly1305 → VaultData)
 5. Per-entry fields decrypted on-demand (XChaCha20-Poly1305 / AES-256-GCM)
@@ -66,21 +70,24 @@ HKDF-SHA512 ──┬── Vault Key (XChaCha20-Poly1305 + Header AAD)
 
 ---
 
-## 2. Browser Integration (Native Messaging)
+## 2. Browser Integration & Architecture [Specification / Out of Scope]
 
-### Architecture
+> [!NOTE]
+> Yntra Vault operates strictly offline without background network services or browser extension processes. All application and web form auto-filling is performed directly via the OS-level Autotype Engine. The specification below outlines the conceptual architecture for browser extensions.
+
+### Conceptual Architecture
 
 ```
 Browser Extension ◄──── stdin/stdout (4-byte length prefix) ────► Native Host
-                                                                      │
+                                                                       │
                                                      Named Pipe / Unix Socket
-                                                                      │
-                                                              Tauri Desktop App
+                                                                       │
+                                                               Tauri Desktop App
 ```
 
 **Components**:
-- **Native Host** (`src-core/src/bin/yntra-vault-native-host.rs`): Lightweight Rust binary registered as a Chrome/Firefox Native Messaging host.
-- **IPC Server** (`src-core/src/vault/ipc_server.rs`): Runs inside the Tauri app, listens on `\\.\pipe\yntra-vault-ipc` (Windows) or `/tmp/yntra-vault-ipc.sock` (Unix).
+- **Native Host**: Lightweight executable registered as a Chrome/Firefox Native Messaging host.
+- **IPC Server**: Runs inside the desktop app, listens on `\\.\pipe\yntra-vault-ipc` (Windows) or `/tmp/yntra-vault-ipc.sock` (Unix).
 
 ### Security Model
 
@@ -90,48 +97,12 @@ Browser Extension ◄──── stdin/stdout (4-byte length prefix) ───�
    - Rejects execution from unknown parents
 
 2. **Session Token Verification**:
-   - Tauri app generates a cryptographic token on vault unlock
+   - App generates a cryptographic token on vault unlock
    - Token is wrapped via DPAPI (Windows) / Keychain (macOS)
    - All IPC requests must include a valid `session_token`
    - Token comparison uses constant-time equality (`subtle::ConstantTimeEq`)
 
 3. **Message Size Limit**: All payloads capped at 1 MB
-
-### SDK Request/Response Format
-
-All payloads are JSON.
-
-#### `get_credentials`
-
-```json
-// Request
-{
-  "action": "get_credentials",
-  "domain": "github.com",
-  "session_token": "a1b2c3d4..."
-}
-
-// Success
-{
-  "username": "user123",
-  "password": "decryptedPassword",
-  "email": "user@example.com"
-}
-
-// Errors
-{"error": "Unauthorized parent process"}
-{"error": "Invalid session token"}
-{"error": "Vault is locked"}
-{"error": "No matching credentials found"}
-```
-
-### Installation
-
-The `install_browser_extension` Tauri command:
-1. Writes a Native Messaging manifest JSON to the OS-specific location
-2. On Windows: registers `HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.yntra.vault`
-3. On macOS: writes to `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`
-4. On Linux: writes to `~/.config/google-chrome/NativeMessagingHosts/`
 
 ---
 
@@ -145,26 +116,17 @@ The engine classifies focused elements by inspecting accessibility properties:
 
 | Priority | Classification | Detection |
 |----------|---------------|-----------|
-| 1 | **TOTP/2FA** | Keywords: `code`, `token`, `totp`, `2fa`, `otp`, `mfa` |
+| 1 | **TOTP/2FA** | Keywords: `code`, `token`, `totp`, `2fa`, `otp`, `mfa`, `verification`, `kod`, `säkerhet`, `security` |
 | 2 | **Password** | `IsPassword == true`, or keywords: `password`, `lösenord`, `pass` |
 | 3 | **Username** | Any visible, focusable edit control not matching above |
 
 ### Safety Guards
 
 - **Window Lock**: Captures `target_hwnd` on start. If the foreground window changes mid-type, execution aborts immediately.
-- **Focus Settle Polling**: If autotype is triggered while Yntra Vault is the active foreground window, the engine polls (max 15s) until the active window changes, then sleeps for the configured `autotypeSettleDelayMs` before starting to type.
-- **Exclusion Filter**: Skips elements with names/classes containing `search`, `sök`, `find`, `chat`, `message`, `reply`, `comment`, `prompt`.
+- **Focus Settle Polling**: If autotype is triggered while Yntra Vault is active, the engine polls (max 15s) until the active window changes, then sleeps for `settle_delay_ms` before typing.
+- **Exclusion Filter**: Skips elements with names/classes containing `search`, `sök`, `find`, `chat`, `message`, `reply`, `comment`, `prompt`, `filter`, `query`, `ask`, `fråga`, `gpt`, `copilot`.
 - **Auto-Focus**: If no input is focused, scans for the first valid edit field and focuses it (1s intervals, max 15s).
-- **Memory Zeroization**: All sensitive autotype data is wrapped in `AutotypeGuard` which implements `ZeroizeOnDrop`.
-
-### Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `autotypeCharDelayMs` | 15 | Delay between keystrokes (ms) |
-| `autotypeFieldDelayMs` | 300 | Delay between fields (ms) |
-| `autotypeSettleDelayMs` | 3000 | Delay after target fönster is focused before typing (ms) |
-| `autotypeLaunchBrowser` | true | Open URL in browser before typing |
+- **Memory Zeroization**: Sensitive credentials are automatically wrapped in `AutotypeGuard` implementing `ZeroizeOnDrop` via `Zeroizing<String>`.
 
 ---
 
@@ -173,7 +135,7 @@ The engine classifies focused elements by inspecting accessibility properties:
 ### Cryptographic Scheme
 
 - **Algorithm**: ECDSA over NIST P-256 (ES256)
-- **Private Key Storage**: Encrypted per-entry using AES-256-GCM (same entry key as passwords)
+- **Private Key Storage**: Encrypted per-entry using AES-256-GCM / XChaCha20-Poly1305
 - **Public Key Format**: SEC1 uncompressed (65 bytes)
 
 ### API
@@ -196,11 +158,11 @@ entry.passkey_public_key  // Option<Vec<u8>>
 
 ## 5. Encrypted Search (Zero-Disclosure)
 
-The search system uses **trigram hashing** to enable fuzzy search without exposing plaintext index data.
+The search system uses **trigram HMAC hashing** to enable fuzzy search without exposing plaintext index data.
 
-1. Entry metadata is split into character trigrams
-2. Each trigram is HMAC-hashed with a dedicated `search_key`
-3. Hashed trigrams are stored in a `HashMap<[u8; 32], Vec<Uuid>>`
+1. Entry metadata (title, username, url, email, tags) is split into character trigrams
+2. Each trigram is HMAC-SHA256 hashed with a dedicated `search_key` and truncated to 8 bytes (`[u8; 8]`)
+3. Hashed trigrams are stored in a `HashMap<[u8; 8], Vec<Uuid>>`
 4. Query trigrams are hashed with the same key and matched against the index
 5. Results require ≥80% trigram overlap (fuzzy matching)
 
@@ -208,11 +170,11 @@ The search system uses **trigram hashing** to enable fuzzy search without exposi
 
 ## 6. Shamir Secret Sharing
 
-Vault recovery supports splitting the master key into N shares where K are required to reconstruct (K-of-N threshold).
+Vault recovery supports splitting a master password hash into 3 shares where any 2 are required to reconstruct (2-of-3 threshold).
 
-- **Field**: GF(256) with irreducible polynomial `x⁸ + x⁴ + x³ + x + 1`
-- **Share Format**: `YNTRA-SHARE-{index}-{hex_data}`
-- **Constant-Time**: All GF(256) arithmetic uses lookup tables to prevent timing side-channels
+- **Field**: GF(256) with irreducible polynomial `x⁸ + x⁴ + x³ + x + 1` (0x11b)
+- **Share Format**: `SL-SHARE1-{hex}`, `SL-SHARE2-{hex}`, `SL-SHARE3-{hex}`
+- **Scheme**: Password is hashed with SHA-256 to a 32-byte secret before splitting; reconstruction recovers the SHA-256 hash to verify identity.
 
 ---
 
@@ -228,21 +190,7 @@ yntra-vault-private ──── publish-public.ps1 ────► yntra-vault 
 
 ### Public Repository (`yntra-vault`)
 - Clean source only — no `.agents/`, no dev `.md` files, no build artifacts
-- Never commit directly — all updates via sync script
-
-### Sync Command
-
-```powershell
-.\publish-public.ps1 -DestDir <path-to-public-repo> -Push
-```
-
-**Steps performed**:
-1. Wipes destination (preserves `.git/`)
-2. Copies `src/`, `src-core/`, `src-tauri/`, `public/`
-3. Excludes `target/`, `node_modules/`, `.agents/`, dev `.md` files
-4. Copies config files (`package.json`, `tsconfig.json`, etc.)
-5. Renames `README-public.md` → `README.md`
-6. Commits as `pysen00` and pushes to GitHub
+- All updates via sync script `publish-public.ps1`
 
 ---
 
@@ -250,39 +198,116 @@ yntra-vault-private ──── publish-public.ps1 ────► yntra-vault 
 
 All commands are invoked from the React frontend via `@tauri-apps/api/core::invoke()`.
 
-### Vault Lifecycle
+### Vault Lifecycle & Authentication
 
 | Command | Arguments | Returns |
 |---------|-----------|---------|
-| `list_vaults` | — | `VaultInfo[]` |
-| `create_vault` | `name`, `password`, `path` | `VaultInfo` |
-| `open_vault` | `path`, `password` | `VaultInfo` |
+| `get_vault_info` | — | `Option<VaultInfo>` |
+| `create_vault` | `name`, `password`, `path`, `key_file_path?` | `VaultInfo` |
+| `open_vault` | `path`, `password`, `key_file_path?` | `VaultInfo` |
 | `lock_vault` | — | `()` |
-| `close_vault` | — | `()` |
-| `change_master_password` | `current`, `new_password` | `()` |
+| `change_master_password` | `current`, `new_password`, `current_key_file?`, `new_key_file?` | `()` |
 | `get_vault_path` | — | `string` |
-| `export_vault` | `destination` | `()` |
+| `generate_key_file` | `path` | `()` |
 
-### Entry CRUD
+### Biometrics (Windows Hello / Touch ID)
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `check_biometric_available` | — | `BiometricInfo` |
+| `is_biometric_enabled` | `path` | `bool` |
+| `unlock_vault_biometric` | `path` | `VaultInfo` |
+| `enable_biometric` | — | `()` |
+| `disable_biometric` | — | `()` |
+
+### Hardware 2FA / YubiKey
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `check_hardware2fa_available` | — | `Hardware2FaInfo` |
+| `list_hardware_keys` | — | `HardwareKeyInfo[]` |
+| `is_hardware2fa_enabled` | `path` | `bool` |
+| `open_vault_with_hardware2fa` | `path`, `password`, `key_file_path?`, `hardware_response` | `VaultInfo` |
+| `perform_hardware2fa_challenge` | `protocol`, `challenge?` | `Vec<u8>` |
+| `enable_hardware2fa` | `protocol`, `key_name`, `hardware_response` | `()` |
+| `disable_hardware2fa` | — | `()` |
+
+### Entry & Trash CRUD
 
 | Command | Arguments | Returns |
 |---------|-----------|---------|
 | `list_entries` | — | `EntryPreview[]` |
 | `get_entry` | `id` | `DecryptedEntry` |
 | `add_entry` | `entry: NewEntry` | `string` (UUID) |
-| `update_entry` | `id`, `entry: UpdateEntry` | `()` |
+| `update_entry` | `id`, `update: UpdateEntry` | `()` |
 | `delete_entry` | `id` | `()` |
+| `toggle_favorite` | `id` | `bool` |
+| `toggle_pin` | `id` | `bool` |
 | `search_entries` | `query` | `EntryPreview[]` |
+| `list_trash` | — | `TrashedEntryPreview[]` |
+| `restore_from_trash` | `id` | `()` |
+| `permanent_delete` | `id` | `()` |
+| `empty_trash` | — | `()` |
+
+### Attachments
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `get_attachment_data` | `entry_id`, `attachment_id` | `Vec<u8>` |
+| `add_attachment` | `entry_id`, `name`, `mime_type`, `data` | `AttachmentInfo` |
+| `delete_attachment` | `entry_id`, `attachment_id` | `()` |
+
+### Tags & Password History
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `get_tags` | — | `Tag[]` |
+| `add_tag` | `name`, `color`, `icon` | `string` (UUID) |
+| `update_tag` | `id`, `name`, `color`, `icon` | `()` |
+| `delete_tag` | `id` | `()` |
+| `get_password_history` | `entry_id` | `DecryptedHistoryItem[]` |
 
 ### Security & Tools
 
 | Command | Arguments | Returns |
 |---------|-----------|---------|
-| `check_breach` | `password` | `BreachResult` |
+| `check_password_breach` | `password` | `BreachResult` |
+| `analyze_password_strength` | `password` | `StrengthScore` |
 | `security_audit` | — | `SecurityAudit` |
 | `generate_password` | `options: GeneratorOptions` | `string` |
-| `get_totp_code` | `secret` | `TotpCode` |
+| `generate_password_default` | — | `string` |
+| `generate_totp` | `secret` | `TotpCode` |
+| `generate_totp_with_config` | `config: TotpConfig` | `TotpCode` |
+| `parse_otpauth_uri` | `uri` | `TotpConfig` |
 | `autotype` | `text`, `char_delay_ms`, `settle_delay_ms` | `()` |
 | `run_smart_autotype` | `username`, `password`, `totp_secret`, `url`, `launch_browser`, `char_delay_ms`, `field_delay_ms` | `()` |
+| `enable_autostart` | — | `()` |
+| `disable_autostart` | — | `()` |
+| `is_autostart_enabled` | — | `bool` |
 | `set_minimize_to_tray` | `enabled` | `()` |
-| `install_browser_extension` | — | `()` |
+| `check_vault_file_exists` | `path` | `bool` |
+| `show_in_explorer` | `path` | `()` |
+
+### Synchronization (WebDAV & P2P)
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `webdav_test_connection` | `url`, `username`, `password?` | `()` |
+| `webdav_upload` | `url`, `username`, `password?`, `db_path`, `if_match_etag?` | `Option<string>` |
+| `webdav_download` | `url`, `username`, `password?`, `dest_db_path` | `()` |
+| `webdav_sync` | `url`, `username`, `password?` | `MergeStats` |
+| `run_p2p_sync_listener` | `listen_addr`, `db_path` | `()` |
+| `run_p2p_sync_client` | `server_addr`, `db_path` | `()` |
+
+### Shamir Recovery & Import / Export
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `split_master_password` | `password` | `Vec<string>` |
+| `reconstruct_master_password_hash` | `share_a`, `share_b` | `string` (hex) |
+| `export_vault` | `dest_path` | `()` |
+| `export_vault_csv` | `dest_path` | `()` |
+| `export_vault_json` | `dest_path` | `()` |
+| `parse_import_file` | `file_path`, `format?` | `ImportPreviewResult` |
+| `parse_import_content` | `content`, `format?` | `ImportPreviewResult` |
+| `import_entries` | `entries`, `duplicate_strategy` | `usize` |

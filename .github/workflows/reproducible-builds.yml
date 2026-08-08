@@ -1,0 +1,64 @@
+name: SOTA Reproducible Builds CI & Attestation
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify-reproducible-linux:
+    name: Reproducible Build Verification (Linux / Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Run Hermetic Docker Reproducible Build
+        run: |
+          docker build -t yntra-vault-reproducible -f Dockerfile.reproducible .
+          docker run --rm yntra-vault-reproducible
+
+      - name: Execute Dual-Build Verification Suite (Linux Native)
+        run: |
+          chmod +x ./scripts/*.sh
+          ./scripts/verify-reproducible.sh
+
+      - name: Upload Reproducible Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducible-manifest-linux
+          path: reproducible-dist/reproducible-manifest.json
+          if-no-files-found: ignore
+
+  verify-reproducible-windows:
+    name: Reproducible Build Verification (Windows MSVC)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Execute Dual-Build Verification Suite (Windows PowerShell)
+        run: |
+          powershell -ExecutionPolicy Bypass -File ./scripts/verify-reproducible.ps1

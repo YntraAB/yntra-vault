@@ -1282,6 +1282,16 @@ impl VaultManager {
         Ok(())
     }
 
+    /// Permanently empty all entries from trash.
+    pub fn empty_trash(&mut self) -> crate::Result<()> {
+        if !self.is_unlocked() {
+            return Err(VaultError::VaultLocked);
+        }
+        self.data.trash.clear();
+        self.save()?;
+        Ok(())
+    }
+
     /// Restore an entry from trash.
     pub fn restore_from_trash(&mut self, id: Uuid) -> crate::Result<()> {
         let pos = self.data.trash.iter().position(|t| t.entry.id == id)

@@ -134,6 +134,10 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('permanent_delete', { id });
   }
 
+  async emptyTrash(): Promise<void> {
+    return invoke('empty_trash');
+  }
+
   // ─── Password History ───────────────────────────────────────────
 
   async getPasswordHistory(entryId: string): Promise<DecryptedHistoryItem[]> {

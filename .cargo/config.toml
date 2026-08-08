@@ -1,0 +1,22 @@
+[build]
+rustflags = [
+    "--remap-path-prefix=./=/yntra-vault/",
+    "-C", "codegen-units=1",
+    "-C", "target-cpu=x86-64"
+]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "--remap-path-prefix=./=/yntra-vault/",
+    "-C", "codegen-units=1",
+    "-C", "target-cpu=x86-64",
+    "-C", "link-arg=/TIMESTAMP:1700000000",
+    "-C", "link-arg=/BREPRO",
+    "-C", "link-arg=/PDBALTPATH:yntra-vault-app.pdb"
+]
+
+[env]
+SOURCE_DATE_EPOCH = { value = "1700000000", force = false }
+ZERO_AR_DATE = { value = "1", force = true }
+TZ = { value = "UTC", force = true }
+LC_ALL = { value = "C.UTF-8", force = true }

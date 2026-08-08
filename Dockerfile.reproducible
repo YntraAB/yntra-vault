@@ -1,0 +1,56 @@
+# SOTA Reproducible Build Environment for Yntra Vault
+# Base OS: Debian Bookworm Slim
+FROM debian:bookworm-slim AS builder
+
+# 1. Standardize Locale & Timezone
+ENV TZ=UTC \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    curl \
+    git \
+    ca-certificates \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Pin Rust Toolchain (1.95.0)
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH \
+    RUST_VERSION=1.95.0
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal
+
+# 3. Pin Bun Toolchain (1.3.13)
+ENV BUN_INSTALL=/usr/local/bun \
+    PATH=/usr/local/bun/bin:$PATH
+
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.13"
+
+# 4. Standardize Build Environment Variables
+ENV SOURCE_DATE_EPOCH=1700000000 \
+    ZERO_AR_DATE=1 \
+    RUSTFLAGS="--remap-path-prefix=./=/yntra-vault/ -C codegen-units=1 -C target-cpu=x86-64"
+
+WORKDIR /yntra-vault
+
+# Copy repository source code
+COPY . .
+
+# 5. Execute Reproducible Build Sequence
+RUN bun install --frozen-lockfile && \
+    bun run build && \
+    cargo build --manifest-path src-core/Cargo.toml --release --frozen && \
+    cargo build --manifest-path src-tauri/Cargo.toml --release --frozen
+
+# 6. Generate Verification Attestation Manifest
+RUN mkdir -p /dist && \
+    sha256sum /yntra-vault/src-core/target/release/libyntra_vault_core.rlib > /dist/SHA256SUMS 2>/dev/null || true && \
+    sha256sum /yntra-vault/src-tauri/target/release/yntra-vault-app >> /dist/SHA256SUMS 2>/dev/null || true
+
+CMD ["cat", "/dist/SHA256SUMS"]

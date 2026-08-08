@@ -29,6 +29,7 @@ fn setup_concurrent_vault(count: usize) -> (tempfile::TempDir, Arc<Mutex<VaultMa
             custom_fields: Vec::new(),
             entry_type: Some(EntryType::Login),
             generate_passkey: None,
+            attachments: None,
         };
         manager.add_entry(new_entry).expect("Add entry");
     }

@@ -11,14 +11,14 @@
 Yntra Vault operates under an **offline-first, zero-knowledge** security posture.
 
 ### 1. Cryptographic Isolation
-* **Key Derivation**: Master Password → Argon2id (256MB RAM, 4 iterations, 4 parallelism) → HKDF-SHA512 → Derived SubKeys (`Vault Key`, `Entry Key`, `Search Key`, `P2P Auth Key`).
+* **Key Derivation**: Master Password → Argon2id (256MB RAM, 4 iterations, 4 parallelism) → HKDF-SHA512 → Derived SubKeys (`Vault Key`, `Entry Key`, `Search Key`, `HMAC / P2P Auth Key`).
 * **Vault Encryption**: XChaCha20-Poly1305 with unencrypted `FileHeader` bound as Additional Authenticated Data (`AAD`).
 * **Entry Field Encryption**: XChaCha20-Poly1305 / AES-256-GCM for sensitive fields within individual entries.
 * **Integrity Guarantee**: Single-pass Poly1305 AEAD tag authentication over header AAD + payload (rejecting tampered headers or payloads before payload deserialization; legacy v1/v2 files verify outer HMAC-SHA512 first).
 
 ### 2. Memory Hygiene
 * All key buffers (`SubKeys`), temporary secrets (`LockedBuffer`), and scrambled UI memory (`ScrambledString`) implement `ZeroizeOnDrop` via the `zeroize` crate.
-* Core dump generation is disabled at runtime using platform mitigation APIs (`prctl(PR_SET_DUMPABLE, 0)` on Linux / `SetProcessMitigationPolicy` on Windows).
+* Core dump generation is disabled at runtime using platform mitigation APIs (`prctl(PR_SET_DUMPABLE, 0)` & `setrlimit(RLIMIT_CORE, 0)` on Unix / `SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)` on Windows).
 * Memory pages holding raw keys use OS page locking (`VirtualLock` / `mlock`) where supported.
 
 ### 3. Network & Telemetry Policy

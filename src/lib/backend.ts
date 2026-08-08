@@ -311,6 +311,7 @@ export interface YntraVaultBackend {
   listTrash(): Promise<TrashedEntryPreview[]>;
   restoreFromTrash(id: string): Promise<void>;
   permanentDelete(id: string): Promise<void>;
+  emptyTrash(): Promise<void>;
 
   // Password History
   getPasswordHistory(entryId: string): Promise<DecryptedHistoryItem[]>;

@@ -60,9 +60,7 @@ export function TrashTab() {
     if (!backend) return;
     if (!confirm(t('settings.confirm_empty_trash'))) return;
     try {
-      for (const item of trashItems) {
-        await backend.permanentDelete(item.id);
-      }
+      await backend.emptyTrash();
       addToast({ message: t('settings.trash_emptied'), type: 'success' });
       await fetchTrash();
     } catch (e) {

@@ -27,6 +27,7 @@ fn create_populated_vault(count: usize) -> (tempfile::TempDir, std::path::PathBu
             custom_fields: Vec::new(),
             entry_type: Some(EntryType::Login),
             generate_passkey: None,
+            attachments: None,
         };
         manager.add_entry(new_entry).expect("Add entry");
     }

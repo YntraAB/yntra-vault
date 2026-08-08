@@ -70,7 +70,6 @@ graph TD
 | Security Audit & Breach Check | `breach/` | `SecurityDashboard.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Encrypted Search (Trigram) | `vault/search.rs` | `PasswordList.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Autotype Engine | `vault/autotype.rs` | `AutotypeButton.tsx` | Windows (UIA) | ✅ Windows |
-| Native Messaging Host (Browser) | `vault/ipc_server.rs` | `SettingsPanel.tsx` | Windows, Linux | ✅ Complete |
 | Master Password Re-keying | `manager.rs` | `ChangeMasterPasswordModal.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Password History & Rollback | `vault/history.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Shamir Secret Sharing | `crypto/sharing.rs` | — | Cross-Platform | ⚙️ Core Only |
@@ -132,6 +131,7 @@ bun run bench
 ## Documentation & Format Specifications
 
 * **Security Policy & Vulnerability Reporting**: [SECURITY.md](SECURITY.md)
+* **Reproducible Builds Specification & Verification**: [REPRODUCIBLE_BUILDS.md](REPRODUCIBLE_BUILDS.md)
 * **Vault Storage Format (.vdb)**: [INTEGRATION-SDK.md](INTEGRATION-SDK.md)
 
 ---

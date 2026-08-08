@@ -45,6 +45,7 @@ fn create_sample_entries(count: usize) -> Vec<Entry> {
             password_changed_at: now,
             encrypted_passkey: None,
             passkey_public_key: None,
+            attachments: Vec::new(),
         };
         entries.push(entry);
     }

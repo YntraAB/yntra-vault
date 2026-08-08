@@ -10,7 +10,7 @@ import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import {
   X, Plus, Eye, EyeOff, Wand2, GripVertical,
   Globe, User, Mail, Key, FileText, ShieldCheck, Loader2, Fingerprint,
-  Paperclip, File, Image, FileArchive, Upload, Trash2,
+  Paperclip, Image, FileArchive, Upload,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
