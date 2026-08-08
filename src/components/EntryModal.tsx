@@ -21,6 +21,7 @@ import CreateTagModal from './CreateTagModal';
 import type { PasswordEntry, CustomField, Tag, FieldType, AttachmentInfo } from '@/types';
 import { getFieldLayout } from '@/lib/utils';
 import { ActionTooltip } from './ui/tooltip';
+import AttachmentPreviewModal from './AttachmentPreviewModal';
 
 function formatBytes(bytes: number, decimals = 1): string {
   if (bytes === 0) return '0 Bytes';
@@ -31,15 +32,17 @@ function formatBytes(bytes: number, decimals = 1): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-function getAttachmentIcon(mimeType: string, fileName: string) {
-  const ext = fileName.split('.').pop()?.toLowerCase() || '';
-  if (mimeType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
+function getAttachmentIcon(mimeType: string | undefined = '', fileName: string = '') {
+  const mime = (mimeType || '').toLowerCase();
+  const name = fileName || '';
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
     return <Image size={14} className="text-blue-400 shrink-0" />;
   }
-  if (mimeType.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
+  if (mime.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
     return <FileText size={14} className="text-emerald-400 shrink-0" />;
   }
-  if (mimeType.includes('zip') || mimeType.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
+  if (mime.includes('zip') || mime.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
     return <FileArchive size={14} className="text-amber-400 shrink-0" />;
   }
   return <Paperclip size={14} className="text-indigo-400 shrink-0" />;
@@ -104,6 +107,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
   const [stagedAttachments, setStagedAttachments] = useState<{ name: string; mimeType: string; data: Uint8Array; size: number }[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<AttachmentInfo[]>([]);
   const [deleteAttachmentIds, setDeleteAttachmentIds] = useState<string[]>([]);
+  const [previewStagedAtt, setPreviewStagedAtt] = useState<{ att: AttachmentInfo; data: Uint8Array } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = useCallback(async (files: FileList | File[]) => {
@@ -215,15 +219,20 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
     }
   }, [open, editEntry, filterCategory]);
 
+  const stagedAttachmentsRef = useRef(stagedAttachments);
+  stagedAttachmentsRef.current = stagedAttachments;
+
   // Clear sensitive data on close and zeroize staged attachment buffers in RAM
   useEffect(() => {
     if (!open) {
       setForm(prev => ({ ...prev, password: '' }));
       setShowPassword(false);
-      stagedAttachments.forEach(att => att.data.fill(0));
-      setStagedAttachments([]);
+      if (stagedAttachmentsRef.current.length > 0) {
+        stagedAttachmentsRef.current.forEach(att => att.data.fill(0));
+        setStagedAttachments([]);
+      }
     }
-  }, [open, stagedAttachments]);
+  }, [open]);
 
   // Esc to close
   useEffect(() => {
@@ -804,7 +813,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                     className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
-                                      {getAttachmentIcon(att.mime_type, att.name)}
+                                      {getAttachmentIcon(att.mime_type || att.mimeType, att.name)}
                                       <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
                                       <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
                                     </div>
@@ -825,21 +834,53 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                   key={idx}
                                   className="flex items-center justify-between rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[12px]"
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
+                                  <div
+                                    onClick={() => setPreviewStagedAtt({
+                                      att: {
+                                        id: `staged-${idx}`,
+                                        name: att.name,
+                                        mimeType: att.mimeType,
+                                        size: att.size,
+                                        createdAt: new Date().toISOString(),
+                                      },
+                                      data: att.data,
+                                    })}
+                                    className="flex items-center gap-2 min-w-0 cursor-pointer group/att"
+                                  >
                                     {getAttachmentIcon(att.mimeType, att.name)}
-                                    <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                                    <span className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-indigo-400 transition-colors text-[12px]">{att.name}</span>
                                     <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
                                     <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
                                   </div>
-                                  <ActionTooltip content="Remove file">
-                                    <button
-                                      type="button"
-                                      onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
-                                      className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
-                                    >
-                                      <X size={13} />
-                                    </button>
-                                  </ActionTooltip>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <ActionTooltip content="Preview file">
+                                      <button
+                                        type="button"
+                                        onClick={() => setPreviewStagedAtt({
+                                          att: {
+                                            id: `staged-${idx}`,
+                                            name: att.name,
+                                            mimeType: att.mimeType,
+                                            size: att.size,
+                                            createdAt: new Date().toISOString(),
+                                          },
+                                          data: att.data,
+                                        })}
+                                        className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                                      >
+                                        <Eye size={13} />
+                                      </button>
+                                    </ActionTooltip>
+                                    <ActionTooltip content="Remove file">
+                                      <button
+                                        type="button"
+                                        onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
+                                        className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                      >
+                                        <X size={13} />
+                                      </button>
+                                    </ActionTooltip>
+                                  </div>
                                 </div>
                               ))}
 
@@ -1145,6 +1186,13 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
       <CreateTagModal
         open={showCreateTagModal}
         onClose={() => setShowCreateTagModal(false)}
+      />
+
+      <AttachmentPreviewModal
+        open={!!previewStagedAtt}
+        onClose={() => setPreviewStagedAtt(null)}
+        attachment={previewStagedAtt?.att || null}
+        data={previewStagedAtt?.data || null}
       />
     </AnimatePresence>
   );

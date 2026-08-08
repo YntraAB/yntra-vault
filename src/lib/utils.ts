@@ -83,14 +83,15 @@ interface MiniCustomField {
 
 export function getFieldLayout(customFields: MiniCustomField[] = [], activeStandardFields: string[]): string[] {
   const layoutCf = customFields.find(cf => cf.name === '_field_order');
-  const activeCustomFieldIds = customFields.filter(cf => cf.name !== '_field_order').map(cf => cf.id);
-  const allActive = [...activeStandardFields, ...activeCustomFieldIds];
+  const activeCustomFieldIds = customFields.filter(cf => cf.name !== '_field_order' && Boolean(cf.id)).map(cf => cf.id);
+  const validActiveStandard = activeStandardFields.filter(Boolean);
+  const allActive = Array.from(new Set([...validActiveStandard, ...activeCustomFieldIds]));
 
   if (layoutCf && layoutCf.value) {
-    const savedOrder = layoutCf.value.split(',');
-    const ordered = savedOrder.filter(id => allActive.includes(id));
+    const savedOrder = layoutCf.value.split(',').map(s => s.trim()).filter(Boolean);
+    const ordered = Array.from(new Set(savedOrder.filter(id => allActive.includes(id))));
     const missing = allActive.filter(id => !ordered.includes(id));
-    return [...ordered, ...missing];
+    return Array.from(new Set([...ordered, ...missing]));
   }
   
   return allActive;

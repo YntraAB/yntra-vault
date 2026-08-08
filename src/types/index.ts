@@ -29,8 +29,10 @@ export interface AttachmentInfo {
   id: string;
   name: string;
   size: number;
-  mimeType: string;
-  createdAt: string;
+  mimeType?: string;
+  mime_type?: string;
+  createdAt?: string;
+  created_at?: string;
 }
 
 export interface NewAttachment {

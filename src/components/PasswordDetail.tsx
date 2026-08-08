@@ -33,6 +33,7 @@ import DeleteEntryModal from './DeleteEntryModal';
 import type { BreachStatus } from '@/lib/backend';
 import { useTotp, useBackend } from '@/lib/useBackend';
 import EntryModal from './EntryModal';
+import AttachmentPreviewModal from './AttachmentPreviewModal';
 import Favicon from './Favicon';
 import { formatDate, getFieldLayout, openExternalUrl } from '@/lib/utils';
 import type { Tag, AttachmentInfo } from '@/types';
@@ -49,15 +50,17 @@ function formatBytes(bytes: number, decimals = 1): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-function getAttachmentIcon(mimeType: string, fileName: string) {
-  const ext = fileName.split('.').pop()?.toLowerCase() || '';
-  if (mimeType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
+function getAttachmentIcon(mimeType: string | undefined = '', fileName: string = '') {
+  const mime = (mimeType || '').toLowerCase();
+  const name = fileName || '';
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
     return <Image size={14} className="text-blue-400 shrink-0" />;
   }
-  if (mimeType.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
+  if (mime.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
     return <FileText size={14} className="text-emerald-400 shrink-0" />;
   }
-  if (mimeType.includes('zip') || mimeType.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
+  if (mime.includes('zip') || mime.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
     return <FileArchive size={14} className="text-amber-400 shrink-0" />;
   }
   return <Paperclip size={14} className="text-indigo-400 shrink-0" />;
@@ -93,6 +96,32 @@ export default function PasswordDetail() {
   const [warningTimer, setWarningTimer] = useState(0);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
+  const [previewAtt, setPreviewAtt] = useState<AttachmentInfo | null>(null);
+  const [previewData, setPreviewData] = useState<Uint8Array | null>(null);
+  const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
+
+  const handlePreviewAttachment = useCallback(async (attachment: AttachmentInfo) => {
+    if (!backend || !selectedEntry) return;
+    setLoadingPreviewId(attachment.id);
+    try {
+      const data = await backend.getAttachmentData(selectedEntry.id, attachment.id);
+      const uint8 = new Uint8Array(data);
+      setPreviewAtt(attachment);
+      setPreviewData(uint8);
+    } catch (err) {
+      addToast({ message: `Failed to load preview: ${err}`, type: 'error' });
+    } finally {
+      setLoadingPreviewId(null);
+    }
+  }, [backend, selectedEntry, addToast]);
+
+  const handleClosePreview = useCallback(() => {
+    if (previewData) {
+      previewData.fill(0);
+    }
+    setPreviewData(null);
+    setPreviewAtt(null);
+  }, [previewData]);
 
   const handleDownloadAttachment = useCallback(async (attachment: AttachmentInfo) => {
     if (!backend || !selectedEntry) return;
@@ -1000,10 +1029,13 @@ export default function PasswordDetail() {
                       key={att.id}
                       className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 shadow-sm hover:border-[var(--border)] transition-colors"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
-                        {getAttachmentIcon(att.mime_type, att.name)}
+                      <div
+                        onClick={() => handlePreviewAttachment(att)}
+                        className="flex items-center gap-2.5 min-w-0 flex-1 pr-2 cursor-pointer group/att"
+                      >
+                        {getAttachmentIcon(att.mime_type || att.mimeType, att.name)}
                         <div className="flex flex-col min-w-0">
-                          <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)]">
+                          <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)] group-hover/att:text-indigo-400 transition-colors">
                             {att.name}
                           </span>
                           <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono">
@@ -1013,6 +1045,22 @@ export default function PasswordDetail() {
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
+                        <ActionTooltip content="Preview file">
+                          <button
+                            type="button"
+                            onClick={() => handlePreviewAttachment(att)}
+                            disabled={loadingPreviewId === att.id}
+                            className="flex items-center gap-1 rounded-md bg-[var(--bg-base)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-hover)] transition-all disabled:opacity-50"
+                          >
+                            {loadingPreviewId === att.id ? (
+                              <Loader2 size={13} className="animate-spin text-[var(--text-secondary)]" />
+                            ) : (
+                              <Eye size={13} className="text-[var(--text-secondary)]" />
+                            )}
+                            <span>Preview</span>
+                          </button>
+                        </ActionTooltip>
+
                         <ActionTooltip content="Download attachment">
                           <button
                             type="button"
@@ -1173,6 +1221,15 @@ export default function PasswordDetail() {
         open={showEditModal}
         onClose={() => setShowEditModal(false)}
         editEntry={selectedEntry}
+      />
+
+      {/* Attachment Preview Modal */}
+      <AttachmentPreviewModal
+        open={!!previewAtt && !!previewData}
+        onClose={handleClosePreview}
+        attachment={previewAtt}
+        data={previewData}
+        onDownload={previewAtt ? () => handleDownloadAttachment(previewAtt) : undefined}
       />
     </div>
   );
