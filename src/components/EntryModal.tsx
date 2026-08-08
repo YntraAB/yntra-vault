@@ -313,7 +313,10 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
   }, [getFieldCount, getOrdinal]);
 
   const applyTemplatePreset = useCallback((presetFields: StandardFieldKey[]) => {
-    setFieldsOrder(presetFields);
+    setFieldsOrder(prev => {
+      const hasAttachments = prev.includes('attachments');
+      return hasAttachments ? [...presetFields, 'attachments'] : presetFields;
+    });
 
     setForm(prev => {
       let updatedEmail = prev.email;
@@ -530,9 +533,21 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                 <X size={16} />
               </button>
             </div>
-
             {/* Form */}
             <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-5 flex-1 min-h-0">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) {
+                    handleFileSelect(e.target.files);
+                    e.target.value = '';
+                  }
+                }}
+              />
+
               {/* Presets / Templates */}
               <div className="flex flex-col gap-1.5 pb-2 border-b border-[var(--border-subtle)] mb-1">
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
@@ -540,17 +555,18 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                 </label>
                 <div className="flex flex-wrap gap-1.5">
                   {PRESETS.map((p) => {
+                    const coreFields = fieldsOrder.filter(f => f !== 'attachments');
                     const isMatch = p.id === 'custom'
                       ? !PRESETS.filter(x => x.id !== 'custom').some(x => {
                           const standardFields = x.fields;
                           return (
-                            fieldsOrder.length === standardFields.length &&
-                            standardFields.every(f => fieldsOrder.includes(f))
+                            coreFields.length === standardFields.length &&
+                            standardFields.every(f => coreFields.includes(f))
                           );
                         })
                       : (
-                          fieldsOrder.length === p.fields.length &&
-                          p.fields.every(f => fieldsOrder.includes(f))
+                          coreFields.length === p.fields.length &&
+                          p.fields.every(f => coreFields.includes(f))
                         );
 
                     return (
@@ -559,7 +575,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                         type="button"
                         onClick={() => {
                           if (p.id === 'custom') {
-                            setFieldsOrder([]);
+                            setFieldsOrder(prev => prev.includes('attachments') ? ['attachments'] : []);
                           } else {
                             applyTemplatePreset(p.fields);
                           }
