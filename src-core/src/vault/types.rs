@@ -69,6 +69,7 @@ pub struct AttachmentInfo {
     pub id: Uuid,
     pub name: String,
     pub size: u64,
+    #[serde(alias = "mimeType")]
     pub mime_type: String,
     pub created_at: DateTime<Utc>,
 }
@@ -77,6 +78,7 @@ pub struct AttachmentInfo {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NewAttachment {
     pub name: String,
+    #[serde(alias = "mimeType")]
     pub mime_type: String,
     pub data: Vec<u8>,
 }

@@ -470,6 +470,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
         cleanedForm.newAttachments = stagedAttachments.map(a => ({
           name: a.name,
           mimeType: a.mimeType,
+          mime_type: a.mimeType,
           data: a.data,
         }));
       }

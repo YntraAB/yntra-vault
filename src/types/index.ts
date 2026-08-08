@@ -36,6 +36,7 @@ export interface AttachmentInfo {
 export interface NewAttachment {
   name: string;
   mimeType: string;
+  mime_type?: string;
   data: Uint8Array | number[];
 }
 
