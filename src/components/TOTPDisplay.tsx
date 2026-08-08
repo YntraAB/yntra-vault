@@ -10,6 +10,8 @@ import { useTotp } from '../lib/useBackend';
 import { Copy, Check } from 'lucide-react';
 import { ActionTooltip } from './ui/tooltip';
 
+import { getBackend } from '../lib/backend';
+
 interface TOTPDisplayProps {
   secret: string;
   compact?: boolean;
@@ -35,7 +37,12 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
   const isUrgent = code.seconds_remaining <= 5;
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(code.code);
+    try {
+      const backend = await getBackend();
+      await backend.copyToClipboard(code.code, true, 30);
+    } catch {
+      await navigator.clipboard.writeText(code.code).catch(() => {});
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

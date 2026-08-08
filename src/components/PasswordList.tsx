@@ -455,6 +455,7 @@ function ListItem({
   onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const tagColors = entry.tags
     .map((t) => tags.find((tag) => tag.name === t)?.color)
     .filter(Boolean) as string[];
@@ -551,7 +552,7 @@ function ListItem({
 
         {/* Breach Alert */}
         {showBreach && entry.breachStatus?.type === 'Breached' && (
-          <ActionTooltip content="Leaked in data breach">
+          <ActionTooltip content={t('security.leaked_in_breach')}>
             <span>
               <ShieldAlert size={12} className="text-red-500 shrink-0 animate-pulse" />
             </span>
@@ -560,7 +561,7 @@ function ListItem({
 
         {/* Attachment indicator */}
         {((entry.attachmentCount || 0) > 0 || (entry.attachments && entry.attachments.length > 0)) && (
-          <ActionTooltip content="Has file attachments">
+          <ActionTooltip content={t('entry.has_attachments')}>
             <span>
               <Paperclip size={11} className="text-indigo-400" />
             </span>
@@ -569,7 +570,7 @@ function ListItem({
 
         {/* Pin indicator */}
         {entry.pinned && (
-          <ActionTooltip content="Pinned entry">
+          <ActionTooltip content={t('entry.pinned_entry')}>
             <span>
               <Pin size={11} className="text-yellow-500 fill-current" />
             </span>
@@ -578,7 +579,7 @@ function ListItem({
 
         {/* Favorite star */}
         {entry.favorite && (
-          <ActionTooltip content="Favorite entry">
+          <ActionTooltip content={t('entry.favorite_entry')}>
             <span>
               <Star size={11} className="text-orange-500 fill-current" />
             </span>

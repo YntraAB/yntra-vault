@@ -18,6 +18,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useTranslation } from "@/contexts/LanguageContext"
 import {
   Tooltip,
   TooltipContent,
@@ -282,9 +283,10 @@ function SidebarTrigger({
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar } = useSidebar()
+  const { t } = useTranslation()
 
   return (
-    <ActionTooltip content="Toggle Sidebar">
+    <ActionTooltip content={t('sidebar.toggle')}>
       <button
         data-sidebar="rail"
         data-slot="sidebar-rail"

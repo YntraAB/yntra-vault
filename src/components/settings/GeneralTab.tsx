@@ -85,7 +85,10 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </select>
       </SettingSection>
 
-      <SettingSection label={t('settings.clipboard_label')}>
+      <SettingSection
+        label={t('settings.clipboard_label')}
+        tooltip={t('settings.tooltip_clipboard')}
+      >
         <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
           {t('settings.clipboard_desc')}
         </p>
@@ -104,7 +107,10 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </select>
       </SettingSection>
 
-      <SettingSection label={t('settings.autotype_title')}>
+      <SettingSection
+        label={t('settings.autotype_title')}
+        tooltip={t('settings.tooltip_autotype')}
+      >
         <div className="flex flex-col gap-4">
           <div>
             <div className="flex justify-between items-center mb-1">
@@ -184,6 +190,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
       <SettingRow
         label={t('settings.disable_skeleton_delays')}
         description={t('settings.disable_skeleton_delays_desc')}
+        tooltip={t('settings.tooltip_disable_skeleton_delays')}
       >
         <Toggle
           checked={settings.disableSkeletonDelays}
@@ -194,6 +201,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
       <SettingRow
         label={t('settings.breach_label')}
         description={t('settings.breach_desc')}
+        tooltip={t('settings.tooltip_breach')}
       >
         <Toggle
           checked={settings.autoBreachCheck}

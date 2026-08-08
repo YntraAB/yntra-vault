@@ -4,6 +4,7 @@ import { KeyRound, ShieldCheck, Cpu, RefreshCw, X, CheckCircle2, AlertCircle } f
 import { getBackend, isTauri } from '@/lib/backend';
 import type { Hardware2FaProtocol, HardwareKeyInfo } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
+import { useTranslation } from '@/contexts/LanguageContext';
 
 interface Hardware2FaModalProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface Hardware2FaModalProps {
 }
 
 export default function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: Hardware2FaModalProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<'select' | 'prompt' | 'success'>('select');
   const [protocol, setProtocol] = useState<Hardware2FaProtocol>('YubiKeyChallengeResponse');
   const [keyName, setKeyName] = useState('My YubiKey 5');
@@ -92,7 +94,7 @@ export default function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enr
                 </p>
               </div>
             </div>
-            <ActionTooltip content="Close modal">
+            <ActionTooltip content={t('common.close')}>
               <button
                 onClick={onClose}
                 className="rounded-lg p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"

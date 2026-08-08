@@ -254,7 +254,7 @@ export default function Login() {
                 </div>
               )}
 
-              <ActionTooltip content="Fingerprint, Face Recognition, or Security PIN">
+              <ActionTooltip content={t('login.biometric_tooltip')}>
                 <button
                   type="button"
                   onClick={handleBiometricUnlock}

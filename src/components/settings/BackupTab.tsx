@@ -30,7 +30,10 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   return (
     <div className="flex flex-col gap-6">
       {/* WebDAV Cloud Sync */}
-      <SettingSection label={t('settings.cloud_sync')}>
+      <SettingSection
+        label={t('settings.cloud_sync')}
+        tooltip={t('settings.tooltip_cloud_sync')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
           {t('settings.cloud_sync_desc')}
         </p>
@@ -57,7 +60,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
             <div className="flex flex-col gap-3 rounded-[4px] border border-[var(--border)] bg-[var(--bg-card)] p-3">
               <div className="flex flex-col gap-2">
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
-                  Server Configuration
+                  {t('settings.server_config')}
                 </label>
                 <input
                   type="text"
@@ -76,7 +79,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                   />
                   <input
                     type="password"
-                    placeholder="App Password / Token"
+                    placeholder={t('settings.app_password_token')}
                     value={webdavPass}
                     onChange={(e) => setWebdavPass(e.target.value)}
                     className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
@@ -173,14 +176,17 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       </SettingSection>
 
       {/* Local Network P2P Sync */}
-      <SettingSection label={t('settings.p2p_sync')}>
+      <SettingSection
+        label={t('settings.p2p_sync')}
+        tooltip={t('settings.tooltip_p2p_sync')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
           {t('settings.p2p_sync_desc')}
         </p>
         <div className="flex flex-col gap-2">
           <input
             type="text"
-            placeholder="IP Address:Port (e.g. 192.168.1.50:5322)"
+            placeholder={t('settings.p2p_placeholder')}
             value={p2pAddr}
             onChange={(e) => setP2pAddr(e.target.value)}
             className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
@@ -230,27 +236,33 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       </SettingSection>
 
       {/* Competitor Importer */}
-      <SettingSection label="Competitor Password Importer">
+      <SettingSection
+        label={t('settings.importer_title')}
+        tooltip={t('settings.tooltip_importer')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          Import passwords and logins from Bitwarden, 1Password, KeePass, Chrome, LastPass, Dashlane, Proton Pass, or generic CSV.
+          {t('settings.importer_desc')}
         </p>
         <button
           onClick={onOpenImportModal}
           className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 cursor-pointer"
         >
           <FolderInput size={14} />
-          <span>Import Passwords</span>
+          <span>{t('settings.import_passwords_btn')}</span>
         </button>
       </SettingSection>
 
       {/* Manual Export */}
-      <SettingSection label={t('settings.manual_export')}>
+      <SettingSection
+        label={t('settings.manual_export')}
+        tooltip={t('settings.tooltip_manual_export')}
+      >
         <p className="mb-2.5 text-[12px] text-[var(--text-secondary)]">
           {t('settings.manual_export_desc')}
         </p>
         <div className="mb-3 flex items-center gap-2 rounded-[3px] border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-500 font-medium">
           <AlertTriangle size={14} className="shrink-0" />
-          <span>Warning: CSV and JSON exports contain unencrypted credentials. Keep exported files secure and delete them after migration.</span>
+          <span>{t('settings.export_warning')}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Encrypted Backup */}
@@ -295,7 +307,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
             className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
           >
             <FileSpreadsheet size={13} />
-            <span>Export CSV</span>
+            <span>{t('settings.export_csv')}</span>
           </button>
 
           {/* JSON Export */}
@@ -318,7 +330,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
             className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
           >
             <FileCode size={13} />
-            <span>Export JSON</span>
+            <span>{t('settings.export_json')}</span>
           </button>
         </div>
       </SettingSection>

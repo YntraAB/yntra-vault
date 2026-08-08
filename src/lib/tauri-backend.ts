@@ -383,6 +383,29 @@ export class TauriBackend implements YntraVaultBackend {
   async disableHardware2Fa(): Promise<void> {
     return invoke('disable_hardware2fa');
   }
+
+  // ─── Clipboard Defense ───────────────────────────────────────────────
+
+  async copyToClipboard(text: string, isSensitive: boolean = true, clearAfterSecs?: number): Promise<void> {
+    try {
+      await invoke('copy_to_clipboard', {
+        text,
+        isSensitive,
+        clearAfterSecs,
+      });
+    } catch {
+      // Fallback to standard web clipboard if IPC call fails
+      await navigator.clipboard.writeText(text);
+    }
+  }
+
+  async clearClipboard(): Promise<void> {
+    try {
+      await invoke('clear_clipboard');
+    } catch {
+      await navigator.clipboard.writeText('');
+    }
+  }
 }
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────

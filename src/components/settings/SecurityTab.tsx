@@ -44,19 +44,22 @@ export function SecurityTab({
   return (
     <div className="flex flex-col gap-6">
       {/* Biometric Unlock */}
-      <SettingSection label="Biometric Unlock">
+      <SettingSection
+        label={t('settings.biometric_unlock')}
+        tooltip={t('settings.tooltip_biometric')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          Unlock Yntra Vault using hardware biometrics ({bioInfo?.biometric_type || 'Windows Hello / Touch ID'}).
+          {t('settings.biometric_desc')}
         </p>
         <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
           <div className="flex items-center gap-3">
             <Fingerprint className="text-[var(--accent)]" size={20} />
             <div className="flex flex-col">
               <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                {bioInfo?.biometric_type || 'Hardware Biometrics'}
+                {bioInfo?.biometric_type || t('settings.biometric_hardware_title')}
               </span>
               <span className="text-[11px] text-[var(--text-tertiary)]">
-                {bioActive ? 'Enrolled for this vault' : 'Disabled'}
+                {bioActive ? t('settings.biometric_enrolled') : t('settings.biometric_disabled')}
               </span>
             </div>
           </div>
@@ -68,25 +71,28 @@ export function SecurityTab({
                 : 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
-            {bioActive ? 'Disable' : 'Enable'}
+            {bioActive ? t('common.disable') : t('common.enable')}
           </button>
         </div>
       </SettingSection>
 
       {/* Hardware 2FA / YubiKey */}
-      <SettingSection label="Hardware 2FA / YubiKey">
+      <SettingSection
+        label={t('settings.hardware_2fa')}
+        tooltip={t('settings.tooltip_hardware_2fa')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          Hardware 2FA (CTAP1 YubiKey HMAC-SHA1 & CTAP2 FIDO2 HMAC-Secret) cryptographic vault protection.
+          {t('settings.hardware_2fa_desc')}
         </p>
         <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
           <div className="flex items-center gap-3">
             <KeyRound className="text-white" size={20} />
             <div className="flex flex-col">
               <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                YubiKey / FIDO2 Security Key
+                {t('settings.yubikey_title')}
               </span>
               <span className="text-[11px] text-[var(--text-tertiary)]">
-                {hwActive ? 'Hardware 2FA Enrolled' : 'Not Enrolled'}
+                {hwActive ? t('settings.yubikey_enrolled') : t('settings.yubikey_not_enrolled')}
               </span>
             </div>
           </div>
@@ -97,13 +103,13 @@ export function SecurityTab({
                   onClick={() => onOpenHwModal('test')}
                   className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
-                  Test Key
+                  {t('settings.test_key')}
                 </button>
                 <button
                   onClick={onDisableHw}
                   className="h-8 rounded-[3px] border border-[var(--destructive)] bg-transparent px-3 text-[12px] font-medium text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-colors"
                 >
-                  Disable
+                  {t('common.disable')}
                 </button>
               </>
             ) : (
@@ -111,7 +117,7 @@ export function SecurityTab({
                 onClick={() => onOpenHwModal('enroll')}
                 className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
               >
-                Enable
+                {t('common.enable')}
               </button>
             )}
           </div>
@@ -119,9 +125,12 @@ export function SecurityTab({
       </SettingSection>
 
       {/* Primary Choice of Login */}
-      <SettingSection label="Primary Choice of Login">
+      <SettingSection
+        label={t('settings.primary_login')}
+        tooltip={t('settings.tooltip_primary_login')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          Select your default unlock screen view on app launch. Master password fallback is always accessible.
+          {t('settings.primary_login_desc')}
         </p>
         <div className="grid grid-cols-3 gap-2.5">
           <button
@@ -134,8 +143,8 @@ export function SecurityTab({
             }`}
           >
             <KeyRound size={18} className="mb-1 text-white" />
-            <span className="text-[12px]">Master Password</span>
-            <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">Always Required</span>
+            <span className="text-[12px]">{t('settings.primary_master_password')}</span>
+            <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">{t('settings.always_required')}</span>
           </button>
 
           <button
@@ -153,7 +162,7 @@ export function SecurityTab({
             <Fingerprint size={18} className="mb-1 text-white" />
             <span className="text-[12px] truncate max-w-full">{bioInfo?.biometric_type?.replace(/\s*\(.*\)/, '') || 'Windows Hello'}</span>
             <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-              {bioActive ? 'Enrolled' : 'Not Enrolled'}
+              {bioActive ? t('settings.enrolled') : t('settings.not_enrolled')}
             </span>
           </button>
 
@@ -170,9 +179,9 @@ export function SecurityTab({
             }`}
           >
             <ShieldCheck size={18} className="mb-1 text-white" />
-            <span className="text-[12px]">YubiKey / FIDO2</span>
+            <span className="text-[12px]">{t('settings.yubikey_title')}</span>
             <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-              {hwActive ? 'Enrolled' : 'Not Enrolled'}
+              {hwActive ? t('settings.enrolled') : t('settings.not_enrolled')}
             </span>
           </button>
         </div>
@@ -192,7 +201,10 @@ export function SecurityTab({
       </SettingSection>
 
       {/* Emergency Recovery */}
-      <SettingSection label={t('settings.emergency_recovery')}>
+      <SettingSection
+        label={t('settings.emergency_recovery')}
+        tooltip={t('settings.tooltip_emergency_recovery')}
+      >
         <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
           {t('settings.emergency_recovery_desc')}
         </p>
@@ -230,7 +242,11 @@ export function SecurityTab({
                   <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">{s}</span>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(s).catch(() => {});
+                      if (backend) {
+                        backend.copyToClipboard(s, true, 30).catch(() => {});
+                      } else {
+                        navigator.clipboard.writeText(s).catch(() => {});
+                      }
                       addToast({ message: `Share ${idx + 1} copied`, type: 'success' });
                     }}
                     className="text-[10px] font-medium text-[var(--text-primary)] hover:underline"

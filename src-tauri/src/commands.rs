@@ -190,6 +190,7 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
         manager.lock();
     }
     *vault = None;
+    let _ = yntra_vault_core::crypto::clear_clipboard();
     Ok(())
 }
 
@@ -894,4 +895,24 @@ pub async fn import_entries(
 
     manager.bulk_import_entries(entries, strategy).map_err(|e| e.to_string())
 }
+
+// ─── Clipboard Defense Commands ──────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn copy_to_clipboard(
+    text: String,
+    is_sensitive: Option<bool>,
+    clear_after_secs: Option<u64>,
+) -> Result<(), String> {
+    let sensitive = is_sensitive.unwrap_or(true);
+    yntra_vault_core::crypto::copy_to_clipboard_defended(&text, sensitive, clear_after_secs)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn clear_clipboard() -> Result<(), String> {
+    yntra_vault_core::crypto::clear_clipboard()
+        .map_err(|e| e.to_string())
+}
+
 

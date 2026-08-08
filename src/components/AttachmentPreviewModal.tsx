@@ -19,6 +19,8 @@ import {
 import * as fflate from 'fflate';
 import type { AttachmentInfo } from '@/types';
 import { ActionTooltip } from './ui/tooltip';
+import { getBackend } from '@/lib/backend';
+import { useTranslation } from '@/contexts/LanguageContext';
 
 interface AttachmentPreviewModalProps {
   open: boolean;
@@ -66,6 +68,7 @@ export default function AttachmentPreviewModal({
   data,
   onDownload,
 }: AttachmentPreviewModalProps) {
+  const { t } = useTranslation();
   const [zoom, setZoom] = useState(1);
   const [copied, setCopied] = useState(false);
   const [zipSearch, setZipSearch] = useState('');
@@ -133,9 +136,14 @@ export default function AttachmentPreviewModal({
     return zipEntries.filter(e => e.path.toLowerCase().includes(query));
   }, [zipEntries, zipSearch]);
 
-  const handleCopyText = () => {
+  const handleCopyText = async () => {
     if (!textContent) return;
-    navigator.clipboard.writeText(textContent);
+    try {
+      const backend = await getBackend();
+      await backend.copyToClipboard(textContent, false);
+    } catch {
+      await navigator.clipboard.writeText(textContent).catch(() => {});
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -172,26 +180,26 @@ export default function AttachmentPreviewModal({
 
             <div className="flex items-center gap-2 shrink-0">
               {category === 'text' && (
-                <ActionTooltip content="Copy text">
+                <ActionTooltip content={t('common.copy_text')}>
                   <button
                     type="button"
                     onClick={handleCopyText}
                     className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                   >
                     {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
-                    {copied ? 'Copied' : 'Copy'}
+                    {copied ? t('common.copied') : t('common.copy')}
                   </button>
                 </ActionTooltip>
               )}
 
               {onDownload && (
-                <ActionTooltip content="Download file">
+                <ActionTooltip content={t('common.download_file')}>
                   <button
                     type="button"
                     onClick={onDownload}
                     className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                   >
-                    <Download size={13} /> Download
+                    <Download size={13} /> {t('common.download')}
                   </button>
                 </ActionTooltip>
               )}
@@ -270,7 +278,7 @@ export default function AttachmentPreviewModal({
                       type="text"
                       value={zipSearch}
                       onChange={(e) => setZipSearch(e.target.value)}
-                      placeholder="Search files in archive..."
+                      placeholder={t('preview.search_archive')}
                       className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--bg-base)] pl-8 pr-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                     />
                   </div>

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
+import { getBackend } from '@/lib/backend';
 import CopyButton from './CopyButton';
 import AutotypeButton from './AutotypeButton';
 import PasswordInput from './PasswordInput';
@@ -208,7 +209,11 @@ export default function PasswordDetail() {
         if (!hasSelection && !isInputFocused && selectedEntry.password) {
           e.preventDefault();
           e.stopPropagation();
-          navigator.clipboard.writeText(selectedEntry.password).catch(() => {});
+          if (backend) {
+            backend.copyToClipboard(selectedEntry.password, true, settings.clipboardClearSeconds).catch(() => {});
+          } else {
+            navigator.clipboard.writeText(selectedEntry.password).catch(() => {});
+          }
           addToast({ message: 'Password copied to clipboard', type: 'info' });
         }
         return;
@@ -219,7 +224,11 @@ export default function PasswordDetail() {
         if (selectedEntry.username) {
           e.preventDefault();
           e.stopPropagation();
-          navigator.clipboard.writeText(selectedEntry.username).catch(() => {});
+          if (backend) {
+            backend.copyToClipboard(selectedEntry.username, false).catch(() => {});
+          } else {
+            navigator.clipboard.writeText(selectedEntry.username).catch(() => {});
+          }
           addToast({ message: 'Username copied to clipboard', type: 'info' });
         }
         return;
@@ -230,7 +239,11 @@ export default function PasswordDetail() {
         if (selectedEntry.url) {
           e.preventDefault();
           e.stopPropagation();
-          navigator.clipboard.writeText(selectedEntry.url).catch(() => {});
+          if (backend) {
+            backend.copyToClipboard(selectedEntry.url, false).catch(() => {});
+          } else {
+            navigator.clipboard.writeText(selectedEntry.url).catch(() => {});
+          }
           addToast({ message: 'Website URL copied to clipboard', type: 'info' });
         }
         return;
@@ -245,7 +258,7 @@ export default function PasswordDetail() {
             try {
               const totpRes = await backend.generateTotp(selectedEntry.totpSecret);
               if (totpRes && totpRes.code) {
-                await navigator.clipboard.writeText(totpRes.code);
+                await backend.copyToClipboard(totpRes.code, true, settings.clipboardClearSeconds);
                 addToast({ message: `TOTP code (${totpRes.code}) copied to clipboard`, type: 'info' });
               }
             } catch {
@@ -880,8 +893,13 @@ export default function PasswordDetail() {
                                 </div>
                                 <div className="flex justify-end">
                                   <button
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(data.recoveryCodes || '');
+                                    onClick={async () => {
+                                      try {
+                                        const backend = await getBackend();
+                                        await backend.copyToClipboard(data.recoveryCodes || '', true, 30);
+                                      } catch {
+                                        navigator.clipboard.writeText(data.recoveryCodes || '').catch(() => {});
+                                      }
                                       addToast({ message: 'All recovery codes copied', type: 'success' });
                                     }}
                                     className="rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
@@ -955,7 +973,7 @@ export default function PasswordDetail() {
                             </ActionTooltip>
                           )}
                           {isUrl && cf.value && (
-                            <ActionTooltip content="Open website in browser">
+                            <ActionTooltip content={t('detail.open_website')}>
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1045,7 +1063,7 @@ export default function PasswordDetail() {
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        <ActionTooltip content="Preview file">
+                        <ActionTooltip content={t('entry.preview_file')}>
                           <button
                             type="button"
                             onClick={() => handlePreviewAttachment(att)}
@@ -1061,7 +1079,7 @@ export default function PasswordDetail() {
                           </button>
                         </ActionTooltip>
 
-                        <ActionTooltip content="Download attachment">
+                        <ActionTooltip content={t('entry.download_attachment')}>
                           <button
                             type="button"
                             onClick={() => handleDownloadAttachment(att)}
@@ -1078,7 +1096,7 @@ export default function PasswordDetail() {
                         </ActionTooltip>
 
                         {!isEditing && (
-                          <ActionTooltip content="Delete attachment">
+                          <ActionTooltip content={t('entry.remove_attachment')}>
                             <button
                               type="button"
                               onClick={() => handleDeleteAttachment(att)}
@@ -1239,8 +1257,13 @@ function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+  const handleCopy = async () => {
+    try {
+      const backend = await getBackend();
+      await backend.copyToClipboard(code, true, 30);
+    } catch {
+      await navigator.clipboard.writeText(code).catch(() => {});
+    }
     setCopied(true);
     onCopy();
     setTimeout(() => setCopied(false), 1500);

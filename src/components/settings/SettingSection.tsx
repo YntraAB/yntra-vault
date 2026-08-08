@@ -1,10 +1,17 @@
 import React from 'react';
+import { Info } from 'lucide-react';
+import { ActionTooltip } from '../ui/tooltip';
 
-export function SettingSection({ label, children }: { label: string; children: React.ReactNode }) {
+export function SettingSection({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
   return (
     <div className="border-b border-[var(--border-subtle)] pb-5">
-      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
-        {label}
+      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)] flex items-center">
+        <span>{label}</span>
+        {tooltip && (
+          <ActionTooltip content={tooltip}>
+            <Info size={12} className="ml-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors cursor-help" />
+          </ActionTooltip>
+        )}
       </h3>
       {children}
     </div>
@@ -14,16 +21,25 @@ export function SettingSection({ label, children }: { label: string; children: R
 export function SettingRow({
   label,
   description,
+  tooltip,
   children,
 }: {
   label: string;
   description?: string;
+  tooltip?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between border-b border-[var(--border-subtle)] py-3">
       <div>
-        <div className="text-[13px] text-[var(--text-primary)]">{label}</div>
+        <div className="text-[13px] text-[var(--text-primary)] flex items-center">
+          <span>{label}</span>
+          {tooltip && (
+            <ActionTooltip content={tooltip}>
+              <Info size={12} className="ml-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors cursor-help" />
+            </ActionTooltip>
+          )}
+        </div>
         {description && (
           <div className="mt-0.5 text-[12px] text-[var(--text-secondary)]">{description}</div>
         )}

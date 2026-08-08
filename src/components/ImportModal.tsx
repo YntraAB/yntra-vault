@@ -238,7 +238,10 @@ const BRANDS: BrandInfo[] = [
   },
 ];
 
+import { useTranslation } from '@/contexts/LanguageContext';
+
 export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
+  const { t } = useTranslation();
   const { backend } = useBackend();
   const { refreshEntries, addToast } = useAppState();
 
@@ -691,7 +694,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search preview entries..."
+                      placeholder={t('import.search_preview')}
                       className="h-7 w-48 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] pl-7 pr-2 text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                     />
                   </div>

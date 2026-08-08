@@ -383,6 +383,10 @@ export interface YntraVaultBackend {
   performHardware2FaChallenge(protocol: Hardware2FaProtocol, challenge?: number[]): Promise<number[]>;
   enableHardware2Fa(protocol: Hardware2FaProtocol, keyName: string, hardwareResponse: number[]): Promise<void>;
   disableHardware2Fa(): Promise<void>;
+
+  // Clipboard Defense
+  copyToClipboard(text: string, isSensitive?: boolean, clearAfterSecs?: number): Promise<void>;
+  clearClipboard(): Promise<void>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────

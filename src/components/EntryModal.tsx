@@ -732,7 +732,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                 {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                               </button>
                             </div>
-                            <ActionTooltip content="Generate random password">
+                            <ActionTooltip content={t('entry.generate_pw')}>
                               <button
                                 type="button"
                                 onClick={() => setShowGenerator(!showGenerator)}
@@ -817,7 +817,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                       <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
                                       <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
                                     </div>
-                                    <ActionTooltip content="Remove attachment">
+                                    <ActionTooltip content={t('entry.remove_attachment')}>
                                       <button
                                         type="button"
                                         onClick={() => setDeleteAttachmentIds(prev => [...prev, att.id])}
@@ -853,7 +853,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                     <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
                                   </div>
                                   <div className="flex items-center gap-1 shrink-0">
-                                    <ActionTooltip content="Preview file">
+                                    <ActionTooltip content={t('entry.preview_file')}>
                                       <button
                                         type="button"
                                         onClick={() => setPreviewStagedAtt({
@@ -871,7 +871,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                         <Eye size={13} />
                                       </button>
                                     </ActionTooltip>
-                                    <ActionTooltip content="Remove file">
+                                    <ActionTooltip content={t('entry.remove_file')}>
                                       <button
                                         type="button"
                                         onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
@@ -1045,7 +1045,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                     );
                   })}
 
-                  <ActionTooltip content="Create new tag">
+                  <ActionTooltip content={t('tags.new_tag')}>
                     <button
                       type="button"
                       onClick={() => setShowCreateTagModal(true)}

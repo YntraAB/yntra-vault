@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Tag as TagIcon, Star, Pin, Globe, FileText, Check, Plus, Minus, Type, User } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 
 interface BulkEditModalProps {
   open: boolean;
@@ -16,6 +17,7 @@ interface BulkEditModalProps {
 }
 
 export default function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps) {
+  const { t } = useTranslation();
   const { tags: allTags, bulkUpdateEntries } = useAppState();
 
   // Title & Username / Email
@@ -138,7 +140,7 @@ export default function BulkEditModal({ open, selectedIds, onClose }: BulkEditMo
               {applyTitle && (
                 <input
                   type="text"
-                  placeholder="Enter title for selected entries..."
+                  placeholder={t('bulk.enter_title')}
                   value={titleValue}
                   onChange={(e) => setTitleValue(e.target.value)}
                   className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
@@ -350,7 +352,7 @@ export default function BulkEditModal({ open, selectedIds, onClose }: BulkEditMo
               {applyNotes && (
                 <textarea
                   rows={3}
-                  placeholder="Notes to apply to selected entries..."
+                  placeholder={t('bulk.notes_placeholder')}
                   value={notesValue}
                   onChange={(e) => setNotesValue(e.target.value)}
                   className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] p-2.5 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"

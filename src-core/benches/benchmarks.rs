@@ -15,6 +15,7 @@ mod bench_search_engine;
 mod bench_passkey;
 mod bench_concurrency;
 mod bench_protected_memory;
+mod bench_clipboard;
 
 use criterion::{criterion_group, criterion_main};
 
@@ -31,6 +32,7 @@ criterion_group!(
     bench_search_engine::bench_search_engine,
     bench_passkey::bench_passkey,
     bench_concurrency::bench_concurrency,
-    bench_protected_memory::bench_protected_memory
+    bench_protected_memory::bench_protected_memory,
+    bench_clipboard::bench_clipboard
 );
 criterion_main!(benches);

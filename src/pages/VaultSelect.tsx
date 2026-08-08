@@ -195,7 +195,7 @@ export default function VaultSelect() {
 
         {/* Actions */}
         <div className={`flex gap-2 ${recentVaults.length > 0 ? 'mt-4' : 'mt-8'}`}>
-          <ActionTooltip content="Create a new encrypted vault file" side="top">
+          <ActionTooltip content={t('vault_select.create_tooltip')} side="top">
             <button
               onClick={() => setShowCreate(true)}
               disabled={!isTauri()}
@@ -205,7 +205,7 @@ export default function VaultSelect() {
               {t('vault_select.new_vault')}
             </button>
           </ActionTooltip>
-          <ActionTooltip content="Open an existing vault file (.vdb)" side="top">
+          <ActionTooltip content={t('vault_select.open_tooltip')} side="top">
             <button
               onClick={handleImport}
               disabled={!isTauri()}

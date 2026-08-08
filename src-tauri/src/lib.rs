@@ -36,6 +36,7 @@ pub fn run() {
                         }
                         *vault = None;
                     }
+                    let _ = yntra_vault_core::crypto::clear_clipboard();
                     let _ = window.emit("vault-locked", ());
                 }
             }
@@ -123,6 +124,9 @@ pub fn run() {
             commands::parse_import_file,
             commands::parse_import_content,
             commands::import_entries,
+            // Clipboard Defense
+            commands::copy_to_clipboard,
+            commands::clear_clipboard,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
