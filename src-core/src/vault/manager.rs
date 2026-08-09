@@ -817,7 +817,7 @@ impl VaultManager {
             updated_at: now,
             password_history: Vec::new(),
             breach_status: BreachStatus::Unknown,
-            strength_score: Some(crate::breach::strength::analyze_password(&new.password)),
+            strength_score: if new.password.is_empty() { None } else { Some(crate::breach::strength::analyze_password(&new.password)) },
             password_changed_at: now,
             encrypted_passkey: None,
             passkey_public_key: None,
@@ -980,7 +980,7 @@ impl VaultManager {
                 updated_at: now,
                 password_history: Vec::new(),
                 breach_status: BreachStatus::Unknown,
-                strength_score: Some(crate::breach::strength::analyze_password(&new_entry.password)),
+                strength_score: if new_entry.password.is_empty() { None } else { Some(crate::breach::strength::analyze_password(&new_entry.password)) },
                 password_changed_at: now,
                 encrypted_passkey: None,
                 passkey_public_key: None,
@@ -1085,7 +1085,7 @@ impl VaultManager {
                     )?;
                     entry.password_changed_at = now;
                     entry.breach_status = BreachStatus::Unknown; // Reset breach status
-                    entry.strength_score = Some(crate::breach::strength::analyze_password(new_password)); // Recalculate
+                    entry.strength_score = if new_password.is_empty() { None } else { Some(crate::breach::strength::analyze_password(new_password)) };
                 }
             }
 
@@ -1387,13 +1387,15 @@ impl VaultManager {
             plain_passwords.push((entry.id, entry.title.clone(), pwd));
         }
 
-        // Group entries by password to identify reused passwords
+        // Group non-empty passwords to identify reused passwords
         use std::collections::HashMap;
         let mut pwd_map: HashMap<String, Vec<(Uuid, String)>> = HashMap::new();
         for (id, title, pwd) in &plain_passwords {
-            pwd_map.entry(pwd.clone())
-                .or_default()
-                .push((*id, title.clone()));
+            if !pwd.is_empty() {
+                pwd_map.entry(pwd.clone())
+                    .or_default()
+                    .push((*id, title.clone()));
+            }
         }
 
         for (i, entry) in self.data.entries.iter().enumerate() {
@@ -1411,52 +1413,55 @@ impl VaultManager {
                 });
             }
 
-            // Weak password (fallback to real-time calculation if None)
-            let score = match &entry.strength_score {
-                Some(score) => score.clone(),
-                None => crate::breach::strength::analyze_password(pwd),
-            };
+            // Perform password strength, reuse, and age audits only if password is non-empty
+            if !pwd.is_empty() {
+                // Weak password (fallback to real-time calculation if None)
+                let score = match &entry.strength_score {
+                    Some(score) => score.clone(),
+                    None => crate::breach::strength::analyze_password(pwd),
+                };
 
-            if score.level <= StrengthLevel::Weak {
-                weak += 1;
-                issues.push(SecurityIssue {
-                    entry_id: entry.id,
-                    entry_title: entry.title.clone(),
-                    issue_type: IssueType::WeakPassword,
-                    severity: IssueSeverity::Warning,
-                    description: format!("Password strength: {:?} ({:.0} bits entropy)", score.level, score.entropy_bits),
-                });
-            }
-
-            // Reused password
-            if let Some(duplicates) = pwd_map.get(pwd) {
-                if duplicates.len() > 1 {
-                    reused += 1;
-                    let other_services: Vec<String> = duplicates.iter()
-                        .filter(|(dup_id, _)| dup_id != &entry.id)
-                        .map(|(_, dup_title)| dup_title.clone())
-                        .collect();
+                if score.level <= StrengthLevel::Weak {
+                    weak += 1;
                     issues.push(SecurityIssue {
                         entry_id: entry.id,
                         entry_title: entry.title.clone(),
-                        issue_type: IssueType::ReusedPassword,
+                        issue_type: IssueType::WeakPassword,
                         severity: IssueSeverity::Warning,
-                        description: format!("Password is reused on: {}", other_services.join(", ")),
+                        description: format!("Password strength: {:?} ({:.0} bits entropy)", score.level, score.entropy_bits),
                     });
                 }
-            }
 
-            // Old password (> 90 days)
-            let age_days = (Utc::now() - entry.password_changed_at).num_days();
-            if age_days > 90 {
-                old += 1;
-                issues.push(SecurityIssue {
-                    entry_id: entry.id,
-                    entry_title: entry.title.clone(),
-                    issue_type: IssueType::OldPassword,
-                    severity: IssueSeverity::Info,
-                    description: format!("Password hasn't been changed in {} days", age_days),
-                });
+                // Reused password
+                if let Some(duplicates) = pwd_map.get(pwd) {
+                    if duplicates.len() > 1 {
+                        reused += 1;
+                        let other_services: Vec<String> = duplicates.iter()
+                            .filter(|(dup_id, _)| dup_id != &entry.id)
+                            .map(|(_, dup_title)| dup_title.clone())
+                            .collect();
+                        issues.push(SecurityIssue {
+                            entry_id: entry.id,
+                            entry_title: entry.title.clone(),
+                            issue_type: IssueType::ReusedPassword,
+                            severity: IssueSeverity::Warning,
+                            description: format!("Password is reused on: {}", other_services.join(", ")),
+                        });
+                    }
+                }
+
+                // Old password (> 90 days)
+                let age_days = (Utc::now() - entry.password_changed_at).num_days();
+                if age_days > 90 {
+                    old += 1;
+                    issues.push(SecurityIssue {
+                        entry_id: entry.id,
+                        entry_title: entry.title.clone(),
+                        issue_type: IssueType::OldPassword,
+                        severity: IssueSeverity::Info,
+                        description: format!("Password hasn't been changed in {} days", age_days),
+                    });
+                }
             }
 
             // Missing 2FA on important accounts
@@ -2101,5 +2106,85 @@ mod tests {
         // Test non-existent file
         let missing_path = temp_dir.path().join("missing.key");
         assert!(read_key_file_safely(&missing_path).is_err());
+    }
+
+    #[test]
+    fn test_security_audit_ignores_empty_passwords() {
+        let test_vault = TestVault::new();
+        let password = "master-password-123";
+        let mut manager = VaultManager::create("audit-test-vault", password, &test_vault.path).unwrap();
+
+        // Add 2 entries with empty passwords (e.g. Secure Notes or empty password items)
+        let entry1 = NewEntry {
+            title: "Note 1".to_string(),
+            username: "".to_string(),
+            password: "".to_string(),
+            url: "".to_string(),
+            email: "".to_string(),
+            notes: "Secret Note A".to_string(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: Some(EntryType::SecureNote),
+            generate_passkey: None,
+            attachments: None,
+        };
+        let entry2 = NewEntry {
+            title: "Note 2".to_string(),
+            username: "".to_string(),
+            password: "".to_string(),
+            url: "".to_string(),
+            email: "".to_string(),
+            notes: "Secret Note B".to_string(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: Some(EntryType::SecureNote),
+            generate_passkey: None,
+            attachments: None,
+        };
+
+        manager.add_entry(entry1).unwrap();
+        manager.add_entry(entry2).unwrap();
+
+        let audit = manager.security_audit().unwrap();
+        assert_eq!(audit.reused_count, 0, "Empty passwords must not be counted as reused");
+        assert_eq!(audit.weak_count, 0, "Empty passwords must not be counted as weak passwords");
+
+        // Add 2 entries with identical non-empty passwords to verify real reuse is still detected
+        let entry3 = NewEntry {
+            title: "Service A".to_string(),
+            username: "user1".to_string(),
+            password: "SamePassword123!".to_string(),
+            url: "".to_string(),
+            email: "".to_string(),
+            notes: "".to_string(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: Some(EntryType::Login),
+            generate_passkey: None,
+            attachments: None,
+        };
+        let entry4 = NewEntry {
+            title: "Service B".to_string(),
+            username: "user2".to_string(),
+            password: "SamePassword123!".to_string(),
+            url: "".to_string(),
+            email: "".to_string(),
+            notes: "".to_string(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: Some(EntryType::Login),
+            generate_passkey: None,
+            attachments: None,
+        };
+
+        manager.add_entry(entry3).unwrap();
+        manager.add_entry(entry4).unwrap();
+
+        let audit2 = manager.security_audit().unwrap();
+        assert_eq!(audit2.reused_count, 2, "Duplicate non-empty passwords must be flagged as reused");
     }
 }

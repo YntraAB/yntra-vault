@@ -75,6 +75,45 @@ graph TD
 | Password History & Rollback | `vault/history.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Shamir Secret Sharing | `crypto/sharing.rs` | — | Cross-Platform | ⚙️ Core Only |
 | WebDAV Cloud & P2P Vault Sync | `vault/sync.rs` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
+| Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
+
+---
+
+## Command Line Interface (`yntra` / `yntra-cli`)
+
+Yntra Vault features an ultra-fast, SOTA command-line interface (`yntra` / `yntra-cli`) built with Rust `clap` (v4) and `ratatui` (v0.26).
+
+### CLI Key Capabilities
+- **Sub-5ms IPC Session Daemon (`yntra unlock`)**: Keeps unlocked vault state in zeroized memory over local Named Pipe / Unix Socket with `YNTRA_SESSION` token authentication and OS Credential Manager persistence.
+- **Secret Injection Engine (`yntra run`)**: Resolves `yntra://<entry>/<field>` references directly in environment variables or `.env` template files (`yntra run --env-file .env.tpl -- <cmd>`) without writing secrets to disk.
+- **Interactive Terminal UI (`yntra tui`)**: Ratatui + Crossterm TUI featuring fuzzy search (`/`), Vim navigation (`j`/`k`), live TOTP countdown gauge, modal creation dialogs (`a`), and defended clipboards (`c`/`t`).
+- **Developer Ecosystem Protocols**:
+  - `yntra git-credential setup`: One-click Git HTTPS credential helper setup.
+  - `yntra ssh-agent`: OpenSSH Agent pipe server (`SSH_AUTH_SOCK`) for in-memory SSH authentication.
+  - `yntra native-host install <chrome|firefox>`: Chrome/Firefox Native Messaging host installer.
+- **Shell Auto-Completions**: Subcommand `yntra completions <zsh|bash|fish|powershell>`.
+
+### Quick CLI Usage
+
+```bash
+# Build CLI binary
+cargo build --manifest-path src-core/Cargo.toml --release --bin yntra
+
+# Unlock vault session daemon (sub-5ms command latency)
+yntra unlock
+
+# Launch interactive Terminal UI
+yntra tui
+
+# Inject secrets into process environment
+yntra run --env-file .env.tpl -- npm start
+
+# Configure Git HTTPS credential helper
+yntra git-credential setup
+
+# Generate Zsh completion script
+yntra completions zsh > ~/.zsh/completion/_yntra
+```
 
 ---
 
