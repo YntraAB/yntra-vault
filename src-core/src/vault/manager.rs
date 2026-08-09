@@ -1036,6 +1036,23 @@ impl VaultManager {
             .map_err(|e| VaultError::InvalidFormat(format!("Failed to write JSON: {}", e)))
     }
 
+    /// Queries vault entries for a given mobile application package name.
+    pub fn find_entries_for_mobile_package(&self, package_name: &str) -> crate::Result<Vec<crate::vault::mobile_autofill::AutofillCredentialItem>> {
+        self.find_entries_for_mobile_context(package_name, None)
+    }
+
+    /// Queries vault entries for a given mobile package and optional WebDomain origin.
+    pub fn find_entries_for_mobile_context(&self, package_name: &str, web_domain: Option<&str>) -> crate::Result<Vec<crate::vault::mobile_autofill::AutofillCredentialItem>> {
+        let mut full_entries = Vec::new();
+        for preview in self.list_entries()? {
+            if let Ok(decrypted) = self.get_entry(preview.id) {
+                full_entries.push(decrypted);
+            }
+        }
+        Ok(crate::vault::mobile_autofill::match_entries_for_mobile_context(&full_entries, package_name, web_domain))
+    }
+
+
     /// Update an existing entry. Tracks password history.
     pub fn update_entry(&mut self, id: Uuid, update: UpdateEntry) -> crate::Result<()> {
         let entry_key = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();

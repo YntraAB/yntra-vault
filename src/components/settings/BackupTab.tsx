@@ -161,7 +161,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                         addToast({ message: t('settings.upload_backup'), type: 'success' });
                       }
                     } catch (err: any) {
-                      addToast({ message: `Sync failed: ${err}`, type: 'error' });
+                      addToast({ message: t('toast.sync_failed', { err: String(err) }), type: 'error' });
                     } finally {
                       setIsSyncingWebdav(false);
                     }
@@ -180,7 +180,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                       addToast({ message: t('toast.database_restored'), type: 'success' });
                       await refreshEntries();
                     } catch (err) {
-                      addToast({ message: `Download failed: ${err}`, type: 'error' });
+                      addToast({ message: t('toast.download_failed', { err: String(err) }), type: 'error' });
                     }
                   }}
                   className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] text-amber-500"
@@ -215,13 +215,13 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               onClick={async () => {
                 if (!backend || !currentVault) return;
                 setIsSyncingP2P(true);
-                addToast({ message: `Listening for P2P connection on ${p2pAddr}...`, type: 'info' });
+                addToast({ message: t('toast.p2p_listening', { addr: p2pAddr }), type: 'info' });
                 try {
                   await backend.runP2pSyncListener(p2pAddr, currentVault.path);
                   addToast({ message: t('toast.received_db_update'), type: 'success' });
                   await refreshEntries();
                 } catch (err) {
-                  addToast({ message: `Sync failed: ${err}`, type: 'error' });
+                  addToast({ message: t('toast.sync_failed', { err: String(err) }), type: 'error' });
                 } finally {
                   setIsSyncingP2P(false);
                 }
@@ -235,12 +235,12 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               onClick={async () => {
                 if (!backend || !currentVault) return;
                 setIsSyncingP2P(true);
-                addToast({ message: `Connecting to ${p2pAddr}...`, type: 'info' });
+                addToast({ message: t('toast.p2p_connecting', { addr: p2pAddr }), type: 'info' });
                 try {
                   await backend.runP2pSyncClient(p2pAddr, currentVault.path);
                   addToast({ message: t('toast.db_sync_sent'), type: 'success' });
                 } catch (err) {
-                  addToast({ message: `Connection failed: ${err}`, type: 'error' });
+                  addToast({ message: t('toast.connection_failed', { err: String(err) }), type: 'error' });
                 } finally {
                   setIsSyncingP2P(false);
                 }
@@ -280,7 +280,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 await backend.exportVault(destPath);
                 addToast({ message: t('toast.encrypted_vault_exported'), type: 'success' });
               } catch (err) {
-                addToast({ message: `Export failed: ${err}`, type: 'error' });
+                addToast({ message: t('toast.export_failed', { err: String(err) }), type: 'error' });
               }
             }}
             className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
@@ -302,7 +302,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 await backend.exportVaultCsv(destPath);
                 addToast({ message: t('toast.decrypted_csv_exported'), type: 'success' });
               } catch (err) {
-                addToast({ message: `Export failed: ${err}`, type: 'error' });
+                addToast({ message: t('toast.export_failed', { err: String(err) }), type: 'error' });
               }
             }}
             className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
@@ -325,7 +325,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 await backend.exportVaultJson(destPath);
                 addToast({ message: t('toast.decrypted_json_exported'), type: 'success' });
               } catch (err) {
-                addToast({ message: `Export failed: ${err}`, type: 'error' });
+                addToast({ message: t('toast.export_failed', { err: String(err) }), type: 'error' });
               }
             }}
             className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"

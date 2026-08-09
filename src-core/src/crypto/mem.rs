@@ -340,8 +340,10 @@ impl Zeroize for ProtectedSecret {
     }
 }
 
-/// Attempts to disable process core dumps and debugger attach events.
+/// Attempts to disable process core dumps, enforce DLL preloading guard, and suppress crash dialogs.
 pub fn prevent_core_dumps() {
+    let _ = enforce_dll_preloading_guard();
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::System::Diagnostics::Debug::{
@@ -365,6 +367,104 @@ pub fn prevent_core_dumps() {
             let _ = libc::prctl(libc::PR_SET_DUMPABLE, 0);
         }
     }
+}
+
+/// Enforces DLL Preloading Guard on Windows (`SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`).
+///
+/// Prevents DLL side-loading / DLL preloading attack vectors by ensuring that `LoadLibrary`
+/// calls strictly search `%SystemRoot%\System32` and ignore the current working directory,
+/// application directory, or untrusted user PATH environment variable entries.
+pub fn enforce_dll_preloading_guard() -> crate::Result<()> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::LibraryLoader::{
+            SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_SYSTEM32,
+        };
+        if let Err(e) = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) {
+            return Err(crate::error::VaultError::DecryptionError(format!(
+                "SetDefaultDllDirectories failed: {}",
+                e
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Detects if the Windows workstation is currently locked (`Win + L` or Winlogon screen active).
+pub fn is_workstation_locked() -> bool {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::StationsAndDesktops::{
+            OpenInputDesktop, CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP,
+        };
+        // OpenInputDesktop returns NULL / ERROR_ACCESS_DENIED when desktop is locked by Winlogon
+        if let Ok(h_desk) = OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP) {
+            let _ = CloseDesktop(h_desk);
+            false
+        } else {
+            true
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+
+
+/// Configures window capture protection (`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`).
+///
+/// Prevents screen capture, video recording, Snipping Tool, OBS, Teams screen share, and
+/// screen scraping malware from reading secrets displayed in the application window.
+pub fn set_window_capture_protection(hwnd_ptr: isize, enable: bool) -> crate::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WDA_MONITOR,
+        };
+
+        if hwnd_ptr == 0 {
+            return Err(crate::error::VaultError::DecryptionError(
+                "Invalid null window handle passed to set_window_capture_protection".into(),
+            ));
+        }
+
+        let hwnd = HWND(hwnd_ptr as _);
+        let affinity = if enable {
+            WDA_EXCLUDEFROMCAPTURE
+        } else {
+            WDA_NONE
+        };
+
+        unsafe {
+            if let Err(e) = SetWindowDisplayAffinity(hwnd, affinity) {
+                if enable {
+                    // Fall back to WDA_MONITOR for older Windows 10 versions (< build 19041)
+                    SetWindowDisplayAffinity(hwnd, WDA_MONITOR).map_err(|e2| {
+                        crate::error::VaultError::DecryptionError(format!(
+                            "SetWindowDisplayAffinity failed (primary: {}, fallback: {})",
+                            e, e2
+                        ))
+                    })?;
+                } else {
+                    return Err(crate::error::VaultError::DecryptionError(format!(
+                        "SetWindowDisplayAffinity disable failed: {}",
+                        e
+                    )));
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (hwnd_ptr, enable);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -417,7 +517,30 @@ mod tests {
         assert_eq!(key_slice.len(), 32);
         assert_ne!(key_slice, &[0u8; 32]);
     }
+
+    #[test]
+    fn test_window_capture_protection_null_handle() {
+        let result = set_window_capture_protection(0, true);
+        #[cfg(target_os = "windows")]
+        assert!(result.is_err());
+        #[cfg(not(target_os = "windows"))]
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_enforce_dll_preloading_guard() {
+        let result = enforce_dll_preloading_guard();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_is_workstation_locked() {
+        // When running unit tests on interactive desktop, workstation should not be locked
+        let locked = is_workstation_locked();
+        let _ = locked;
+    }
 }
+
 
 
 

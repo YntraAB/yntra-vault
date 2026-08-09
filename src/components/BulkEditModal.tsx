@@ -143,7 +143,7 @@ export default function BulkEditModal({ open, selectedIds, onClose }: BulkEditMo
                     Title
                   </label>
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-[var(--text-tertiary)]">Update title</span>
+                    <span className="text-[11px] text-[var(--text-tertiary)]">{t('bulk_edit.update_title')}</span>
                     <input
                       type="checkbox"
                       id="bulk-title-check"
@@ -172,7 +172,7 @@ export default function BulkEditModal({ open, selectedIds, onClose }: BulkEditMo
                     Username / Email
                   </label>
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-[var(--text-tertiary)]">Update username</span>
+                    <span className="text-[11px] text-[var(--text-tertiary)]">{t('bulk_edit.update_username')}</span>
                     <input
                       type="checkbox"
                       id="bulk-user-check"

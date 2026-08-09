@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Key, Star, Sliders, Settings } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
+import { useTranslation } from '@/contexts/LanguageContext';
 
 interface MobileBottomNavProps {
   activeTab: 'entries' | 'favorites' | 'generator' | 'settings';
@@ -16,6 +17,7 @@ export default function MobileBottomNav({
   onOpenSettings,
 }: MobileBottomNavProps) {
   const { setFilterCategory } = useAppState();
+  const { t } = useTranslation();
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function MobileBottomNav({
         }`}
       >
         <Key size={20} className={activeTab === 'entries' ? 'stroke-[2.5]' : 'stroke-[1.75]'} />
-        <span className="text-[10px]">Vault</span>
+        <span className="text-[10px]">{t('mobile.nav_vault')}</span>
       </button>
 
       <button
@@ -71,7 +73,7 @@ export default function MobileBottomNav({
         }`}
       >
         <Star size={20} className={activeTab === 'favorites' ? 'fill-current stroke-none' : 'stroke-[1.75]'} />
-        <span className="text-[10px]">Favorites</span>
+        <span className="text-[10px]">{t('mobile.nav_favorites')}</span>
       </button>
 
       <button
@@ -81,7 +83,7 @@ export default function MobileBottomNav({
         className="flex flex-1 flex-col items-center justify-center gap-1 py-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
       >
         <Sliders size={20} className="stroke-[1.75]" />
-        <span className="text-[10px]">Generator</span>
+        <span className="text-[10px]">{t('mobile.nav_generator')}</span>
       </button>
 
       <button
@@ -91,7 +93,7 @@ export default function MobileBottomNav({
         className="flex flex-1 flex-col items-center justify-center gap-1 py-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
       >
         <Settings size={20} className="stroke-[1.75]" />
-        <span className="text-[10px]">Settings</span>
+        <span className="text-[10px]">{t('mobile.nav_settings')}</span>
       </button>
     </nav>
   );

@@ -297,6 +297,7 @@ function PasswordField({ label, value, onChange, show, placeholder, mismatch, in
   show: boolean; placeholder: string; mismatch?: boolean;
   inputRef?: React.RefObject<SecureSecretInputRef | null>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-[12px] font-medium text-[var(--text-secondary)]">{label}</label>
@@ -319,7 +320,7 @@ function PasswordField({ label, value, onChange, show, placeholder, mismatch, in
           }`}
         />
       )}
-      {mismatch && <span className="text-[11px] text-[var(--destructive)]">Passwords do not match</span>}
+      {mismatch && <span className="text-[11px] text-[var(--destructive)]">{t('create_vault.err_pass_mismatch')}</span>}
     </div>
   );
 }

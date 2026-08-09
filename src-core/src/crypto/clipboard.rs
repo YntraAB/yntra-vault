@@ -457,4 +457,13 @@ mod tests {
         let tx2 = CLIPBOARD_TX_COUNTER.fetch_add(1, Ordering::SeqCst);
         assert!(tx2 > tx1);
     }
+
+    #[test]
+    fn test_clipboard_defended_roundtrip() {
+        let result = copy_to_clipboard_defended("TestSecretClipboard123", true, Some(10));
+        assert!(result.is_ok());
+
+        let clear_res = clear_clipboard();
+        assert!(clear_res.is_ok());
+    }
 }

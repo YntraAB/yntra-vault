@@ -312,7 +312,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
       const res = await backend.parseImportFile(path, selectedBrand.supportedFormatKey);
       applyPreviewResult(res);
     } catch (err) {
-      addToast({ message: `Parse failed: ${err}`, type: 'error' });
+      addToast({ message: t('toast.parse_failed', { err: String(err) }), type: 'error' });
     } finally {
       setParsing(false);
     }
@@ -325,7 +325,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
       const res = await backend.parseImportContent(content, selectedBrand.supportedFormatKey);
       applyPreviewResult(res);
     } catch (err) {
-      addToast({ message: `Parse failed: ${err}`, type: 'error' });
+      addToast({ message: t('toast.parse_failed', { err: String(err) }), type: 'error' });
     } finally {
       setParsing(false);
     }
@@ -396,10 +396,10 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
       setImportedCount(count);
       await refreshEntries();
       setStep('complete');
-      addToast({ message: `Successfully imported ${count} entries!`, type: 'success' });
+      addToast({ message: t('toast.import_success', { count }), type: 'success' });
       if (onSuccess) onSuccess();
     } catch (err) {
-      addToast({ message: `Import failed: ${err}`, type: 'error' });
+      addToast({ message: t('toast.import_failed', { err: String(err) }), type: 'error' });
       setStep('preview');
     }
   };

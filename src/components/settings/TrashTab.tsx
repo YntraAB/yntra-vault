@@ -40,7 +40,7 @@ export function TrashTab() {
       await fetchTrash();
       await refreshEntries();
     } catch (e) {
-      addToast({ message: `Restore failed: ${e}`, type: 'error' });
+      addToast({ message: t('toast.restore_failed', { err: String(e) }), type: 'error' });
     }
   };
 
@@ -52,7 +52,7 @@ export function TrashTab() {
       addToast({ message: t('settings.entry_deleted_permanently'), type: 'success' });
       await fetchTrash();
     } catch (e) {
-      addToast({ message: `Permanent delete failed: ${e}`, type: 'error' });
+      addToast({ message: t('toast.permanent_delete_failed', { err: String(e) }), type: 'error' });
     }
   };
 
@@ -64,7 +64,7 @@ export function TrashTab() {
       addToast({ message: t('settings.trash_emptied'), type: 'success' });
       await fetchTrash();
     } catch (e) {
-      addToast({ message: `Empty trash failed: ${e}`, type: 'error' });
+      addToast({ message: t('toast.empty_trash_failed', { err: String(e) }), type: 'error' });
     }
   };
 

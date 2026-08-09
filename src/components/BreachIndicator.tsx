@@ -9,6 +9,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useBackend } from '../lib/useBackend';
 import { useAppState } from '../contexts/AppStateContext';
+import { useTranslation } from '../contexts/LanguageContext';
 import type { BreachStatus } from '../lib/backend';
 import { ActionTooltip } from './ui/tooltip';
 
@@ -34,6 +35,7 @@ export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
 }) => {
   const { backend } = useBackend();
   const { settings } = useAppState();
+  const { t } = useTranslation();
   const [status, setStatus] = useState<BreachStatus>(
     initialStatus || { type: 'Unknown' }
   );
@@ -94,7 +96,7 @@ export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
     return () => clearTimeout(timer);
   }, [password, checkBreach, settings.autoBreachCheck]);
 
-  const config = getStatusConfig(status);
+  const config = getStatusConfig(status, t);
 
   if (hideIfSafe && (status.type === 'Safe' || status.type === 'Unknown')) {
     return null;
@@ -130,47 +132,47 @@ interface StatusConfig {
   textColor: string;
 }
 
-function getStatusConfig(status: BreachStatus): StatusConfig {
+function getStatusConfig(status: BreachStatus, t: (key: string, params?: Record<string, string | number>) => string): StatusConfig {
   switch (status.type) {
     case 'Unknown':
       return {
-        shortLabel: 'Not checked',
-        label: 'Password breach status not checked yet',
-        tooltip: 'This password has not been checked against the HIBP database',
+        shortLabel: t('breach.not_checked'),
+        label: t('breach.status_not_checked'),
+        tooltip: t('breach.tooltip_not_checked'),
         textColor: 'text-[var(--text-tertiary)]',
       };
 
     case 'Checking':
       return {
-        shortLabel: 'Checking...',
-        label: 'Checking password safety...',
-        tooltip: 'Comparing password hash against data breach records',
+        shortLabel: t('breach.checking'),
+        label: t('breach.checking_safety'),
+        tooltip: t('breach.tooltip_checking'),
         textColor: 'text-[var(--text-secondary)] animate-pulse',
       };
 
     case 'Safe':
       return {
-        shortLabel: 'Safe',
-        label: 'No data breaches found',
-        tooltip: 'This password was not found in any known public data leaks',
+        shortLabel: t('breach.safe'),
+        label: t('breach.no_breaches'),
+        tooltip: t('breach.tooltip_safe'),
         textColor: 'text-green-500',
       };
 
     case 'Breached':
       const formatted = formatCount(status.breach_count);
       return {
-        shortLabel: `${formatted} breaches`,
-        label: `Found in ${status.breach_count.toLocaleString()} data breaches!`,
-        tooltip: `⚠ Warning: This password was leaked in ${status.breach_count.toLocaleString()} public breaches! Change it immediately.`,
+        shortLabel: t('breach.count_short', { count: formatted }),
+        label: t('breach.found_in_breaches', { count: status.breach_count.toLocaleString() }),
+        tooltip: t('breach.warning_breached', { count: status.breach_count.toLocaleString() }),
         textColor: 'text-red-500 font-semibold',
       };
 
     case 'Error':
       return {
-        shortLabel: 'Check failed',
-        label: 'Failed to verify breach status',
-        detail: 'offline',
-        tooltip: `Error details: ${status.message}`,
+        shortLabel: t('breach.check_failed'),
+        label: t('breach.failed_verify'),
+        detail: t('breach.offline'),
+        tooltip: t('breach.error_details', { message: status.message }),
         textColor: 'text-amber-500',
       };
   }

@@ -112,11 +112,11 @@ export default function PasswordDetail() {
       setPreviewAtt(attachment);
       setPreviewData(uint8);
     } catch (err) {
-      addToast({ message: `Failed to load preview: ${err}`, type: 'error' });
+      addToast({ message: t('toast.load_preview_failed', { err: String(err) }), type: 'error' });
     } finally {
       setLoadingPreviewId(null);
     }
-  }, [backend, selectedEntry, addToast]);
+  }, [backend, selectedEntry, addToast, t]);
 
   const handleClosePreview = useCallback(() => {
     if (previewData) {
@@ -142,13 +142,13 @@ export default function PasswordDetail() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       uint8.fill(0);
-      addToast({ message: `Downloaded ${attachment.name}`, type: 'success' });
+      addToast({ message: t('toast.downloaded_attachment', { name: attachment.name }), type: 'success' });
     } catch (err) {
-      addToast({ message: `Failed to download attachment: ${err}`, type: 'error' });
+      addToast({ message: t('toast.download_failed', { err: String(err) }), type: 'error' });
     } finally {
       setDownloadingAttId(null);
     }
-  }, [backend, selectedEntry, addToast]);
+  }, [backend, selectedEntry, addToast, t]);
 
   const handleDeleteAttachment = useCallback(async (attachment: AttachmentInfo) => {
     if (!backend || !selectedEntry) return;
@@ -159,7 +159,7 @@ export default function PasswordDetail() {
       await updateEntry({ ...selectedEntry, attachments: updatedAttachments });
       addToast({ message: t('toast.attachment_deleted'), type: 'success' });
     } catch (err) {
-      addToast({ message: `Failed to delete attachment: ${err}`, type: 'error' });
+      addToast({ message: t('toast.delete_attachment_failed', { err: String(err) }), type: 'error' });
     }
   }, [backend, selectedEntry, updateEntry, addToast, t]);
 
@@ -180,7 +180,7 @@ export default function PasswordDetail() {
         settings.autotypeFieldDelayMs || 300
       );
     } catch (err) {
-      addToast({ message: `Smart Login failed: ${err}`, type: 'error' });
+      addToast({ message: t('toast.smart_login_failed', { err: String(err) }), type: 'error' });
     }
   }, [backend, selectedEntry, settings.autotypeLaunchBrowser, settings.autotypeCharDelayMs, settings.autotypeFieldDelayMs, addToast]);
 
@@ -936,7 +936,7 @@ export default function PasswordDetail() {
                                       key={idx}
                                       code={code}
                                       index={idx}
-                                      onCopy={() => addToast({ message: `Recovery code ${idx + 1} copied`, type: 'success' })}
+                                      onCopy={() => addToast({ message: t('toast.recovery_code_copied', { index: idx + 1 }), type: 'success' })}
                                     />
                                   ))}
                                 </div>
@@ -1089,7 +1089,7 @@ export default function PasswordDetail() {
                           await updateEntry({ ...selectedEntry, passkeyAction: 'remove' });
                           addToast({ message: t('toast.passkey_removed'), type: 'success' });
                         } catch (err) {
-                          addToast({ message: `Failed to remove passkey: ${err}`, type: 'error' });
+                          addToast({ message: t('toast.remove_passkey_failed', { err: String(err) }), type: 'error' });
                         }
                       }}
                       className="text-[11px] font-medium text-red-400 hover:text-red-300 transition-colors"
@@ -1227,7 +1227,7 @@ export default function PasswordDetail() {
                 type="button"
                 onClick={() => setShowWarningModal(false)}
                 className="absolute top-4 right-4 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-1 rounded-[3px] hover:bg-[var(--bg-hover)]"
-                aria-label="Close dialog"
+                aria-label={t('common.close_dialog')}
               >
                 <X size={15} />
               </button>

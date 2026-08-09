@@ -128,10 +128,10 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
         setFilterCategory('all');
       }
       removeTag(deleteConfirmTag.id);
-      addToast({ message: `Tag "${deleteConfirmTag.name}" deleted`, type: 'info' });
+      addToast({ message: t('toast.tag_deleted', { name: deleteConfirmTag.name }), type: 'info' });
       setDeleteConfirmTag(null);
     }
-  }, [deleteConfirmTag, removeTag, addToast, filterCategory, setFilterCategory]);
+  }, [deleteConfirmTag, removeTag, addToast, filterCategory, setFilterCategory, t]);
 
   return (
     <aside
@@ -246,7 +246,7 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
         className="absolute right-0 top-0 z-10 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
         onMouseDown={onResizeStart}
         role="slider"
-        aria-label="Resize sidebar"
+        aria-label={t('common.resize_sidebar')}
       />
 
       {/* Create Tag Modal */}

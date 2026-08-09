@@ -65,7 +65,7 @@ export default function SettingsPanel() {
 
   const handleToggleLaunch = async (val: boolean) => {
     if (!isTauri()) {
-      addToast({ message: 'Autostart feature unavailable in web mode', type: 'error' });
+      addToast({ message: t('toast.autostart_unavailable_web'), type: 'error' });
       return;
     }
     try {
@@ -78,10 +78,10 @@ export default function SettingsPanel() {
         await disable();
       }
       setLaunchOnStartup(val);
-      addToast({ message: val ? 'Launch on startup enabled' : 'Launch on startup disabled', type: 'info' });
+      addToast({ message: val ? t('toast.autostart_enabled') : t('toast.autostart_disabled'), type: 'info' });
     } catch (e) {
       console.error('Autostart toggle failed:', e);
-      addToast({ message: 'Autostart feature unavailable in dev mode', type: 'error' });
+      addToast({ message: t('toast.autostart_unavailable_dev'), type: 'error' });
     }
   };
 
@@ -109,14 +109,14 @@ export default function SettingsPanel() {
       if (bioActive) {
         await backend.disableBiometric();
         setBioActive(false);
-        addToast({ message: 'Biometric unlock disabled', type: 'success' });
+        addToast({ message: t('toast.biometric_disabled'), type: 'success' });
       } else {
         await backend.enableBiometric();
         setBioActive(true);
-        addToast({ message: 'Biometric unlock enabled', type: 'success' });
+        addToast({ message: t('toast.biometric_enabled'), type: 'success' });
       }
     } catch (err: any) {
-      addToast({ message: err.toString() || 'Biometric toggle failed', type: 'error' });
+      addToast({ message: err ? err.toString() : t('toast.biometric_failed'), type: 'error' });
     }
   };
 
@@ -126,9 +126,9 @@ export default function SettingsPanel() {
     try {
       await backend.disableHardware2Fa();
       setHwActive(false);
-      addToast({ message: 'Hardware 2FA disabled', type: 'success' });
+      addToast({ message: t('toast.hardware_2fa_disabled'), type: 'success' });
     } catch (err: any) {
-      addToast({ message: err.toString() || 'Failed to disable Hardware 2FA', type: 'error' });
+      addToast({ message: err ? err.toString() : t('toast.hardware_2fa_disable_failed'), type: 'error' });
     }
   };
 

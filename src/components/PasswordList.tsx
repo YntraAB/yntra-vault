@@ -181,14 +181,14 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
   const confirmDeleteEntry = useCallback(() => {
     if (deleteConfirmEntry) {
       deleteEntry(deleteConfirmEntry.id);
-      addToast({ message: `Entry "${deleteConfirmEntry.title}" deleted`, type: 'info' });
+      addToast({ message: t('toast.entry_deleted', { title: deleteConfirmEntry.title }), type: 'info' });
       setDeleteConfirmEntry(null);
     }
-  }, [deleteConfirmEntry, deleteEntry, addToast]);
+  }, [deleteConfirmEntry, deleteEntry, addToast, t]);
 
   const handleAutotype = useCallback(async (entry: PasswordEntry) => {
     if (!backend) return;
-    addToast({ message: `Starting autotype for "${entry.title}"...`, type: 'info' });
+    addToast({ message: t('toast.autotype_starting', { title: entry.title }), type: 'info' });
     try {
       await backend.runSmartAutotype(
         entry.username || '',
@@ -200,9 +200,9 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
         settings.autotypeFieldDelayMs || 300
       );
     } catch (err) {
-      addToast({ message: `Autotype failed: ${err}`, type: 'error' });
+      addToast({ message: t('toast.autotype_failed', { err: String(err) }), type: 'error' });
     }
-  }, [backend, settings, addToast]);
+  }, [backend, settings, addToast, t]);
 
   const handleToggleFavorite = useCallback((entry: PasswordEntry) => {
     toggleFavorite(entry.id);
@@ -380,7 +380,7 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
         className="absolute right-0 top-0 z-10 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
         onMouseDown={onResizeStart}
         role="slider"
-        aria-label="Resize password list"
+        aria-label={t('common.resize_password_list')}
       />
 
       <EntryModal

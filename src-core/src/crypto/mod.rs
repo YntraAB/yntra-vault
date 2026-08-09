@@ -16,7 +16,7 @@ pub use cipher::{
     encrypt_entry_with_aad, decrypt_entry_with_aad,
     compute_hmac, verify_hmac,
 };
-pub use mem::{LockedBuffer, ScrambledString, prevent_core_dumps};
+pub use mem::{LockedBuffer, ScrambledString, prevent_core_dumps, set_window_capture_protection, enforce_dll_preloading_guard, is_workstation_locked};
 pub use sharing::{split_secret, reconstruct_secret, parse_share, split_password, reconstruct_password_to_hex};
 pub use tpm::{hardware_wrap_key, hardware_unwrap_key, write_session_token, read_session_token};
 pub use passkey::{generate_passkey_pair, sign_assertion, verify_assertion};

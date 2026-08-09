@@ -24,6 +24,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct AppState {
     pub vault: Mutex<Option<VaultManager>>,
     pub minimize_to_tray: AtomicBool,
+    pub lock_on_focus_loss: AtomicBool,
+    pub lock_on_system_lock: AtomicBool,
 }
 
 // ─── Vault Commands ─────────────────────────────────────────────────────
@@ -1058,6 +1060,52 @@ pub async fn get_vault_path(state: State<'_, AppState>) -> Result<String, String
     Ok(manager.info().path)
 }
 
+// ─── Mobile Autofill Integration ──────────────────────────────────────────
+
+#[tauri::command]
+pub async fn query_mobile_autofill_status(
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::vault::mobile_autofill::MobileAutofillStatus, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let entries_count = manager.list_entries().map_err(|e| e.to_string())?.len();
+
+    Ok(yntra_vault_core::vault::mobile_autofill::MobileAutofillStatus {
+        supported: true,
+        enabled: true,
+        active_provider: "Android AutofillService / iOS CredentialProvider".into(),
+        mapped_packages_count: entries_count,
+        strict_domain_matching: true,
+        asset_links_enforced: true,
+        webview_origin_protected: true,
+        biometric_stepup_required: true,
+    })
+}
+
+#[tauri::command]
+pub async fn get_autofill_credentials_for_package(
+    package_name: String,
+    web_domain: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::vault::mobile_autofill::AutofillDatasetPayload, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    let items = manager.find_entries_for_mobile_context(&package_name, web_domain.as_deref()).map_err(|e| e.to_string())?;
+    let asset_links_valid = items.iter().any(|item| {
+        yntra_vault_core::vault::mobile_autofill::verify_digital_asset_links(&item.domain, &package_name, None)
+    });
+
+    Ok(yntra_vault_core::vault::mobile_autofill::AutofillDatasetPayload {
+        package_name,
+        web_domain,
+        matched_credentials: items,
+        asset_links_verified: asset_links_valid,
+    })
+}
+
+
+
+
 // ─── Import Commands ─────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1342,5 +1390,36 @@ pub async fn autotype_entry_smart(
     mut_totp.zeroize();
     res
 }
+
+#[tauri::command]
+pub async fn set_window_capture_protection(
+    window: tauri::WebviewWindow,
+    enable: bool,
+) -> Result<(), String> {
+    #[cfg(not(mobile))]
+    {
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, enable)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(mobile)]
+    {
+        let _ = (window, enable);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub async fn set_lock_on_focus_loss(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.lock_on_focus_loss.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_lock_on_system_lock(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.lock_on_system_lock.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
+
 
 

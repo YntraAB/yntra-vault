@@ -7,6 +7,7 @@
 
 import React, { useState } from 'react';
 import { useTotp } from '../lib/useBackend';
+import { useTranslation } from '../contexts/LanguageContext';
 import { Copy, Check } from 'lucide-react';
 import { ActionTooltip } from './ui/tooltip';
 
@@ -22,13 +23,14 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
   compact = false,
 }) => {
   const code = useTotp(secret);
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   if (!code) {
     return (
       <div className="flex items-center gap-3 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-2">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--text-tertiary)] border-t-transparent shrink-0" />
-        <span className="text-[12px] text-[var(--text-tertiary)]">Generating code...</span>
+        <span className="text-[12px] text-[var(--text-tertiary)]">{t('totp.generating_code')}</span>
       </div>
     );
   }
@@ -60,7 +62,7 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
 
   if (compact) {
     return (
-      <ActionTooltip content={copied ? 'Copied code!' : 'Click to copy TOTP code'}>
+      <ActionTooltip content={copied ? t('totp.copied') : t('totp.click_to_copy')}>
         <button
           type="button"
           onClick={handleCopy}
@@ -89,11 +91,11 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
           {formattedCode}
         </span>
         <span className="text-[10px] text-[var(--text-tertiary)] font-medium">
-          {code.seconds_remaining}s remaining
+          {t('totp.seconds_remaining', { seconds: code.seconds_remaining })}
         </span>
       </div>
 
-      <ActionTooltip content={copied ? 'Copied code!' : 'Copy TOTP code'}>
+      <ActionTooltip content={copied ? t('totp.copied') : t('totp.copy')}>
         <button
           type="button"
           onClick={handleCopy}

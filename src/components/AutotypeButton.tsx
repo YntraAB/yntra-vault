@@ -25,7 +25,7 @@ export default function AutotypeButton({ value = '', entryId, className = '', si
       if (!backend || autotyping) return;
       setAutotyping(true);
       const settleSeconds = Math.round((settings.autotypeSettleDelayMs || 3000) / 1000);
-      addToast({ message: `Autotype pending... Focus target window. You will have ${settleSeconds} seconds to select the input field.`, type: 'info' });
+      addToast({ message: t('toast.autotype_pending', { settleSeconds }), type: 'info' });
 
       (async () => {
         try {
@@ -36,7 +36,7 @@ export default function AutotypeButton({ value = '', entryId, className = '', si
           }
           addToast({ message: t('toast.autotyped_success'), type: 'success' });
         } catch (err) {
-          addToast({ message: `Autotype failed: ${err}`, type: 'error' });
+          addToast({ message: t('toast.autotype_failed', { err: String(err) }), type: 'error' });
         } finally {
           setAutotyping(false);
         }

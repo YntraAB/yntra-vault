@@ -258,6 +258,18 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('set_minimize_to_tray', { enabled });
   }
 
+  async setWindowCaptureProtection(enable: boolean): Promise<void> {
+    return invoke('set_window_capture_protection', { enable });
+  }
+
+  async setLockOnFocusLoss(enabled: boolean): Promise<void> {
+    return invoke('set_lock_on_focus_loss', { enabled });
+  }
+
+  async setLockOnSystemLock(enabled: boolean): Promise<void> {
+    return invoke('set_lock_on_system_lock', { enabled });
+  }
+
   async webdavTestConnection(url: string, username: string, password: string | null): Promise<void> {
     return invoke('webdav_test_connection', { url, username, password });
   }
@@ -460,7 +472,18 @@ export class TauriBackend implements YntraVaultBackend {
   async verifyBiometric2Fa(prompt?: string): Promise<void> {
     return invoke('verify_biometric_2fa', { prompt });
   }
+
+  // ─── Mobile Native Autofill Integration ──────────────────────────────────
+
+  async queryMobileAutofillStatus(): Promise<import('./backend').MobileAutofillStatus> {
+    return invoke('query_mobile_autofill_status');
+  }
+
+  async getAutofillCredentialsForPackage(packageName: string, webDomain?: string): Promise<import('./backend').AutofillDatasetPayload> {
+    return invoke('get_autofill_credentials_for_package', { packageName, webDomain });
+  }
 }
+
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────
 

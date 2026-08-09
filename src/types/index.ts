@@ -121,6 +121,9 @@ export interface AppSettings {
   entrySortOrder?: 'title' | 'updated' | 'created';
   keybinds?: KeybindsConfig;
   forceMobileView?: boolean;
+  windowCaptureProtection?: boolean;
+  lockOnFocusLoss?: boolean;
+  lockOnSystemLock?: boolean;
 }
 
 export interface TOTPState {

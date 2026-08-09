@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { usePasswordGenerator } from '../lib/useBackend';
+import { useTranslation } from '../contexts/LanguageContext';
 import type { StrengthScore, StrengthLevel } from '../lib/backend';
 
 interface PasswordStrengthProps {
@@ -15,12 +16,12 @@ interface PasswordStrengthProps {
   showWarnings?: boolean;
 }
 
-const LEVEL_CONFIG: Record<StrengthLevel, { color: string; label: string; width: string }> = {
-  Critical: { color: 'var(--strength-critical, #ef4444)', label: 'Critical', width: '10%' },
-  Weak: { color: 'var(--strength-weak, #f59e0b)', label: 'Weak', width: '30%' },
-  Fair: { color: 'var(--strength-fair, #eab308)', label: 'Fair', width: '50%' },
-  Strong: { color: 'var(--strength-strong, #22c55e)', label: 'Strong', width: '75%' },
-  Excellent: { color: 'var(--strength-excellent, #06b6d4)', label: 'Excellent', width: '100%' },
+const LEVEL_CONFIG: Record<StrengthLevel, { color: string; labelKey: string; width: string }> = {
+  Critical: { color: 'var(--strength-critical, #ef4444)', labelKey: 'strength.critical', width: '10%' },
+  Weak: { color: 'var(--strength-weak, #f59e0b)', labelKey: 'strength.weak', width: '30%' },
+  Fair: { color: 'var(--strength-fair, #eab308)', labelKey: 'strength.fair', width: '50%' },
+  Strong: { color: 'var(--strength-strong, #22c55e)', labelKey: 'strength.strong', width: '75%' },
+  Excellent: { color: 'var(--strength-excellent, #06b6d4)', labelKey: 'strength.excellent', width: '100%' },
 };
 
 export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
@@ -29,6 +30,7 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
   showWarnings = true,
 }) => {
   const { analyzeStrength } = usePasswordGenerator();
+  const { t } = useTranslation();
   const [score, setScore] = useState<StrengthScore | null>(null);
   const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
@@ -52,6 +54,7 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
   if (!password || !score) return null;
 
   const config = LEVEL_CONFIG[score.level];
+  const label = t(config.labelKey);
 
   if (compact) {
     return (
@@ -63,7 +66,7 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
           />
         </div>
         <span className="text-[11px] font-medium" style={{ color: config.color }}>
-          {config.label}
+          {label}
         </span>
       </div>
     );
@@ -90,14 +93,14 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
           })}
         </div>
         <span className="text-[11px] font-medium min-w-[60px] text-right" style={{ color: config.color }}>
-          {config.label}
+          {label}
         </span>
       </div>
 
       {/* Stats */}
       <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
-        <span>{score.entropy_bits.toFixed(0)} bits entropy</span>
-        <span>Crack time: {score.crack_time}</span>
+        <span>{t('strength.bits_entropy', { bits: score.entropy_bits.toFixed(0) })}</span>
+        <span>{t('strength.crack_time', { time: score.crack_time })}</span>
       </div>
 
       {/* Warnings */}

@@ -22,28 +22,47 @@ pub fn run() {
         .manage(AppState {
             vault: Mutex::new(None),
             minimize_to_tray: std::sync::atomic::AtomicBool::new(true),
+            lock_on_focus_loss: std::sync::atomic::AtomicBool::new(false),
+            lock_on_system_lock: std::sync::atomic::AtomicBool::new(true),
         });
 
     #[cfg(not(mobile))]
     {
         builder = builder.on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let app = window.app_handle();
-                let state = app.state::<AppState>();
-                if state.minimize_to_tray.load(std::sync::atomic::Ordering::Relaxed) {
-                    let _ = window.hide();
-                    api.prevent_close();
-
-                    // Lock the vault on close-to-tray
-                    if let Ok(mut vault) = state.vault.lock() {
-                        if let Some(ref mut manager) = *vault {
-                            manager.lock();
+            match event {
+                tauri::WindowEvent::Focused(false) => {
+                    let app = window.app_handle();
+                    let state = app.state::<AppState>();
+                    if state.lock_on_focus_loss.load(std::sync::atomic::Ordering::Relaxed) {
+                        if let Ok(mut vault) = state.vault.lock() {
+                            if let Some(ref mut manager) = *vault {
+                                manager.lock();
+                            }
+                            *vault = None;
                         }
-                        *vault = None;
+                        let _ = yntra_vault_core::crypto::clear_clipboard();
+                        let _ = window.emit("vault-locked", ());
                     }
-                    let _ = yntra_vault_core::crypto::clear_clipboard();
-                    let _ = window.emit("vault-locked", ());
                 }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let app = window.app_handle();
+                    let state = app.state::<AppState>();
+                    if state.minimize_to_tray.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = window.hide();
+                        api.prevent_close();
+
+                        // Lock the vault on close-to-tray
+                        if let Ok(mut vault) = state.vault.lock() {
+                            if let Some(ref mut manager) = *vault {
+                                manager.lock();
+                            }
+                            *vault = None;
+                        }
+                        let _ = yntra_vault_core::crypto::clear_clipboard();
+                        let _ = window.emit("vault-locked", ());
+                    }
+                }
+                _ => {}
             }
         });
     }
@@ -129,6 +148,8 @@ pub fn run() {
             commands::export_vault_csv,
             commands::export_vault_json,
             commands::get_vault_path,
+            commands::query_mobile_autofill_status,
+            commands::get_autofill_credentials_for_package,
             commands::parse_import_file,
             commands::parse_import_content,
             commands::import_entries,
@@ -145,14 +166,25 @@ pub fn run() {
             commands::autotype_entry_smart,
             commands::verify_biometric_2fa,
             commands::get_installed_apps,
+            commands::set_window_capture_protection,
+            commands::set_lock_on_focus_loss,
+            commands::set_lock_on_system_lock,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
 
             #[cfg(not(mobile))]
             {
+                // Enforce Window Capture Protection (WDA_EXCLUDEFROMCAPTURE) against screen scraping malware
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Ok(hwnd) = window.hwnd() {
+                        let _ = yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, true);
+                    }
+                }
+
                 // Setup System Tray Menu & Icon on desktop platforms
                 if let Ok(quit_i) = MenuItem::with_id(app, "quit", "Close", true, None::<&str>) {
+
                     if let Ok(show_i) = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>) {
                         if let Ok(menu) = Menu::with_items(app, &[&show_i, &quit_i]) {
                             let _ = TrayIconBuilder::new()
@@ -205,8 +237,25 @@ pub fn run() {
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 loop {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                     let state = app_handle.state::<AppState>();
+
+                    // Aggressive Auto-Lock: Check OS Workstation Lock / Screen Lock / Sleep
+                    if state.lock_on_system_lock.load(std::sync::atomic::Ordering::Relaxed) {
+                        if yntra_vault_core::crypto::is_workstation_locked() {
+                            if let Ok(mut vault) = state.vault.lock() {
+                                if vault.is_some() {
+                                    if let Some(ref mut manager) = *vault {
+                                        manager.lock();
+                                    }
+                                    *vault = None;
+                                    let _ = yntra_vault_core::crypto::clear_clipboard();
+                                    let _ = app_handle.emit("vault-locked", ());
+                                }
+                            }
+                        }
+                    }
+
                     let mut vault = match state.vault.lock() {
                         Ok(v) => v,
                         Err(_) => continue,

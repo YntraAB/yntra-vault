@@ -26,7 +26,7 @@ export function SecurityTab({
   onDisableHw,
   onOpenChangePassword,
 }: SecurityTabProps) {
-  const { addToast } = useAppState();
+  const { settings, updateSettings, addToast } = useAppState();
   const { t } = useTranslation();
   const { backend } = useBackend();
 
@@ -58,6 +58,77 @@ export function SecurityTab({
         >
           {t('settings.change_password')}
         </button>
+      </SettingSection>
+
+      {/* Window Capture Protection */}
+      <SettingSection
+        label="Window Capture Protection"
+        tooltip="Blocks screen recorders, Snipping Tool, OBS, Teams screen share, and malware from capturing vault window content."
+      >
+        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+          Prevents unauthorized screen scraping malware by instructing Windows Desktop Window Manager (DWM) to exclude the vault window from captures.
+        </p>
+        <label className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 cursor-pointer">
+          <div className="flex flex-col">
+            <span className="text-[13px] font-medium text-[var(--text-primary)]">
+              Enable Window Capture Protection
+            </span>
+            <span className="text-[11px] text-[var(--text-tertiary)]">
+              {settings.windowCaptureProtection !== false ? 'Active (WDA_EXCLUDEFROMCAPTURE)' : 'Disabled'}
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.windowCaptureProtection !== false}
+            onChange={(e) => updateSettings({ windowCaptureProtection: e.target.checked })}
+            className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-0"
+          />
+        </label>
+      </SettingSection>
+
+      {/* Aggressive Auto-Lock */}
+      <SettingSection
+        label="Aggressive Auto-Lock"
+        tooltip="Instantly locks vault and clears memory upon OS screen lock, sleep, or window focus loss to minimize temporal exposure."
+      >
+        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+          Automatically lock the vault and zeroize RAM secrets during system events or app focus changes.
+        </p>
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 cursor-pointer">
+            <div className="flex flex-col">
+              <span className="text-[13px] font-medium text-[var(--text-primary)]">
+                Lock on OS Screen Lock & Sleep (Win + L)
+              </span>
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                {settings.lockOnSystemLock !== false ? 'Active (Subkey zeroization on Winlogon desktop switch)' : 'Disabled'}
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.lockOnSystemLock !== false}
+              onChange={(e) => updateSettings({ lockOnSystemLock: e.target.checked })}
+              className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-0"
+            />
+          </label>
+
+          <label className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 cursor-pointer">
+            <div className="flex flex-col">
+              <span className="text-[13px] font-medium text-[var(--text-primary)]">
+                Lock on Window Focus Loss
+              </span>
+              <span className="text-[11px] text-[var(--text-tertiary)]">
+                {settings.lockOnFocusLoss === true ? 'Active (Locks whenever app loses focus)' : 'Disabled'}
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.lockOnFocusLoss === true}
+              onChange={(e) => updateSettings({ lockOnFocusLoss: e.target.checked })}
+              className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-0"
+            />
+          </label>
+        </div>
       </SettingSection>
 
       {/* Biometric Unlock */}
@@ -166,7 +237,7 @@ export function SecurityTab({
                   setShares(res);
                   addToast({ message: t('toast.recovery_shares_generated'), type: 'success' });
                 } catch (err) {
-                  addToast({ message: `Split failed: ${err}`, type: 'error' });
+                  addToast({ message: t('toast.split_failed', { err: String(err) }), type: 'error' });
                 }
               }}
               className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
@@ -188,7 +259,7 @@ export function SecurityTab({
                       } else {
                         navigator.clipboard.writeText(s).catch(() => {});
                       }
-                      addToast({ message: `Share ${idx + 1} copied`, type: 'success' });
+                      addToast({ message: t('toast.share_copied', { index: idx + 1 }), type: 'success' });
                     }}
                     className="text-[10px] font-medium text-[var(--text-primary)] hover:underline"
                   >
@@ -225,7 +296,7 @@ export function SecurityTab({
                   setReconstructedHash(res);
                   addToast({ message: t('toast.hash_reconstructed'), type: 'success' });
                 } catch (err) {
-                  addToast({ message: `Reconstruction failed: ${err}`, type: 'error' });
+                  addToast({ message: t('toast.reconstruction_failed', { err: String(err) }), type: 'error' });
                 }
               }}
               className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"

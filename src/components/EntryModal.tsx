@@ -147,16 +147,16 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
         });
       }
     } catch (err) {
-      addToast({ message: `QR scan error: ${err}`, type: 'error' });
+      addToast({ message: t('toast.qr_scan_error', { err: String(err) }), type: 'error' });
     }
-  }, [addToast, fieldsOrder]);
+  }, [addToast, fieldsOrder, t]);
 
   const handleFileSelect = useCallback(async (files: FileList | File[]) => {
     const newStaged: { name: string; mimeType: string; data: Uint8Array; size: number }[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (file.size > 25 * 1024 * 1024) {
-        addToast({ message: `File "${file.name}" exceeds 25 MB size limit`, type: 'error' });
+        addToast({ message: t('toast.file_size_exceeded', { name: file.name }), type: 'error' });
         continue;
       }
       try {
@@ -169,7 +169,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
           size: file.size,
         });
       } catch (err) {
-        addToast({ message: `Failed to read file "${file.name}": ${err}`, type: 'error' });
+        addToast({ message: t('toast.file_read_failed', { name: file.name, err: String(err) }), type: 'error' });
       }
     }
     if (newStaged.length > 0) {
@@ -602,7 +602,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
       }
       onClose();
     } catch (err: any) {
-      addToast({ message: `Failed: ${err}`, type: 'error' });
+      addToast({ message: t('toast.action_failed', { err: String(err) }), type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -1031,7 +1031,7 @@ export default function EntryModal({ open, onClose, editEntry }: EntryModalProps
                                 className="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
                               >
                                 <Upload size={16} className="text-[var(--text-tertiary)]" />
-                                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Click or drop files to attach</span>
+                                <span className="text-[11px] font-medium text-[var(--text-secondary)]">{t('entry_modal.drop_files')}</span>
                                 <span className="text-[10px] text-[var(--text-tertiary)]">Files are encrypted with per-entry key (max 25 MB)</span>
                               </button>
                             )}

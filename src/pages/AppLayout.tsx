@@ -286,7 +286,7 @@ export default function AppLayout() {
         <MobileBottomSheet
           open={mobileGeneratorOpen}
           onClose={() => setMobileGeneratorOpen(false)}
-          title="Password & Passphrase Generator"
+          title={t('generator.title')}
         >
           <div className="pb-6">
             <PasswordGenerator />

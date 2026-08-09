@@ -282,6 +282,38 @@ export interface ImportPreviewResult {
   duplicates_count: number;
 }
 
+export interface MobileAutofillStatus {
+  supported: boolean;
+  enabled: boolean;
+  active_provider: string;
+  mapped_packages_count: number;
+  strict_domain_matching: boolean;
+  asset_links_enforced: boolean;
+  webview_origin_protected: boolean;
+  biometric_stepup_required: boolean;
+}
+
+export interface AutofillCredentialItem {
+  entry_id: string;
+  title: string;
+  username: string;
+  domain: string;
+  matched_by: string;
+  is_exact_package_match: boolean;
+  requires_user_consent: boolean;
+  requires_biometric_reauth: boolean;
+}
+
+export interface AutofillDatasetPayload {
+  package_name: string;
+  web_domain?: string;
+  matched_credentials: AutofillCredentialItem[];
+  asset_links_verified: boolean;
+}
+
+
+
+
 // ─── Backend Interface ──────────────────────────────────────────────────
 
 export interface YntraVaultBackend {
@@ -351,6 +383,9 @@ export interface YntraVaultBackend {
   disableAutostart(): Promise<void>;
   isAutostartEnabled(): Promise<boolean>;
   setMinimizeToTray(enabled: boolean): Promise<void>;
+  setWindowCaptureProtection(enable: boolean): Promise<void>;
+  setLockOnFocusLoss(enabled: boolean): Promise<void>;
+  setLockOnSystemLock(enabled: boolean): Promise<void>;
   webdavTestConnection(url: string, username: string, password: string | null): Promise<void>;
   webdavUpload(url: string, username: string, password: string | null, dbPath: string, ifMatchEtag?: string | null): Promise<string | null>;
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
@@ -399,7 +434,12 @@ export interface YntraVaultBackend {
   autotypeEntryPassword(entryId: string, charDelayMs?: number, settleDelayMs?: number): Promise<void>;
   autotypeEntrySmart(entryId: string, launchBrowser?: boolean, charDelayMs?: number, fieldDelayMs?: number): Promise<void>;
   verifyBiometric2Fa(prompt?: string): Promise<void>;
+
+  // Mobile Native Autofill Integration
+  queryMobileAutofillStatus(): Promise<MobileAutofillStatus>;
+  getAutofillCredentialsForPackage(packageName: string, webDomain?: string): Promise<AutofillDatasetPayload>;
 }
+
 
 // ─── Backend Detection & Factory ────────────────────────────────────────
 

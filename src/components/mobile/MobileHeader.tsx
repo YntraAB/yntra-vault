@@ -38,7 +38,7 @@ export default function MobileHeader({
         {/* Menu / Drawer Toggle */}
         <button
           onClick={onOpenDrawer}
-          aria-label="Open drawer"
+          aria-label={t('mobile.open_drawer')}
           className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors active:bg-[var(--bg-hover)] active:text-[var(--text-primary)]"
         >
           <Menu size={22} />
@@ -58,7 +58,7 @@ export default function MobileHeader({
         <div className="flex items-center gap-1">
           <button
             onClick={onToggleSearch}
-            aria-label="Search"
+            aria-label={t('mobile.search')}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
               isSearchVisible
                 ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
@@ -70,7 +70,7 @@ export default function MobileHeader({
 
           <button
             onClick={onNewEntry}
-            aria-label="New entry"
+            aria-label={t('mobile.new_entry')}
             className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--text-primary)] text-[var(--bg-base)] transition-opacity active:opacity-80"
           >
             <Plus size={20} />
@@ -78,7 +78,7 @@ export default function MobileHeader({
 
           <button
             onClick={() => setIsLocked(true)}
-            aria-label="Lock vault"
+            aria-label={t('mobile.lock_vault')}
             className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors active:bg-[var(--bg-hover)] active:text-[var(--text-primary)]"
           >
             <Lock size={18} />

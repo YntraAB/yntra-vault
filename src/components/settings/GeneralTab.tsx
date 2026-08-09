@@ -50,7 +50,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
                 type="button"
                 onClick={() => {
                   backend?.showInExplorer(currentVault.path).catch((err: any) => {
-                    addToast({ message: `Failed to open explorer: ${err}`, type: 'error' });
+                    addToast({ message: t('toast.open_explorer_failed', { err: String(err) }), type: 'error' });
                   });
                 }}
                 className="mt-1 h-7 self-start rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
@@ -181,6 +181,26 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
           />
         </SettingRow>
       )}
+
+      {/* Mobile OS Autofill Service */}
+      <SettingSection label="Mobile OS Autofill Integration">
+        <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-medium text-[var(--text-primary)]">Android AutofillService & iOS CredentialProvider</span>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                Anti-Phishing & Biometric Gate
+              </span>
+            </div>
+          </div>
+          <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+            Strict domain matching, In-App WebView origin inspection (<code className="text-[10px] font-mono text-[var(--accent)]">WebDomain</code> override), and mandatory biometric step-up re-authentication protect credentials against spoofed packages and physical device access.
+          </p>
+        </div>
+      </SettingSection>
+
+
+
 
       {/* Auto-Type Automation */}
       <SettingSection

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { PasswordEntry, Tag, Vault, FilterCategory, AppSettings, ToastMessage } from '@/types';
 import { isTauri, getBackend, type YntraVaultBackend, type EntryPreview, type DecryptedEntry } from '@/lib/backend';
+import { getTranslation } from '@/i18n/translations';
 
 
 
@@ -29,6 +30,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   entrySortOrder: 'updated',
   keybinds: DEFAULT_KEYBINDS,
   forceMobileView: false,
+  windowCaptureProtection: true,
+  lockOnFocusLoss: false,
+  lockOnSystemLock: true,
 };
 
 // ─── Conversion helpers (Rust types ↔ frontend types) ───────────────────
@@ -245,6 +249,33 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       });
     }
   }, [backend, settings.minimizeToTray]);
+
+  // Sync windowCaptureProtection setting to backend
+  useEffect(() => {
+    if (backend) {
+      backend.setWindowCaptureProtection(settings.windowCaptureProtection !== false).catch(err => {
+        console.error('Failed to sync windowCaptureProtection setting:', err);
+      });
+    }
+  }, [backend, settings.windowCaptureProtection]);
+
+  // Sync lockOnFocusLoss setting to backend
+  useEffect(() => {
+    if (backend) {
+      backend.setLockOnFocusLoss(settings.lockOnFocusLoss === true).catch(err => {
+        console.error('Failed to sync lockOnFocusLoss setting:', err);
+      });
+    }
+  }, [backend, settings.lockOnFocusLoss]);
+
+  // Sync lockOnSystemLock setting to backend
+  useEffect(() => {
+    if (backend) {
+      backend.setLockOnSystemLock(settings.lockOnSystemLock !== false).catch(err => {
+        console.error('Failed to sync lockOnSystemLock setting:', err);
+      });
+    }
+  }, [backend, settings.lockOnSystemLock]);
 
   // Listen for vault events in Tauri
   useEffect(() => {
@@ -540,14 +571,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         });
         await refreshEntries();
       } catch (e) {
-        addToast({ message: `Failed to update: ${e}`, type: 'error' });
+        addToast({ message: getTranslation(settings.language, 'toast.update_failed', { err: String(e) }), type: 'error' });
       }
     } else {
       setEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...entry, updatedAt: new Date().toISOString() } : e)));
       setDecryptedCache((prev) => ({ ...prev, [entry.id]: { ...entry, updatedAt: new Date().toISOString() } }));
     }
     setSelectedEntry((prev) => (prev?.id === entry.id ? { ...entry, updatedAt: new Date().toISOString() } : prev));
-  }, [backend, refreshEntries]);
+  }, [backend, refreshEntries, settings.language]);
 
   const addEntry = useCallback(async (entry: PasswordEntry) => {
     if (backend) {
@@ -584,15 +615,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           attachments: entry.newAttachments,
         });
         await refreshEntries();
-        addToast({ message: 'Entry created', type: 'success' });
+        addToast({ message: getTranslation(settings.language, 'toast.entry_created'), type: 'success' });
       } catch (e) {
-        addToast({ message: `Failed to add: ${e}`, type: 'error' });
+        addToast({ message: getTranslation(settings.language, 'toast.add_failed', { err: String(e) }), type: 'error' });
       }
     } else {
       setEntries((prev) => [entry, ...prev]);
       setSelectedEntry(entry);
     }
-  }, [backend, refreshEntries]);
+  }, [backend, refreshEntries, settings.language]);
 
   const deleteEntry = useCallback(async (id: string) => {
     if (backend) {
@@ -604,9 +635,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           return next;
         });
         await refreshEntries();
-        addToast({ message: 'Moved to trash', type: 'info' });
+        addToast({ message: getTranslation(settings.language, 'toast.moved_to_trash'), type: 'info' });
       } catch (e) {
-        addToast({ message: `Failed to delete: ${e}`, type: 'error' });
+        addToast({ message: getTranslation(settings.language, 'toast.delete_failed', { err: String(e) }), type: 'error' });
       }
     } else {
       setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -794,9 +825,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          addToast({ message: `Updated ${ids.length} entries`, type: 'info' });
+          addToast({ message: getTranslation(settings.language, 'toast.bulk_updated', { count: ids.length }), type: 'info' });
         } catch (e) {
-          addToast({ message: `Bulk update failed: ${e}`, type: 'error' });
+          addToast({ message: getTranslation(settings.language, 'toast.action_failed', { err: String(e) }), type: 'error' });
         }
       } else {
         setEntries((prev) =>
