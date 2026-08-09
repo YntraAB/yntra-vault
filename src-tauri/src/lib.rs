@@ -2,7 +2,9 @@ mod commands;
 
 use commands::AppState;
 use std::sync::Mutex;
+#[cfg(not(mobile))]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(not(mobile))]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::{Manager, Emitter};
 
@@ -11,7 +13,7 @@ pub fn run() {
     // Disable core dumps and debugger attachment at process startup
     yntra_vault_core::crypto::prevent_core_dumps();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -20,8 +22,11 @@ pub fn run() {
         .manage(AppState {
             vault: Mutex::new(None),
             minimize_to_tray: std::sync::atomic::AtomicBool::new(true),
-        })
-        .on_window_event(|window, event| {
+        });
+
+    #[cfg(not(mobile))]
+    {
+        builder = builder.on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let state = app.state::<AppState>();
@@ -40,7 +45,10 @@ pub fn run() {
                     let _ = window.emit("vault-locked", ());
                 }
             }
-        })
+        });
+    }
+
+    builder
         .invoke_handler(tauri::generate_handler![
             // Vault
             commands::create_vault,
@@ -124,58 +132,73 @@ pub fn run() {
             commands::parse_import_file,
             commands::parse_import_content,
             commands::import_entries,
-            // Clipboard Defense
+            // Clipboard Defense & Native Zero-Disclosure IPC
             commands::copy_to_clipboard,
             commands::clear_clipboard,
+            commands::copy_entry_password,
+            commands::copy_entry_username,
+            commands::copy_entry_totp,
+            commands::create_vault_bytes,
+            commands::open_vault_bytes,
+            commands::change_master_password_bytes,
+            commands::autotype_entry_password,
+            commands::autotype_entry_smart,
+            commands::verify_biometric_2fa,
+            commands::get_installed_apps,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
 
-            // Setup System Tray Menu & Icon
-            let quit_i = MenuItem::with_id(app, "quit", "Close", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
+            #[cfg(not(mobile))]
+            {
+                // Setup System Tray Menu & Icon on desktop platforms
+                if let Ok(quit_i) = MenuItem::with_id(app, "quit", "Close", true, None::<&str>) {
+                    if let Ok(show_i) = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>) {
+                        if let Ok(menu) = Menu::with_items(app, &[&show_i, &quit_i]) {
+                            let _ = TrayIconBuilder::new()
+                                .icon(app.default_window_icon().unwrap().clone())
+                                .menu(&menu)
+                                .show_menu_on_left_click(false)
+                                .on_menu_event(|app, event| {
+                                    match event.id.as_ref() {
+                                        "quit" => {
+                                            app.exit(0);
+                                        }
+                                        "show" => {
+                                            if let Some(window) = app.get_webview_window("main") {
+                                                let _ = window.show();
+                                                let _ = window.set_focus();
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                })
+                                .on_tray_icon_event(|tray, event| {
+                                    if let TrayIconEvent::Click { button, button_state, .. } = event {
+                                        if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                                            let app = tray.app_handle();
+                                            if let Some(window) = app.get_webview_window("main") {
+                                                if window.is_visible().unwrap_or(false) {
+                                                    let _ = window.hide();
+                                                } else {
+                                                    let _ = window.show();
+                                                    let _ = window.set_focus();
+                                                }
+                                            }
+                                        }
+                                    }
+                                })
+                                .build(app);
                         }
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        _ => {}
                     }
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button, button_state, .. } = event {
-                        if button == MouseButton::Left && button_state == MouseButtonState::Up {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                if window.is_visible().unwrap_or(false) {
-                                    let _ = window.hide();
-                                } else {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                }
-                            }
-                        }
-                    }
-                })
-                .build(app)?;
+                }
 
-            // Conditionally show main window based on launch argument
-            let is_minimized = std::env::args().any(|arg| arg == "--minimized");
-            if !is_minimized {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
+                // Conditionally show main window based on launch argument
+                let is_minimized = std::env::args().any(|arg| arg == "--minimized");
+                if !is_minimized {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                    }
                 }
             }
 
@@ -204,3 +227,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Yntra Vault");
 }
+

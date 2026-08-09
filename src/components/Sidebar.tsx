@@ -135,7 +135,7 @@ export default function Sidebar({ onResizeStart }: SidebarProps) {
 
   return (
     <aside
-      className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+      className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
       style={{ width: 'var(--sidebar-width)' }}
     >
       {/* Nav items */}

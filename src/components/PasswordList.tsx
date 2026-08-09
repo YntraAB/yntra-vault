@@ -249,11 +249,11 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
 
   return (
     <div
-      className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+      className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
       style={{ width: 'var(--passwordlist-width)' }}
     >
-      {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3">
+      {/* Desktop Header */}
+      <div className="hidden md:flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3">
         <h1 className="text-[14px] font-semibold text-[var(--text-primary)]">
           {headerTitle}
         </h1>
@@ -264,8 +264,8 @@ export default function PasswordList({ onResizeStart }: PasswordListProps) {
         </span>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex shrink-0 flex-col gap-2 p-2">
+      {/* Desktop Toolbar */}
+      <div className="hidden md:flex shrink-0 flex-col gap-2 p-2">
         {/* Search */}
         <div className="flex h-8 items-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 transition-colors focus-within:border-[var(--border-focus)]">
           <Search size={14} className="shrink-0 text-[var(--text-tertiary)]" />
@@ -460,22 +460,42 @@ function ListItem({
     .map((t) => tags.find((tag) => tag.name === t)?.color)
     .filter(Boolean) as string[];
 
-  let itemHeightClass = 'h-12';
+  let itemHeightClass = 'h-12 py-2';
   let faviconSizeClass = 'h-7 w-7';
   let titleTextClass = 'text-[14px]';
   let subTextClass = 'text-[12px]';
 
   if (density === 'compact') {
-    itemHeightClass = 'h-9.5 py-1';
+    itemHeightClass = 'h-10 py-1';
     faviconSizeClass = 'h-6 w-6';
     titleTextClass = 'text-[13px]';
     subTextClass = 'text-[11px]';
   } else if (density === 'comfortable') {
-    itemHeightClass = 'h-14 py-2';
+    itemHeightClass = 'h-14 py-2.5';
     faviconSizeClass = 'h-8 w-8';
     titleTextClass = 'text-[15px]';
     subTextClass = 'text-[13px]';
   }
+
+  // Long press timer for mobile touch viewports
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    longPressTimerRef.current = setTimeout(() => {
+      onContextMenu({
+        preventDefault: () => {},
+        stopPropagation: () => {},
+        clientX: e.touches[0].clientX,
+        clientY: e.touches[0].clientY,
+      } as any);
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+  };
 
   return (
     <motion.button
@@ -484,10 +504,13 @@ function ListItem({
       transition={{ duration: 0.1 }}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={`group flex ${itemHeightClass} w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3 text-left transition-all ${
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchEnd}
+      className={`group flex ${itemHeightClass} w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3.5 text-left transition-all active:bg-[var(--bg-hover)] ${
         selected
-          ? 'border-l-2 border-l-[var(--text-primary)] bg-[var(--bg-active)]'
-          : 'border-l-2 border-l-transparent hover:bg-[var(--bg-hover)]'
+          ? 'border-l-3 border-l-[var(--text-primary)] bg-[var(--bg-active)]'
+          : 'border-l-3 border-l-transparent hover:bg-[var(--bg-hover)]'
       }`}
     >
       {/* Favicon */}
@@ -507,7 +530,7 @@ function ListItem({
         {(() => {
           if (entry.username) {
             return (
-              <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)]`}>
+              <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
                 {entry.username}
               </span>
             );
@@ -519,23 +542,19 @@ function ListItem({
               const local = text.slice(0, atIndex);
               const domain = text.slice(atIndex);
               return (
-                <span className={`flex min-w-0 ${subTextClass} leading-tight text-[var(--text-secondary)]`}>
+                <span className={`flex min-w-0 ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
                   <span className="truncate">{local}</span>
                   <span className="shrink-0">{domain}</span>
                 </span>
               );
             }
             return (
-              <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)]`}>
+              <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
                 {text}
               </span>
             );
           }
-          return (
-            <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)]`}>
-              {''}
-            </span>
-          );
+          return null;
         })()}
       </div>
 
@@ -589,6 +608,7 @@ function ListItem({
     </motion.button>
   );
 }
+
 
 
 

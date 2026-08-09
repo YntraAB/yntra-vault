@@ -100,10 +100,6 @@ export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
     return null;
   }
 
-  if (status.type === 'Checking' && !compact) {
-    return null;
-  }
-
   if (compact) {
     return (
       <ActionTooltip content={config.tooltip}>

@@ -75,6 +75,27 @@ export function getDomain(url: string): string | null {
   }
 }
 
+export function deriveTitle(title: string, url?: string, email?: string, username?: string): string {
+  if (title && title.trim().length > 0) {
+    return title.trim();
+  }
+  const domain = getDomain(url || '');
+  if (domain) {
+    const parts = domain.split('.');
+    const tldList = ['com', 'org', 'net', 'io', 'co', 'uk', 'cz', 'de', 'fr', 'app', 'dev', 'ai', 'me', 'edu', 'gov'];
+    const nonTldParts = parts.filter(p => !tldList.includes(p));
+    const mainName = nonTldParts[nonTldParts.length - 1] || parts[0] || domain;
+    return mainName.charAt(0).toUpperCase() + mainName.slice(1);
+  }
+  if (email && email.trim().length > 0) {
+    return email.trim();
+  }
+  if (username && username.trim().length > 0) {
+    return username.trim();
+  }
+  return 'New Entry';
+}
+
 interface MiniCustomField {
   id: string;
   name: string;
@@ -96,14 +117,26 @@ export function getFieldLayout(customFields: MiniCustomField[] = [], activeStand
   
   return allActive;
 }
-export async function openExternalUrl(url: string): Promise<void> {
-  if (!url) return;
-  const formatted = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+export async function openExternalUrl(target: string): Promise<void> {
+  if (!target || !target.trim()) return;
+  const cleanTarget = target.trim();
+
+  const isCustomUriOrPath = /^[a-z][a-z0-9+.-]*:\/\//i.test(cleanTarget) ||
+    /^[a-zA-Z]:[\\\/]/.test(cleanTarget) ||
+    cleanTarget.startsWith('/') ||
+    cleanTarget.startsWith('\\\\');
+
+  const formatted = isCustomUriOrPath
+    ? cleanTarget
+    : (/^https?:\/\//i.test(cleanTarget) ? cleanTarget : `https://${cleanTarget}`);
+
   try {
     const { open } = await import('@tauri-apps/plugin-shell');
     await open(formatted);
   } catch {
-    window.open(formatted, '_blank', 'noopener,noreferrer');
+    if (!isCustomUriOrPath || /^https?:\/\//i.test(formatted)) {
+      window.open(formatted, '_blank', 'noopener,noreferrer');
+    }
   }
 }
 

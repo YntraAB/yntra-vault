@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showTagCounts: true,
   entrySortOrder: 'updated',
   keybinds: DEFAULT_KEYBINDS,
+  forceMobileView: false,
 };
 
 // ─── Conversion helpers (Rust types ↔ frontend types) ───────────────────
@@ -150,7 +151,7 @@ interface AppStateContextType {
   setIsLocked: (locked: boolean) => void;
   toggleFavorite: (id: string) => void;
   togglePin: (id: string) => void;
-  selectEntryById: (id: string) => void;
+  selectEntryById: (id: string | null) => void;
   addTag: (tag: Tag) => void;
   updateTag: (id: string, updates: Partial<Tag>) => void;
   removeTag: (id: string) => void;
@@ -281,6 +282,24 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     };
   }, [addToast]);
 
+  // Purge sensitive state from JS memory when vault is locked (V8 Heap Hygiene)
+  useEffect(() => {
+    if (isLocked) {
+      if (typeof document !== 'undefined' && document.activeElement) {
+        try {
+          (document.activeElement as HTMLElement).blur();
+        } catch {}
+      }
+      setEntries([]);
+      setSelectedEntry(null);
+      setSelectedEntryIds([]);
+      setDecryptedCache({});
+      setSearchTerm('');
+      setIsEntryModalOpen(false);
+      setSettingsOpen(false);
+    }
+  }, [isLocked]);
+
   // Load entries from backend when vault is opened
   const refreshEntries = useCallback(async () => {
     if (!backend || !currentVault) return;
@@ -366,7 +385,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [backend, currentVault, isLocked, refreshEntries, refreshTags, settings.disableSkeletonDelays]);
 
   // Fetch full entry details when selecting (Tauri mode)
-  const selectEntryById = useCallback(async (id: string) => {
+  const selectEntryById = useCallback(async (id: string | null) => {
+    if (!id) {
+      setSelectedEntry(null);
+      return;
+    }
+
     // Check if details are already in the cache to avoid displaying skeleton loader repeatedly
     if (decryptedCache[id]) {
       setSelectedEntry(decryptedCache[id]);

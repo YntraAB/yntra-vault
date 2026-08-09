@@ -342,6 +342,7 @@ export interface YntraVaultBackend {
   // Vault File Helper
   checkVaultFileExists(path: string): Promise<boolean>;
   showInExplorer(path: string): Promise<void>;
+  getInstalledApps(): Promise<import('@/types').InstalledApp[]>;
 
   // Advanced features
   autotype(text: string, charDelayMs: number, settleDelayMs: number): Promise<void>;
@@ -387,6 +388,17 @@ export interface YntraVaultBackend {
   // Clipboard Defense
   copyToClipboard(text: string, isSensitive?: boolean, clearAfterSecs?: number): Promise<void>;
   clearClipboard(): Promise<void>;
+
+  // Zero-Disclosure Native Handle IPC & Binary Secret Transport
+  copyEntryPassword(entryId: string, clearAfterSecs?: number): Promise<void>;
+  copyEntryUsername(entryId: string): Promise<void>;
+  copyEntryTotp(entryId: string, clearAfterSecs?: number): Promise<void>;
+  createVaultBytes(name: string, passwordBytes: Uint8Array | number[], path: string, keyFilePath?: string): Promise<VaultInfo>;
+  openVaultBytes(path: string, passwordBytes: Uint8Array | number[], keyFilePath?: string): Promise<VaultInfo>;
+  changeMasterPasswordBytes(currentBytes: Uint8Array | number[], newPasswordBytes: Uint8Array | number[], currentKeyFile?: string, newKeyFile?: string): Promise<void>;
+  autotypeEntryPassword(entryId: string, charDelayMs?: number, settleDelayMs?: number): Promise<void>;
+  autotypeEntrySmart(entryId: string, launchBrowser?: boolean, charDelayMs?: number, fieldDelayMs?: number): Promise<void>;
+  verifyBiometric2Fa(prompt?: string): Promise<void>;
 }
 
 // ─── Backend Detection & Factory ────────────────────────────────────────

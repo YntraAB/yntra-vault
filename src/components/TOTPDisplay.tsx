@@ -10,7 +10,7 @@ import { useTotp } from '../lib/useBackend';
 import { Copy, Check } from 'lucide-react';
 import { ActionTooltip } from './ui/tooltip';
 
-import { getBackend } from '../lib/backend';
+import { getBackend, isTauri } from '../lib/backend';
 
 interface TOTPDisplayProps {
   secret: string;
@@ -38,10 +38,16 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
 
   const handleCopy = async () => {
     try {
-      const backend = await getBackend();
-      await backend.copyToClipboard(code.code, true, 30);
+      if (isTauri()) {
+        const backend = await getBackend();
+        await backend.copyToClipboard(code.code, true, 30);
+      } else {
+        await navigator.clipboard.writeText(code.code);
+      }
     } catch {
-      await navigator.clipboard.writeText(code.code).catch(() => {});
+      if (!isTauri()) {
+        await navigator.clipboard.writeText(code.code).catch(() => {});
+      }
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

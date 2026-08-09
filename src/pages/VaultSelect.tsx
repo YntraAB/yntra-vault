@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Database, Plus, Download, Clock, AlertTriangle, Trash2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import CreateVaultModal from '@/components/CreateVaultModal';
@@ -11,46 +11,66 @@ import { ActionTooltip } from '@/components/ui/tooltip';
 
 export default function VaultSelect() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { setCurrentVault, setIsLocked } = useAppState();
   const [showCreate, setShowCreate] = useState(false);
   const [recentVaults, setRecentVaults] = useState<Vault[]>([]);
   const [missingVaults, setMissingVaults] = useState<Set<string>>(new Set());
 
-  // Load recent vaults from localStorage
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
-      setRecentVaults(saved);
-    } catch {
-      setRecentVaults([]);
-    }
-  }, []);
+  const manualSelect = location.state?.manualSelect === true;
 
-  // Check which vault files exist
+  // Load recent vaults and auto-select most recent non-deleted vault
   useEffect(() => {
-    const checkFiles = async () => {
-      if (!isTauri() || recentVaults.length === 0) return;
+    const initVaults = async () => {
+      let saved: Vault[] = [];
       try {
-        const backend = await getBackend();
-        const missing = new Set<string>();
-        for (const vault of recentVaults) {
-          try {
-            const fileExists = await backend.checkVaultFileExists(vault.path);
-            if (!fileExists) {
+        saved = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+      } catch {
+        saved = [];
+      }
+
+      setRecentVaults(saved);
+      if (saved.length === 0) return;
+
+      if (isTauri()) {
+        try {
+          const backend = await getBackend();
+          const missing = new Set<string>();
+          const validVaults: Vault[] = [];
+
+          for (const vault of saved) {
+            try {
+              const fileExists = await backend.checkVaultFileExists(vault.path);
+              if (fileExists) {
+                validVaults.push(vault);
+              } else {
+                missing.add(vault.id);
+              }
+            } catch {
               missing.add(vault.id);
             }
-          } catch {
-            missing.add(vault.id);
           }
+
+          setMissingVaults(missing);
+
+          if (!manualSelect && validVaults.length > 0) {
+            setCurrentVault(validVaults[0]);
+            setIsLocked(true);
+            navigate('/login', { replace: true });
+          }
+        } catch (e) {
+          console.error('File check error:', e);
         }
-        setMissingVaults(missing);
-      } catch (e) {
-        console.error('File check failed:', e);
+      } else if (!manualSelect && saved.length > 0) {
+        setCurrentVault(saved[0]);
+        setIsLocked(true);
+        navigate('/login', { replace: true });
       }
     };
-    checkFiles();
-  }, [recentVaults]);
+
+    initVaults();
+  }, []);
 
   const handleSelect = (vault: Vault) => {
     setCurrentVault(vault);
@@ -97,9 +117,9 @@ export default function VaultSelect() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex h-screen w-screen items-center justify-center bg-[var(--bg-base)]"
+      className="flex h-dvh w-dvw items-center justify-center bg-[var(--bg-base)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] overflow-y-auto select-none"
     >
-      <div className="w-[420px] px-6">
+      <div className="w-full max-w-[420px] py-6">
         {/* Header */}
         <div className="flex flex-col items-center gap-3">
           <img

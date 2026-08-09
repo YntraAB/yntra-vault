@@ -13,6 +13,7 @@ import { isTauri } from '@/lib/backend';
 import { useTranslation } from '@/contexts/LanguageContext';
 import type { Vault } from '@/types';
 import { ActionTooltip } from './ui/tooltip';
+import SecureSecretInput, { type SecureSecretInputRef } from './SecureSecretInput';
 
 interface CreateVaultModalProps {
   open: boolean;
@@ -28,6 +29,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const passInputRef = useRef<SecureSecretInputRef>(null);
 
   // Key File state
   const [useKeyFile, setUseKeyFile] = useState(false);
@@ -134,11 +136,10 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
     }
   }, [name, generateNewKeyFile]);
 
-  const validate = (checkPath: string): string | null => {
+  const validate = (checkPath: string, passLength: number): string | null => {
     if (name.trim().length < 2) return 'Vault name must be at least 2 characters';
     if (!checkPath.trim()) return 'Please choose a file location';
-    if (password.length < 12) return 'Master password must be at least 12 characters';
-    if (password !== confirmPassword) return 'Passwords do not match';
+    if (passLength < 12) return 'Master password must be at least 12 characters';
     if (useKeyFile && !keyFilePath.trim()) return 'Please choose or specify a Key File location';
     return null;
   };
@@ -148,6 +149,8 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
     setError(null);
 
     let targetPath = path.trim();
+    const secretBytes = passInputRef.current?.getSecretBytes();
+    const passBytes = secretBytes && secretBytes.length > 0 ? secretBytes : new TextEncoder().encode(password);
 
     // If in Tauri and the path is relative or not explicitly modified by the user,
     // force the browse dialog to open so they choose a real location.
@@ -173,7 +176,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
       }
     }
 
-    const validationError = validate(targetPath);
+    const validationError = validate(targetPath, passBytes.length);
     if (validationError) {
       setError(validationError);
       return;
@@ -191,9 +194,9 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
           await backend.generateKeyFile(keyFilePath.trim());
         }
 
-        info = await backend.createVault(
+        info = await backend.createVaultBytes(
           name.trim(),
-          password,
+          passBytes,
           targetPath,
           useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined,
         );
@@ -202,9 +205,16 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
       }
 
       // Save to recent vaults using the real ID
+      const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
+      if (kf) {
+        const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
+        savedKeyFiles[info.path] = kf;
+        localStorage.setItem('yntra-vault-keyfiles', JSON.stringify(savedKeyFiles));
+      }
+
       const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
       const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
-      const newVault = { id: info.id, name: info.name, path: info.path };
+      const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
       localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
       onCreated(newVault);
@@ -214,12 +224,15 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
       setConfirmPassword('');
       setName('');
       setPath('');
-      setPathModified(false);
-      setUseKeyFile(false);
       setKeyFilePath('');
+      setUseKeyFile(false);
+      setGenerateNewKeyFile(true);
+      onClose();
     } catch (err: any) {
       setError(err?.toString() || 'Failed to create vault');
     } finally {
+      passBytes.fill(0);
+      passInputRef.current?.clearSecretBytes();
       setLoading(false);
     }
   };
@@ -231,7 +244,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
           onClick={onClose}
         >
           <motion.div
@@ -239,7 +252,7 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.96, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="w-[440px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+            className="w-full max-w-[440px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -305,12 +318,11 @@ export default function CreateVaultModal({ open, onClose, onCreated }: CreateVau
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.master_password')}</label>
                 <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                  <SecureSecretInput
+                    ref={passInputRef}
+                    show={showPassword}
                     placeholder={t('cmp.min_chars')}
-                    className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 pr-9 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                    className="w-full pr-9"
                   />
                   <ActionTooltip content={showPassword ? t('login.hide_password') : t('login.show_password')}>
                     <button

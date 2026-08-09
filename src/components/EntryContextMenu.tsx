@@ -44,19 +44,21 @@ export default function EntryContextMenu({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside
+  // Close on click/tap outside
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: Event) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
     const timeout = setTimeout(() => {
+      document.addEventListener('pointerdown', handler);
       document.addEventListener('mousedown', handler);
     }, 0);
     return () => {
       clearTimeout(timeout);
+      document.removeEventListener('pointerdown', handler);
       document.removeEventListener('mousedown', handler);
     };
   }, [open, onClose]);
@@ -72,6 +74,14 @@ export default function EntryContextMenu({
   }, [open, onClose]);
 
   if (!entry) return null;
+
+  const canAutotype = Boolean(
+    (entry.username && entry.username.trim()) ||
+    (entry.email && entry.email.trim()) ||
+    (entry.password && entry.password.trim() && entry.password !== '••••••••') ||
+    (entry.totpSecret && entry.totpSecret !== 'has-totp') ||
+    (entry.customFields && entry.customFields.some(f => f.name !== '_field_order' && f.value && f.value.trim()))
+  );
 
   // Adjust position to keep menu in viewport
   const adjustedPosition = () => {
@@ -134,11 +144,18 @@ export default function EntryContextMenu({
               </button>
 
               <button
+                disabled={!canAutotype}
                 onClick={() => {
+                  if (!canAutotype) return;
                   onAutotype(entry);
                   onClose();
                 }}
-                className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] transition-colors ${
+                  canAutotype
+                    ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer'
+                    : 'text-[var(--text-tertiary)] opacity-40 cursor-not-allowed'
+                }`}
+                title={canAutotype ? undefined : t('context_menu.autotype_disabled_tooltip')}
               >
                 <Zap size={13} />
                 {t('menu.autotype')}

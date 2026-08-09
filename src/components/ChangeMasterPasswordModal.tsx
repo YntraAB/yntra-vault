@@ -2,7 +2,7 @@
  * ChangeMasterPasswordModal — Secure master password change
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, ShieldCheck, KeyRound, FolderOpen } from 'lucide-react';
 import { PasswordStrength } from './PasswordStrength';
@@ -10,6 +10,7 @@ import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { isTauri, getBackend } from '@/lib/backend';
 import { ActionTooltip } from './ui/tooltip';
+import SecureSecretInput, { type SecureSecretInputRef } from './SecureSecretInput';
 
 interface ChangeMasterPasswordModalProps {
   open: boolean;
@@ -23,6 +24,8 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
+  const curInputRef = useRef<SecureSecretInputRef>(null);
+  const newInputRef = useRef<SecureSecretInputRef>(null);
 
   // Key File states
   const [useCurrentKeyFile, setUseCurrentKeyFile] = useState(false);
@@ -45,6 +48,13 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
       setUseNewKeyFile(false);
       setNewKeyFile('');
     }
+    return () => {
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setCurrentKeyFile('');
+      setNewKeyFile('');
+    };
   }, [open]);
 
   useEffect(() => {
@@ -76,28 +86,36 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
     e.preventDefault();
     setError(null);
 
-    if (!currentPassword) { setError('Enter your current password'); return; }
+    const curSecret = curInputRef.current?.getSecretBytes();
+    const newSecret = newInputRef.current?.getSecretBytes();
+    const curBytes = curSecret && curSecret.length > 0 ? curSecret : new TextEncoder().encode(currentPassword);
+    const newBytes = newSecret && newSecret.length > 0 ? newSecret : new TextEncoder().encode(newPassword);
+
+    if (curBytes.length === 0) { setError('Enter your current password'); return; }
     if (useCurrentKeyFile && !currentKeyFile.trim()) { setError('Please select current Key File'); return; }
-    if (newPassword.length < 12) { setError('New password must be at least 12 characters'); return; }
-    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
+    if (newBytes.length < 12) { setError('New password must be at least 12 characters'); return; }
     if (useNewKeyFile && !newKeyFile.trim()) { setError('Please select new Key File location'); return; }
 
     setLoading(true);
     try {
       if (isTauri()) {
         const backend = await getBackend();
-        await backend.changeMasterPassword(
-          currentPassword,
-          newPassword,
+        await backend.changeMasterPasswordBytes(
+          curBytes,
+          newBytes,
           useCurrentKeyFile && currentKeyFile.trim() ? currentKeyFile.trim() : undefined,
           useNewKeyFile && newKeyFile.trim() ? newKeyFile.trim() : undefined,
         );
       }
-      addToast({ message: 'Master password changed successfully', type: 'success' });
+      addToast({ message: t('toast.master_password_changed'), type: 'success' });
       onClose();
     } catch (err: any) {
       setError(err?.toString() || 'Failed to change password');
     } finally {
+      curBytes.fill(0);
+      newBytes.fill(0);
+      curInputRef.current?.clearSecretBytes();
+      newInputRef.current?.clearSecretBytes();
       setLoading(false);
       setCurrentPassword('');
       setNewPassword('');
@@ -116,7 +134,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
           onClick={onClose}
         >
           <motion.div
@@ -124,7 +142,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.96, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="w-[420px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+            className="w-full max-w-[420px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
@@ -146,6 +164,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                 onChange={setCurrentPassword}
                 show={showPasswords}
                 placeholder={t('cmp.current_pass_ph')}
+                inputRef={curInputRef}
               />
 
               {/* Current Key File */}
@@ -193,6 +212,7 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
                 onChange={setNewPassword}
                 show={showPasswords}
                 placeholder={t('cmp.min_chars')}
+                inputRef={newInputRef}
               />
               {newPassword && <PasswordStrength password={newPassword} compact />}
 
@@ -272,22 +292,33 @@ export default function ChangeMasterPasswordModal({ open, onClose }: ChangeMaste
   );
 }
 
-function PasswordField({ label, value, onChange, show, placeholder, mismatch }: {
+function PasswordField({ label, value, onChange, show, placeholder, mismatch, inputRef }: {
   label: string; value: string; onChange: (v: string) => void;
   show: boolean; placeholder: string; mismatch?: boolean;
+  inputRef?: React.RefObject<SecureSecretInputRef | null>;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-[12px] font-medium text-[var(--text-secondary)]">{label}</label>
-      <input
-        type={show ? 'text' : 'password'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
-          mismatch ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
-        }`}
-      />
+      {inputRef ? (
+        <SecureSecretInput
+          ref={inputRef}
+          show={show}
+          placeholder={placeholder}
+          mismatch={mismatch}
+          className="w-full"
+        />
+      ) : (
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+            mismatch ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
+          }`}
+        />
+      )}
       {mismatch && <span className="text-[11px] text-[var(--destructive)]">Passwords do not match</span>}
     </div>
   );

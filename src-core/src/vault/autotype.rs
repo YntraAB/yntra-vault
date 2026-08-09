@@ -16,7 +16,52 @@ pub fn autotype_text(text: &str) -> crate::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
+#[cfg(target_os = "windows")]
+fn is_target_window_active(target_hwnd: windows::Win32::Foundation::HWND) -> bool {
+    if target_hwnd.is_invalid() {
+        return true;
+    }
+    unsafe {
+        let current = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+        current == target_hwnd
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn check_target_window_active(target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
+    if !is_target_window_active(target_hwnd) {
+        return Err(crate::error::VaultError::AutoTypeError(
+            "Target window lost active focus during autotype execution".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn safe_sleep_with_target_guard(duration_ms: u64, target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
+    let mut remaining = duration_ms;
+    while remaining > 0 {
+        check_target_window_active(target_hwnd)?;
+        let step = std::cmp::min(remaining, 25);
+        std::thread::sleep(std::time::Duration::from_millis(step));
+        remaining -= step;
+    }
+    check_target_window_active(target_hwnd)?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64, settle_delay_ms: u64) -> crate::Result<()> {
+    autotype_text_with_delay_guarded(text, char_delay_ms, settle_delay_ms, windows::Win32::Foundation::HWND::default())
+}
+
+#[cfg(target_os = "windows")]
+pub fn autotype_text_with_delay_guarded(
+    text: &str,
+    char_delay_ms: u64,
+    settle_delay_ms: u64,
+    target_hwnd: windows::Win32::Foundation::HWND,
+) -> crate::Result<()> {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
     if settle_delay_ms > 0 {
@@ -43,7 +88,7 @@ pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64, settle_delay_ms:
                         elapsed += 1;
                     }
                     // Settle delay: wait so the user has time to select/focus the input field
-                    std::thread::sleep(std::time::Duration::from_millis(settle_delay_ms));
+                    safe_sleep_with_target_guard(settle_delay_ms, target_hwnd)?;
                 }
             }
         }
@@ -56,6 +101,8 @@ pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64, settle_delay_ms:
     let utf16_chars: Vec<u16> = text.encode_utf16().collect();
 
     for &ch in &utf16_chars {
+        check_target_window_active(target_hwnd)?;
+
         let (vk, scan, flags) = if ch == 9 {
             (VK_TAB, 0u16, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))
         } else {
@@ -101,20 +148,21 @@ pub fn autotype_text_with_delay(text: &str, char_delay_ms: u64, settle_delay_ms:
             }
         }
 
-        // Configurable delay between characters
-        std::thread::sleep(std::time::Duration::from_millis(char_delay_ms));
+        // Configurable delay between characters with active window guard check
+        safe_sleep_with_target_guard(char_delay_ms, target_hwnd)?;
     }
 
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn send_shift_tab() -> crate::Result<()> {
+fn send_shift_tab_guarded(target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_SHIFT, VK_TAB
     };
 
     let send_single = |vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, scan: u16, flags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS| -> crate::Result<()> {
+        check_target_window_active(target_hwnd)?;
         let input = INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
@@ -138,31 +186,28 @@ fn send_shift_tab() -> crate::Result<()> {
         Ok(())
     };
 
-    // Press Shift down (VK_SHIFT = 0x10, scan code = 0x2A)
     send_single(VK_SHIFT, 0x2A, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Press Tab down (VK_TAB = 0x09, scan code = 0x0F)
     send_single(VK_TAB, 0x0F, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Release Tab up
     send_single(VK_TAB, 0x0F, KEYEVENTF_KEYUP)?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Release Shift up
     send_single(VK_SHIFT, 0x2A, KEYEVENTF_KEYUP)?;
 
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn send_ctrl_a_backspace() -> crate::Result<()> {
+fn send_ctrl_a_backspace_guarded(target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_BACK, VIRTUAL_KEY
     };
 
     let send_single = |vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, scan: u16, flags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS| -> crate::Result<()> {
+        check_target_window_active(target_hwnd)?;
         let input = INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
@@ -186,32 +231,28 @@ fn send_ctrl_a_backspace() -> crate::Result<()> {
         Ok(())
     };
 
-    // Press Ctrl down (VK_CONTROL = 0x11, scan code = 0x1D)
     send_single(VK_CONTROL, 0x1D, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Press 'A' down (VK_A = 0x41, scan code = 0x1E)
     send_single(VIRTUAL_KEY(0x41), 0x1E, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Release 'A' up
     send_single(VIRTUAL_KEY(0x41), 0x1E, KEYEVENTF_KEYUP)?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Release Ctrl up
     send_single(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP)?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
 
-    // Press Backspace (VK_BACK = 0x08, scan code = 0x0E)
     send_single(VK_BACK, 0x0E, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    safe_sleep_with_target_guard(15, target_hwnd)?;
     send_single(VK_BACK, 0x0E, KEYEVENTF_KEYUP)?;
 
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn send_enter() -> crate::Result<()> {
+fn send_enter_guarded(target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
+    check_target_window_active(target_hwnd)?;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_RETURN
     };
@@ -247,12 +288,13 @@ fn send_enter() -> crate::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn send_backspaces(count: usize) -> crate::Result<()> {
+fn send_backspaces_guarded(count: usize, target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_BACK
     };
 
     for _ in 0..count {
+        check_target_window_active(target_hwnd)?;
         let input_down = INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
@@ -280,7 +322,7 @@ fn send_backspaces(count: usize) -> crate::Result<()> {
         unsafe {
             let _ = SendInput(&[input_down, input_up], std::mem::size_of::<INPUT>() as i32);
         }
-        std::thread::sleep(std::time::Duration::from_millis(15));
+        safe_sleep_with_target_guard(15, target_hwnd)?;
     }
     Ok(())
 }
@@ -293,25 +335,155 @@ fn common_prefix_len(s1: &str, s2: &str) -> usize {
 }
 
 #[cfg(target_os = "windows")]
-fn autotype_correct_text(current: &str, target: &str, char_delay_ms: u64) -> crate::Result<()> {
+fn autotype_correct_text_guarded(current: &str, target: &str, char_delay_ms: u64, target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
     if current.is_empty() {
-        return autotype_text_with_delay(target, char_delay_ms, 0);
+        return autotype_text_with_delay_guarded(target, char_delay_ms, 0, target_hwnd);
     }
 
     let prefix_len = common_prefix_len(current, target);
     if prefix_len == 0 {
-        send_ctrl_a_backspace()?;
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        autotype_text_with_delay(target, char_delay_ms, 0)
+        send_ctrl_a_backspace_guarded(target_hwnd)?;
+        safe_sleep_with_target_guard(100, target_hwnd)?;
+        autotype_text_with_delay_guarded(target, char_delay_ms, 0, target_hwnd)
     } else {
         let backspaces_needed = current.chars().count() - prefix_len;
         if backspaces_needed > 0 {
-            send_backspaces(backspaces_needed)?;
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            send_backspaces_guarded(backspaces_needed, target_hwnd)?;
+            safe_sleep_with_target_guard(50, target_hwnd)?;
         }
         let remainder: String = target.chars().skip(prefix_len).collect();
-        autotype_text_with_delay(&remainder, char_delay_ms, 0)
+        autotype_text_with_delay_guarded(&remainder, char_delay_ms, 0, target_hwnd)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn try_set_element_value_via_uia(
+    focused: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+    text: &str,
+) -> bool {
+    use windows::core::{Interface, BSTR};
+    use windows::Win32::UI::Accessibility::{IUIAutomationValuePattern, UIA_ValuePatternId};
+
+    unsafe {
+        if let Ok(pattern_obj) = focused.GetCurrentPattern(UIA_ValuePatternId) {
+            if let Ok(val_pattern) = pattern_obj.cast::<IUIAutomationValuePattern>() {
+                let bstr = BSTR::from(text);
+                if val_pattern.SetValue(&bstr).is_ok() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn send_ctrl_v_guarded(target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VIRTUAL_KEY
+    };
+
+    let send_single = |vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, scan: u16, flags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS| -> crate::Result<()> {
+        check_target_window_active(target_hwnd)?;
+        let input = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: scan,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        unsafe {
+            let sent = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+            if sent != 1 {
+                return Err(crate::error::VaultError::EncryptionError(
+                    "Autotype failed to send key event".into(),
+                ));
+            }
+        }
+        Ok(())
+    };
+
+    send_single(VK_CONTROL, 0x1D, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
+    safe_sleep_with_target_guard(15, target_hwnd)?;
+
+    send_single(VIRTUAL_KEY(0x56), 0x2F, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0))?;
+    safe_sleep_with_target_guard(15, target_hwnd)?;
+
+    send_single(VIRTUAL_KEY(0x56), 0x2F, KEYEVENTF_KEYUP)?;
+    safe_sleep_with_target_guard(15, target_hwnd)?;
+
+    send_single(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP)?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn send_secure_paste_guarded(text: &str, target_hwnd: windows::Win32::Foundation::HWND) -> crate::Result<()> {
+    use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    check_target_window_active(target_hwnd)?;
+
+    let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let bytes_len = utf16.len() * std::mem::size_of::<u16>();
+
+    unsafe {
+        if OpenClipboard(target_hwnd).is_ok() {
+            let _ = EmptyClipboard();
+            if let Ok(h_mem) = GlobalAlloc(GMEM_MOVEABLE, bytes_len) {
+                let ptr = GlobalLock(h_mem) as *mut u16;
+                if !ptr.is_null() {
+                    std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+                    let _ = GlobalUnlock(h_mem);
+                    let _ = SetClipboardData(13u32, windows::Win32::Foundation::HANDLE(h_mem.0));
+                }
+            }
+            let _ = CloseClipboard();
+        }
+    }
+
+    // Send Ctrl+V key combination (keyloggers see Ctrl+V only, hiding raw password scan codes)
+    send_ctrl_v_guarded(target_hwnd)?;
+
+    // Immediate zeroization of clipboard after paste settling delay (50ms)
+    safe_sleep_with_target_guard(50, target_hwnd)?;
+
+    unsafe {
+        if OpenClipboard(target_hwnd).is_ok() {
+            let _ = EmptyClipboard();
+            let _ = CloseClipboard();
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn inject_secret_guarded(
+    focused: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+    text: &str,
+    target_hwnd: windows::Win32::Foundation::HWND,
+    char_delay_ms: u64,
+) -> crate::Result<()> {
+    check_target_window_active(target_hwnd)?;
+
+    // Primary Defense: Direct UIA COM Property Injection (0 Keystrokes, Immune to WH_KEYBOARD_LL)
+    if try_set_element_value_via_uia(focused, text) {
+        return Ok(());
+    }
+
+    // Secondary Defense: Block Paste with Instant Zeroization (Keyloggers see Ctrl+V only)
+    if send_secure_paste_guarded(text, target_hwnd).is_ok() {
+        return Ok(());
+    }
+
+    // Tertiary Fallback: Guarded Keystroke Typing
+    autotype_text_with_delay_guarded(text, char_delay_ms, 0, target_hwnd)
 }
 
 #[cfg(target_os = "windows")]
@@ -342,6 +514,142 @@ fn get_window_title(hwnd: windows::Win32::Foundation::HWND) -> String {
         String::new()
     }
 }
+
+#[cfg(target_os = "windows")]
+fn get_window_process_name(hwnd: windows::Win32::Foundation::HWND) -> String {
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    use windows::Win32::System::ProcessStatus::GetModuleBaseNameA;
+
+    if hwnd.is_invalid() {
+        return String::new();
+    }
+
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 {
+            return String::new();
+        }
+
+        let handle = match OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid) {
+            Ok(h) => h,
+            Err(_) => return String::new(),
+        };
+
+        let mut buf = [0u8; 260];
+        let len = GetModuleBaseNameA(handle, None, &mut buf);
+        let _ = windows::Win32::Foundation::CloseHandle(handle);
+
+        if len > 0 {
+            String::from_utf8_lossy(&buf[..len as usize]).to_lowercase()
+        } else {
+            String::new()
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_known_web_browser(proc_name: &str) -> bool {
+    let p = proc_name.to_lowercase();
+    p.contains("chrome")
+        || p.contains("msedge")
+        || p.contains("firefox")
+        || p.contains("brave")
+        || p.contains("opera")
+        || p.contains("vivaldi")
+        || p.contains("arc")
+        || p.contains("waterfox")
+        || p.contains("librewolf")
+        || p.contains("zen")
+        || p.contains("thorium")
+        || p.contains("floorp")
+        || p.contains("iexplore")
+}
+
+#[cfg(target_os = "windows")]
+fn is_verified_login_context(
+    hwnd: windows::Win32::Foundation::HWND,
+    title: &str,
+    target_domain_token: &str,
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation,
+) -> bool {
+    let title_lower = title.to_lowercase();
+    let proc_name = get_window_process_name(hwnd);
+    let is_browser = is_known_web_browser(&proc_name);
+
+    // 1. Basic UI check: Does window have an active password field or explicit login indicator?
+    let has_login_indicator = if let Ok(win_el) = unsafe { automation.ElementFromHandle(hwnd) } {
+        active_window_has_password_field(automation, &win_el)
+            || title_lower.contains("login")
+            || title_lower.contains("sign in")
+            || title_lower.contains("signin")
+            || title_lower.contains("log in")
+            || title_lower.contains("sign-in")
+            || title_lower.contains("log-in")
+            || title_lower.contains("auth")
+            || title_lower.contains("session")
+            || title_lower.contains("skapa konto")
+            || title_lower.contains("registrera")
+            || title_lower.contains("logga in")
+            || title_lower.contains("lösenord")
+    } else {
+        false
+    };
+
+    if !has_login_indicator {
+        return false;
+    }
+
+    // 2. Strict Domain & Process Executable Anti-Phishing Guard
+    if !target_domain_token.is_empty() {
+        if is_browser {
+            // Browser window MUST contain the verified domain token in its title bar snippet
+            // E.g., "Sign in to GitHub · GitHub - Google Chrome" contains "github" -> Verified.
+            // A phishing window titled "Sign In - Google Chrome" does NOT contain "github" -> Rejected!
+            if !title_lower.contains(target_domain_token) {
+                return false;
+            }
+        } else {
+            // Native Application window: Process name or window title MUST match domain token
+            // E.g., "discord.exe" matches "discord" -> Verified.
+            // Spoofed app "phish.exe" with title "Sign In - Google Chrome" -> Rejected!
+            if !proc_name.contains(target_domain_token) && !title_lower.contains(target_domain_token) {
+                return false;
+            }
+        }
+    } else if !is_browser {
+        // If no URL is provided AND process is not a recognized browser, require an explicit password field
+        if let Ok(win_el) = unsafe { automation.ElementFromHandle(hwnd) } {
+            if !active_window_has_password_field(automation, &win_el) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn poll_until_login_context_ready(
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation,
+    domain_token: &str,
+    max_timeout_ms: u64,
+) -> bool {
+    let steps = max_timeout_ms / 50;
+    for _ in 0..steps {
+        let hwnd = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        if !hwnd.is_invalid() {
+            let title = get_window_title(hwnd);
+            if is_verified_login_context(hwnd, &title, domain_token, automation) {
+                return true;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
 
 // ─── Semantic Language-Independent Link & Text Parsers ─────────────────
 
@@ -424,14 +732,17 @@ fn is_likely_login_text(text: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn is_search_or_chat_field(name: &str, class_name: &str, auto_id: &str) -> bool {
+fn is_non_login_input_field(name: &str, class_name: &str, auto_id: &str) -> bool {
     let n = name.to_lowercase();
     let c = class_name.to_lowercase();
     let i = auto_id.to_lowercase();
     
     let keywords = [
         "search", "sök", "find", "chat", "message", "reply", "comment", 
-        "prompt", "filter", "query", "ask", "fråga", "gpt", "copilot"
+        "prompt", "filter", "query", "ask", "fråga", "gpt", "copilot",
+        "newsletter", "subscribe", "coupon", "promo", "discount", "rabatt",
+        "prenumerera", "address", "street", "zip", "postcode", "city",
+        "cvv", "card", "subject", "feedback", "review"
     ];
     
     for kw in keywords {
@@ -442,87 +753,65 @@ fn is_search_or_chat_field(name: &str, class_name: &str, auto_id: &str) -> bool 
     false
 }
 
-// ─── Background URL Login-Link Resolver ─────────────────────────────────
-
 #[cfg(target_os = "windows")]
-fn find_login_url_in_html(html: &str, base: &reqwest::Url) -> Option<String> {
-    let mut search_idx = 0;
-    while let Some(a_start) = html[search_idx..].find("<a ") {
-        let absolute_a_start = search_idx + a_start;
-        let tag_end = match html[absolute_a_start..].find('>') {
-            Some(offset) => absolute_a_start + offset,
-            None => {
-                search_idx = absolute_a_start + 3;
-                continue;
-            }
-        };
-
-        let attrs = &html[absolute_a_start..tag_end];
-        
-        if let Some(href_offset) = attrs.find("href=") {
-            let val_start = absolute_a_start + href_offset + 5;
-            let quote = match html.as_bytes().get(val_start) {
-                Some(q) => *q,
-                None => break,
-            };
-            
-            let (link_start, link_end) = if quote == b'"' || quote == b'\'' {
-                let end = match html[val_start + 1..].find(quote as char) {
-                    Some(e) => e,
-                    None => break,
-                };
-                (val_start + 1, val_start + 1 + end)
-            } else {
-                let end = match html[val_start..].find(|c: char| c.is_whitespace() || c == '>') {
-                    Some(e) => e,
-                    None => break,
-                };
-                (val_start, val_start + end)
-            };
-
-            let raw_link = &html[link_start..link_end];
-            if is_likely_login_url(raw_link) {
-                if let Ok(resolved) = base.join(raw_link) {
-                    return Some(resolved.to_string());
-                }
-            }
-        }
-
-        search_idx = tag_end + 1;
+fn is_valid_username_field(
+    name: &str,
+    class_name: &str,
+    auto_id: &str,
+    has_co_located_password_field: bool,
+    is_password_field: bool,
+    is_totp_field: bool,
+) -> bool {
+    if is_password_field || is_totp_field {
+        return false;
     }
-    None
+
+    if is_non_login_input_field(name, class_name, auto_id) {
+        return false;
+    }
+
+    let n = name.to_lowercase();
+    let c = class_name.to_lowercase();
+    let i = auto_id.to_lowercase();
+
+    // 1. Explicit Positive Keyword Identifiers (High Confidence)
+    let username_keywords = [
+        "user", "username", "email", "e-mail", "mail", "login", "account",
+        "ident", "användar", "e-post", "epost", "usuario", "kullanıcı", "nom",
+        "identifier", "handle", "signin", "sign-in", "log-in"
+    ];
+
+    for kw in username_keywords {
+        if n.contains(kw) || c.contains(kw) || i.contains(kw) {
+            return true;
+        }
+    }
+
+    // 2. Structural Co-location Guard:
+    // If the active page/form explicitly contains a co-located password field,
+    // any non-search input on that form is accepted as the username input field.
+    if has_co_located_password_field {
+        return true;
+    }
+
+    false
 }
 
+// ─── Browser Automation Helpers ─────────────────────────────────────────
+
+
 #[cfg(target_os = "windows")]
-async fn resolve_login_url(base_url: &str) -> Option<String> {
-    let parsed_base = reqwest::Url::parse(base_url).ok()?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(1500))
-        .build()
-        .ok()?;
-
-    // 1. Try to fetch homepage HTML and parse login link
-    if let Ok(resp) = client.get(parsed_base.clone()).send().await {
-        if let Ok(html) = resp.text().await {
-            if let Some(link) = find_login_url_in_html(&html, &parsed_base) {
-                return Some(link);
-            }
-        }
+fn find_targeted_elements(
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation,
+    window_el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+    control_type_id: windows::Win32::UI::Accessibility::UIA_CONTROLTYPE_ID,
+) -> Option<windows::Win32::UI::Accessibility::IUIAutomationElementArray> {
+    use windows::Win32::UI::Accessibility::{TreeScope_Descendants, UIA_ControlTypePropertyId};
+    unsafe {
+        let var = windows::core::VARIANT::from(control_type_id.0);
+        let cond = automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &var).ok()?;
+        window_el.FindAll(TreeScope_Descendants, &cond).ok()
     }
-
-    // 2. Probe common paths directly
-    let common_paths = ["login", "signin", "log-in", "sign-in"];
-    for path in common_paths {
-        if let Ok(target) = parsed_base.join(path) {
-            if let Ok(resp) = client.get(target.clone()).send().await {
-                if resp.status().is_success() {
-                    return Some(target.to_string());
-                }
-            }
-        }
-    }
-
-    None
 }
 
 #[cfg(target_os = "windows")]
@@ -532,38 +821,22 @@ fn try_click_login_link(
 ) -> bool {
     use windows::core::Interface;
     use windows::Win32::UI::Accessibility::{
-        IUIAutomationElementArray, IUIAutomationInvokePattern, TreeScope_Descendants,
-        UIA_ButtonControlTypeId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
+        IUIAutomationInvokePattern, UIA_ButtonControlTypeId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
     };
 
-    let true_cond = match unsafe { automation.CreateTrueCondition() } {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    let elements: IUIAutomationElementArray = match unsafe {
-        window_el.FindAll(TreeScope_Descendants, &true_cond)
-    } {
-        Ok(el) => el,
-        Err(_) => return false,
-    };
-
-    let count = match unsafe { elements.Length() } {
-        Ok(c) => c,
-        Err(_) => 0,
-    };
-
-    for i in 0..count {
-        let el = match unsafe { elements.GetElement(i) } {
-            Ok(e) => e,
-            Err(_) => continue,
+    let check_array = |elements: windows::Win32::UI::Accessibility::IUIAutomationElementArray| -> bool {
+        let raw_count = match unsafe { elements.Length() } {
+            Ok(c) => c as usize,
+            Err(_) => 0,
         };
+        let count = std::cmp::min(raw_count, 35);
 
-        let control_id = unsafe { el.CurrentControlType() }
-            .map(|id| id.0)
-            .unwrap_or(0);
+        for i in 0..count {
+            let el = match unsafe { elements.GetElement(i as i32) } {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
 
-        if control_id == UIA_ButtonControlTypeId.0 || control_id == UIA_HyperlinkControlTypeId.0 {
             let name = unsafe { el.CurrentName() }
                 .map(|b| b.to_string())
                 .unwrap_or_default();
@@ -573,7 +846,6 @@ fn try_click_login_link(
                 .map(|id| id.to_string().to_lowercase())
                 .unwrap_or_default();
 
-            // Language-independent dynamic keyword checks across visible name, target href, or element ID
             let is_login_btn = is_likely_login_text(&name)
                 || is_likely_login_url(&href)
                 || auto_id.contains("login")
@@ -592,6 +864,19 @@ fn try_click_login_link(
                 }
             }
         }
+        false
+    };
+
+    if let Some(buttons) = find_targeted_elements(automation, window_el, UIA_ButtonControlTypeId) {
+        if check_array(buttons) {
+            return true;
+        }
+    }
+
+    if let Some(links) = find_targeted_elements(automation, window_el, UIA_HyperlinkControlTypeId) {
+        if check_array(links) {
+            return true;
+        }
     }
 
     false
@@ -602,51 +887,24 @@ fn try_focus_username_field(
     automation: &windows::Win32::UI::Accessibility::IUIAutomation,
     window_el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
 ) -> bool {
-    use windows::Win32::UI::Accessibility::{IUIAutomationElementArray, TreeScope_Descendants, UIA_EditControlTypeId};
+    use windows::Win32::UI::Accessibility::UIA_EditControlTypeId;
 
-    let true_cond = match unsafe { automation.CreateTrueCondition() } {
-        Ok(c) => c,
-        Err(_) => return false,
+    let elements = match find_targeted_elements(automation, window_el, UIA_EditControlTypeId) {
+        Some(el) => el,
+        None => return false,
     };
 
-    let elements: IUIAutomationElementArray = match unsafe {
-        window_el.FindAll(TreeScope_Descendants, &true_cond)
-    } {
-        Ok(el) => el,
-        Err(_) => return false,
-    };
-
-    let count = match unsafe { elements.Length() } {
-        Ok(c) => c,
+    let raw_count = match unsafe { elements.Length() } {
+        Ok(c) => c as usize,
         Err(_) => 0,
     };
+    let count = std::cmp::min(raw_count, 40);
 
     for i in 0..count {
-        let el = match unsafe { elements.GetElement(i) } {
+        let el = match unsafe { elements.GetElement(i as i32) } {
             Ok(e) => e,
             Err(_) => continue,
         };
-
-        let control_id = unsafe { el.CurrentControlType() }
-            .map(|id| id.0)
-            .unwrap_or(0);
-
-        let class_name = unsafe { el.CurrentClassName() }
-            .map(|b| b.to_string().to_lowercase())
-            .unwrap_or_default();
-
-        let control_type = unsafe { el.CurrentLocalizedControlType() }
-            .map(|b| b.to_string().to_lowercase())
-            .unwrap_or_default();
-
-        let is_edit = control_id == UIA_EditControlTypeId.0
-            || class_name.contains("edit")
-            || control_type.contains("edit")
-            || control_type.contains("text box");
-
-        if !is_edit {
-            continue;
-        }
 
         let is_pw = unsafe { el.CurrentIsPassword() }
             .map(|b| b.as_bool())
@@ -673,12 +931,15 @@ fn try_focus_username_field(
             .map(|b| b.to_string().to_lowercase())
             .unwrap_or_default();
 
+        let class_name = unsafe { el.CurrentClassName() }
+            .map(|b| b.to_string().to_lowercase())
+            .unwrap_or_default();
+
         let auto_id = unsafe { el.CurrentAutomationId() }
             .map(|id| id.to_string().to_lowercase())
             .unwrap_or_default();
 
-        // Skip search or chat fields
-        if is_search_or_chat_field(&name, &class_name, &auto_id) {
+        if is_non_login_input_field(&name, &class_name, &auto_id) {
             continue;
         }
 
@@ -695,9 +956,7 @@ fn is_on_register_page(
     automation: &windows::Win32::UI::Accessibility::IUIAutomation,
     window_el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
 ) -> bool {
-    use windows::Win32::UI::Accessibility::{
-        IUIAutomationElementArray, TreeScope_Descendants, UIA_EditControlTypeId
-    };
+    use windows::Win32::UI::Accessibility::UIA_EditControlTypeId;
 
     let title = unsafe { window_el.CurrentName() }
         .map(|b| b.to_string().to_lowercase())
@@ -712,33 +971,23 @@ fn is_on_register_page(
         return true;
     }
 
-    let true_cond = match unsafe { automation.CreateTrueCondition() } {
-        Ok(c) => c,
-        Err(_) => return false,
+    let elements = match find_targeted_elements(automation, window_el, UIA_EditControlTypeId) {
+        Some(el) => el,
+        None => return false,
     };
 
-    let elements: IUIAutomationElementArray = match unsafe {
-        window_el.FindAll(TreeScope_Descendants, &true_cond)
-    } {
-        Ok(el) => el,
-        Err(_) => return false,
-    };
-
-    let count = match unsafe { elements.Length() } {
-        Ok(c) => c,
+    let raw_count = match unsafe { elements.Length() } {
+        Ok(c) => c as usize,
         Err(_) => 0,
     };
+    let count = std::cmp::min(raw_count, 40);
 
     let mut password_count = 0;
     for i in 0..count {
-        let el = match unsafe { elements.GetElement(i) } {
+        let el = match unsafe { elements.GetElement(i as i32) } {
             Ok(e) => e,
             Err(_) => continue,
         };
-
-        let control_id = unsafe { el.CurrentControlType() }
-            .map(|id| id.0)
-            .unwrap_or(0);
 
         let is_pw = unsafe { el.CurrentIsPassword() }
             .map(|b| b.as_bool())
@@ -749,7 +998,7 @@ fn is_on_register_page(
             if password_count >= 2 {
                 return true;
             }
-        } else if control_id == UIA_EditControlTypeId.0 {
+        } else {
             let name = unsafe { el.CurrentName() }
                 .map(|b| b.to_string().to_lowercase())
                 .unwrap_or_default();
@@ -757,7 +1006,6 @@ fn is_on_register_page(
                 .map(|b| b.to_string().to_lowercase())
                 .unwrap_or_default();
 
-            // Strict confirmation matching only on Edit controls to bypass generic buttons
             let is_confirm_field = name.contains("confirm password")
                 || name.contains("repeat password")
                 || name.contains("lösenordsbekräftelse")
@@ -779,32 +1027,25 @@ fn active_window_has_password_field(
     automation: &windows::Win32::UI::Accessibility::IUIAutomation,
     window_el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
 ) -> bool {
-    use windows::Win32::UI::Accessibility::{IUIAutomationElementArray, TreeScope_Descendants};
+    use windows::Win32::UI::Accessibility::UIA_EditControlTypeId;
 
-    let true_cond = match unsafe { automation.CreateTrueCondition() } {
-        Ok(c) => c,
-        Err(_) => return false,
+    let elements = match find_targeted_elements(automation, window_el, UIA_EditControlTypeId) {
+        Some(el) => el,
+        None => return false,
     };
 
-    let elements: IUIAutomationElementArray = match unsafe {
-        window_el.FindAll(TreeScope_Descendants, &true_cond)
-    } {
-        Ok(el) => el,
-        Err(_) => return false,
-    };
-
-    let count = match unsafe { elements.Length() } {
-        Ok(c) => c,
+    let raw_count = match unsafe { elements.Length() } {
+        Ok(c) => c as usize,
         Err(_) => 0,
     };
+    let count = std::cmp::min(raw_count, 40);
 
     for i in 0..count {
-        let el = match unsafe { elements.GetElement(i) } {
+        let el = match unsafe { elements.GetElement(i as i32) } {
             Ok(e) => e,
             Err(_) => continue,
         };
 
-        // Skip elements that are hidden, offscreen or not keyboard-focusable
         let is_offscreen = unsafe { el.CurrentIsOffscreen() }
             .map(|b| b.as_bool())
             .unwrap_or(false);
@@ -891,18 +1132,20 @@ pub fn run_smart_autotype_with_delays(
             totp_secret: zeroize::Zeroizing::new(totp_secret),
         };
 
-        // Resolve the login URL in the background
+        let domain_token = if let Ok(parsed) = reqwest::Url::parse(&normalized_url) {
+            parsed.host_str()
+                .unwrap_or("")
+                .split('.')
+                .find(|&s| s != "www" && s != "com" && s != "org" && s != "net" && s != "io" && s != "se" && s != "co" && s != "uk")
+                .unwrap_or("")
+                .to_string()
+        } else {
+            String::new()
+        };
+
+        // Use normalized target URL directly without network probing (enforces offline invariant)
         let target_url = if !normalized_url.is_empty() && launch_browser {
-            let url_clone = normalized_url.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .ok()?;
-                rt.block_on(async {
-                    resolve_login_url(&url_clone).await
-                })
-            }).join().unwrap_or(None).unwrap_or(normalized_url)
+            normalized_url
         } else {
             String::new()
         };
@@ -935,10 +1178,24 @@ pub fn run_smart_autotype_with_delays(
                 };
 
                 if !is_already_active {
-                    let _ = std::process::Command::new("cmd")
-                        .args(&["/C", "start", "", &target_url])
-                        .spawn();
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    use windows::core::PCWSTR;
+                    use windows::Win32::UI::Shell::ShellExecuteW;
+                    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+                    let verb: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+                    let url_wide: Vec<u16> = target_url.encode_utf16().chain(std::iter::once(0)).collect();
+
+                    ShellExecuteW(
+                        None,
+                        PCWSTR(verb.as_ptr()),
+                        PCWSTR(url_wide.as_ptr()),
+                        PCWSTR::null(),
+                        PCWSTR::null(),
+                        SW_SHOWNORMAL,
+                    );
+
+                    // Adaptive Settle Polling: Poll in 50ms steps until browser window & login context render (max 3500ms)
+                    let _ = poll_until_login_context_ready(&automation, &domain_token, 3500);
 
                     // Fallback: If we landed on a homepage (e.g. because resolver fell back to original base URL)
                     // and no input is focused, try to find and click a login link.
@@ -972,7 +1229,7 @@ pub fn run_smart_autotype_with_delays(
 
                             if !already_on_login_form {
                                 if try_click_login_link(&automation, &window_el) {
-                                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                                    let _ = poll_until_login_context_ready(&automation, &domain_token, 3000);
                                 }
                             }
                         }
@@ -1007,28 +1264,12 @@ pub fn run_smart_autotype_with_delays(
                     break;
                 }
 
-                // Check if we are in a valid login context
-                let title = get_window_title(hwnd).to_lowercase();
-                let is_login_context = if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
-                    active_window_has_password_field(&automation, &win_el)
-                        || title.contains("login")
-                        || title.contains("sign in")
-                        || title.contains("signin")
-                        || title.contains("log in")
-                        || title.contains("sign-in")
-                        || title.contains("log-in")
-                        || title.contains("auth")
-                        || title.contains("session")
-                        || title.contains("skapa konto")
-                        || title.contains("registrera")
-                        || title.contains("logga in")
-                        || title.contains("lösenord")
-                } else {
-                    false
-                };
+                // Anti-Phishing Guard: Enforce verified domain token and process executable matching
+                let title = get_window_title(hwnd);
+                let is_login_context = is_verified_login_context(hwnd, &title, &domain_token, &automation);
 
                 if !is_login_context {
-                    // Not a login/sign-in context, keep waiting or abort if username/password are still pending
+                    // Not a verified login context (e.g. domain mismatch or untrusted process title), ignore
                     continue;
                 }
 
@@ -1069,8 +1310,8 @@ pub fn run_smart_autotype_with_delays(
                     .map(|id| id.to_string().to_lowercase())
                     .unwrap_or_default();
 
-                // Skip typing if focused element is a search or chat/prompt field
-                if is_input && is_search_or_chat_field(&name, &class_name, &auto_id) {
+                // Skip typing if focused element is a non-login input field (e.g. search, chat, newsletter)
+                if is_input && is_non_login_input_field(&name, &class_name, &auto_id) {
                     continue;
                 }
 
@@ -1100,7 +1341,7 @@ pub fn run_smart_autotype_with_delays(
                     if on_register {
                         if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
                             if try_click_login_link(&automation, &win_el) {
-                                std::thread::sleep(std::time::Duration::from_millis(1500));
+                                let _ = poll_until_login_context_ready(&automation, &domain_token, 3000);
                                 last_focused_element_id = None; // Reset focus to re-evaluate on redirected page
                                 continue;
                             }
@@ -1133,8 +1374,21 @@ pub fn run_smart_autotype_with_delays(
                         || class_name == "pass"
                     );
 
-                    // Language-independent criteria: username is any input that is neither password nor TOTP!
-                    let is_username_field = !is_password_field && !is_totp_field;
+                    // Positive Username Verification: Requires explicit keyword match or co-located password field
+                    let has_co_located_password = !hwnd.is_invalid() && if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
+                        active_window_has_password_field(&automation, &win_el)
+                    } else {
+                        false
+                    };
+
+                    let is_username_field = is_valid_username_field(
+                        &name,
+                        &class_name,
+                        &auto_id,
+                        has_co_located_password,
+                        is_password_field,
+                        is_totp_field,
+                    );
 
                     if is_totp_field && !filled_totp {
                         last_focused_element_id = Some(element_key.clone());
@@ -1143,11 +1397,11 @@ pub fn run_smart_autotype_with_delays(
                             ..Default::default()
                         };
                         if let Ok(totp_code) = crate::totp::generate_totp(&config) {
-                            let _ = send_ctrl_a_backspace();
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                            let _ = autotype_text_with_delay(&totp_code.code, char_delay_ms, 0);
-                            std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
-                            let _ = send_enter();
+                            if send_ctrl_a_backspace_guarded(target_hwnd).is_err() { break; }
+                            if safe_sleep_with_target_guard(100, target_hwnd).is_err() { break; }
+                            if inject_secret_guarded(&focused, &totp_code.code, target_hwnd, char_delay_ms).is_err() { break; }
+                            if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
+                            if send_enter_guarded(target_hwnd).is_err() { break; }
                         }
                         filled_totp = true;
                     } else if is_password_field && !filled_password {
@@ -1155,37 +1409,38 @@ pub fn run_smart_autotype_with_delays(
 
                         if !filled_username {
                             // Focus was directly on Password field first, traverse up to username first
-                            std::thread::sleep(std::time::Duration::from_millis(150));
-                            let _ = send_shift_tab();
-                            std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
+                            if safe_sleep_with_target_guard(150, target_hwnd).is_err() { break; }
+                            if send_shift_tab_guarded(target_hwnd).is_err() { break; }
+                            if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
 
                             // Fill Username
                             let mut user_val = String::new();
                             if let Ok(new_focused) = automation.GetFocusedElement() {
                                 user_val = get_element_value(&new_focused);
+                                if inject_secret_guarded(&new_focused, &guard.username, target_hwnd, char_delay_ms).is_err() { break; }
+                            } else {
+                                if autotype_correct_text_guarded(&user_val, &guard.username, char_delay_ms, target_hwnd).is_err() { break; }
                             }
-                            let _ = autotype_correct_text(&user_val, &guard.username, char_delay_ms);
-                            std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
+                            if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
 
                             // Return to Password
-                            let _ = autotype_text_with_delay("\t", char_delay_ms, 0);
-                            std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
+                            if autotype_text_with_delay_guarded("\t", char_delay_ms, 0, target_hwnd).is_err() { break; }
+                            if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
                             filled_username = true;
                         }
 
                         // Clear password and fill
-                        let _ = send_ctrl_a_backspace();
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                        let _ = autotype_text_with_delay(&guard.password, char_delay_ms, 0);
-                        std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
-                        let _ = send_enter();
+                        if send_ctrl_a_backspace_guarded(target_hwnd).is_err() { break; }
+                        if safe_sleep_with_target_guard(100, target_hwnd).is_err() { break; }
+                        if inject_secret_guarded(&focused, &guard.password, target_hwnd, char_delay_ms).is_err() { break; }
+                        if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
+                        if send_enter_guarded(target_hwnd).is_err() { break; }
                         filled_password = true;
                     } else if is_username_field && !filled_username {
                         last_focused_element_id = Some(element_key.clone());
 
-                        let current_val = get_element_value(&focused);
-                        let _ = autotype_correct_text(&current_val, &guard.username, char_delay_ms);
-                        std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
+                        if inject_secret_guarded(&focused, &guard.username, target_hwnd, char_delay_ms).is_err() { break; }
+                        if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
 
                         // Check if password field is visible in active window
                         let has_password = !hwnd.is_invalid() && if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
@@ -1196,18 +1451,25 @@ pub fn run_smart_autotype_with_delays(
 
                         if has_password {
                             // Standard single-screen login form: Tab down and enter password
-                            let _ = autotype_text_with_delay("\t", char_delay_ms, 0);
-                            std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
-                            let _ = send_ctrl_a_backspace();
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                            let _ = autotype_text_with_delay(&guard.password, char_delay_ms, 0);
-                            std::thread::sleep(std::time::Duration::from_millis(field_delay_ms));
-                            let _ = send_enter();
+                            if autotype_text_with_delay_guarded("\t", char_delay_ms, 0, target_hwnd).is_err() { break; }
+                            if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
+                            if send_ctrl_a_backspace_guarded(target_hwnd).is_err() { break; }
+                            if safe_sleep_with_target_guard(100, target_hwnd).is_err() { break; }
+                            
+                            // Re-query focused password element to inject safely
+                            if let Ok(pass_focused) = automation.GetFocusedElement() {
+                                if inject_secret_guarded(&pass_focused, &guard.password, target_hwnd, char_delay_ms).is_err() { break; }
+                            } else {
+                                if autotype_text_with_delay_guarded(&guard.password, char_delay_ms, 0, target_hwnd).is_err() { break; }
+                            }
+
+                            if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
+                            if send_enter_guarded(target_hwnd).is_err() { break; }
                             filled_username = true;
                             filled_password = true;
                         } else {
                             // Split-screen login form (like Google page 1): Press Enter to go to password screen
-                            let _ = send_enter();
+                            if send_enter_guarded(target_hwnd).is_err() { break; }
                             filled_username = true;
                         }
                     }
@@ -1227,8 +1489,7 @@ pub fn autotype_text(text: &str) -> crate::Result<()> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn autotype_text_with_delay(text: &str, _char_delay_ms: u64, _settle_delay_ms: u64) -> crate::Result<()> {
-    println!("Autotype (fallback stub): {}", text);
+pub fn autotype_text_with_delay(_text: &str, _char_delay_ms: u64, _settle_delay_ms: u64) -> crate::Result<()> {
     Ok(())
 }
 

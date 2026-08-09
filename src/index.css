@@ -73,6 +73,12 @@
     --transition-base: 150ms ease;
     --transition-slow: 250ms ease;
 
+    /* Safe area inset variables for mobile notch & home indicator */
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+
     /* Layout */
     --sidebar-width: 220px;
     --passwordlist-width: 320px;
@@ -131,11 +137,13 @@
 
   * {
     @apply border-border-shadcn;
+    touch-action: manipulation;
   }
 
   html {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+    height: 100%;
   }
 
   body {
@@ -146,7 +154,9 @@
     -moz-osx-font-smoothing: grayscale;
     overflow: hidden;
     height: 100vh;
+    height: 100dvh;
     width: 100vw;
+    width: 100dvw;
   }
 
   /* Selection */
@@ -159,6 +169,16 @@
   input::-ms-reveal,
   input::-ms-clear {
     display: none !important;
+  }
+
+  /* Prevent text highlighting on background content when any modal overlay is open */
+  body:has(.fixed.inset-0) main,
+  body:has(.fixed.inset-0) aside,
+  body:has(.fixed.inset-0) nav,
+  body:has([role="dialog"]) main,
+  body:has([role="dialog"]) aside,
+  body:has([role="dialog"]) nav {
+    user-select: none !important;
   }
 }
 

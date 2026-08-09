@@ -343,7 +343,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-3 p-3 bg-[var(--bg-elevated)] rounded-[3px]">
+    <div className="flex flex-col gap-3 p-3 bg-[var(--bg-elevated)] rounded-[3px] select-none">
       {/* Password Display Box */}
       <div className="flex items-center rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2">
         <code className="flex-1 break-all font-mono text-[13px] text-[var(--text-primary)] select-all tracking-wide">
@@ -430,7 +430,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
                   max={64}
                   value={length}
                   onChange={(e) => setLength(Number(e.target.value))}
-                  className="flex-1 h-1 rounded-full bg-[var(--border)] appearance-none outline-none cursor-pointer"
+                  className="flex-1 h-2 rounded-full bg-[var(--border)] appearance-none outline-none cursor-pointer accent-[var(--accent)]"
                 />
                 <span className="text-[11px] text-[var(--text-primary)] font-mono min-w-[20px] text-right font-medium">
                   {length}
@@ -457,7 +457,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
                   max={10}
                   value={wordCount}
                   onChange={(e) => setWordCount(Number(e.target.value))}
-                  className="flex-1 h-1 rounded-full bg-[var(--border)] appearance-none outline-none cursor-pointer"
+                  className="flex-1 h-2 rounded-full bg-[var(--border)] appearance-none outline-none cursor-pointer accent-[var(--accent)]"
                 />
                 <span className="text-[11px] text-[var(--text-primary)] font-mono min-w-[20px] text-right font-medium">
                   {wordCount}

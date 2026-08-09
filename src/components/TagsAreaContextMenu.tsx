@@ -39,19 +39,21 @@ export default function TagsAreaContextMenu({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside
+  // Close on click/tap outside
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: Event) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
     const timeout = setTimeout(() => {
+      document.addEventListener('pointerdown', handler);
       document.addEventListener('mousedown', handler);
     }, 0);
     return () => {
       clearTimeout(timeout);
+      document.removeEventListener('pointerdown', handler);
       document.removeEventListener('mousedown', handler);
     };
   }, [open, onClose]);

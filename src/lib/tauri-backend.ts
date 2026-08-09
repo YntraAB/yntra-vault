@@ -229,6 +229,10 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('show_in_explorer', { path });
   }
 
+  async getInstalledApps(): Promise<import('@/types').InstalledApp[]> {
+    return invoke('get_installed_apps');
+  }
+
   // Advanced features
   async autotype(text: string, charDelayMs: number, settleDelayMs: number): Promise<void> {
     return invoke('autotype', { text, charDelayMs, settleDelayMs });
@@ -405,6 +409,56 @@ export class TauriBackend implements YntraVaultBackend {
     } catch {
       await navigator.clipboard.writeText('');
     }
+  }
+
+  async copyEntryPassword(entryId: string, clearAfterSecs?: number): Promise<void> {
+    return invoke('copy_entry_password', { entryId, clearAfterSecs });
+  }
+
+  async copyEntryUsername(entryId: string): Promise<void> {
+    return invoke('copy_entry_username', { entryId });
+  }
+
+  async copyEntryTotp(entryId: string, clearAfterSecs?: number): Promise<void> {
+    return invoke('copy_entry_totp', { entryId, clearAfterSecs });
+  }
+
+  async createVaultBytes(name: string, passwordBytes: Uint8Array | number[], path: string, keyFilePath?: string): Promise<VaultInfo> {
+    return invoke('create_vault_bytes', {
+      name,
+      passwordBytes: Array.from(passwordBytes),
+      path,
+      keyFilePath,
+    });
+  }
+
+  async openVaultBytes(path: string, passwordBytes: Uint8Array | number[], keyFilePath?: string): Promise<VaultInfo> {
+    return invoke('open_vault_bytes', {
+      path,
+      passwordBytes: Array.from(passwordBytes),
+      keyFilePath,
+    });
+  }
+
+  async changeMasterPasswordBytes(currentBytes: Uint8Array | number[], newPasswordBytes: Uint8Array | number[], currentKeyFile?: string, newKeyFile?: string): Promise<void> {
+    return invoke('change_master_password_bytes', {
+      currentBytes: Array.from(currentBytes),
+      newPasswordBytes: Array.from(newPasswordBytes),
+      currentKeyFile,
+      newKeyFile,
+    });
+  }
+
+  async autotypeEntryPassword(entryId: string, charDelayMs?: number, settleDelayMs?: number): Promise<void> {
+    return invoke('autotype_entry_password', { entryId, charDelayMs, settleDelayMs });
+  }
+
+  async autotypeEntrySmart(entryId: string, launchBrowser?: boolean, charDelayMs?: number, fieldDelayMs?: number): Promise<void> {
+    return invoke('autotype_entry_smart', { entryId, launchBrowser, charDelayMs, fieldDelayMs });
+  }
+
+  async verifyBiometric2Fa(prompt?: string): Promise<void> {
+    return invoke('verify_biometric_2fa', { prompt });
   }
 }
 

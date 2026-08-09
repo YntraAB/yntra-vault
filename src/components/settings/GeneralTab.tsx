@@ -33,6 +33,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Active Vault Information */}
       {currentVault && (
         <SettingSection label={t('settings.active_vault')}>
           <div className="flex flex-col gap-2.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
@@ -61,6 +62,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </SettingSection>
       )}
 
+      {/* Language */}
       <SettingSection label={t('settings.language_label')}>
         <p className="mb-2.5 text-[12px] text-[var(--text-secondary)]">
           {t('settings.language_desc')}
@@ -68,7 +70,11 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         <LanguageCombobox />
       </SettingSection>
 
-      <SettingSection label={t('settings.autolock_label')}>
+      {/* Security & Privacy Controls */}
+      <SettingSection
+        label={t('settings.autolock_label')}
+        tooltip={t('settings.tooltip_autolock')}
+      >
         <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
           {t('settings.autolock_desc')}
         </p>
@@ -107,6 +113,76 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </select>
       </SettingSection>
 
+      <SettingRow
+        label={t('settings.breach_label')}
+        description={t('settings.breach_desc')}
+        tooltip={t('settings.tooltip_breach')}
+      >
+        <Toggle
+          checked={settings.autoBreachCheck}
+          onChange={(v) => updateSettings({ autoBreachCheck: v })}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={t('settings.show_breach_in_list')}
+        description={t('settings.show_breach_in_list_desc')}
+        tooltip={t('settings.tooltip_show_breach_in_list')}
+      >
+        <Toggle
+          checked={settings.showBreachInList}
+          onChange={(v) => updateSettings({ showBreachInList: v })}
+        />
+      </SettingRow>
+
+      {/* System & Application Behavior */}
+      <SettingRow
+        label={t('settings.autostart_label')}
+        description={t('settings.autostart_desc')}
+        tooltip={t('settings.tooltip_autostart')}
+      >
+        <Toggle
+          checked={launchOnStartup}
+          onChange={onToggleLaunch}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={t('settings.minimize_to_tray')}
+        description={t('settings.minimize_to_tray_desc')}
+        tooltip={t('settings.tooltip_minimize_to_tray')}
+      >
+        <Toggle
+          checked={settings.minimizeToTray}
+          onChange={(v) => updateSettings({ minimizeToTray: v })}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={t('settings.disable_skeleton_delays')}
+        description={t('settings.disable_skeleton_delays_desc')}
+        tooltip={t('settings.tooltip_disable_skeleton_delays')}
+      >
+        <Toggle
+          checked={settings.disableSkeletonDelays}
+          onChange={(v) => updateSettings({ disableSkeletonDelays: v })}
+        />
+      </SettingRow>
+
+      {import.meta.env.DEV && (
+        <SettingRow
+          label="[DEV] Force Mobile Layout Preview"
+          description="Simulates the mobile layout interface on desktop."
+          tooltip="Developer setting: Forces mobile layout mode"
+        >
+          <Toggle
+            checked={Boolean(settings.forceMobileView)}
+            onChange={(v) => updateSettings({ forceMobileView: v })}
+          />
+        </SettingRow>
+      )}
+
+      {/* Auto-Type Automation */}
       <SettingSection
         label={t('settings.autotype_title')}
         tooltip={t('settings.tooltip_autotype')}
@@ -163,6 +239,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
       <SettingRow
         label={t('settings.autotype_launch_browser')}
         description={t('settings.autotype_launch_browser_desc')}
+        tooltip={t('settings.tooltip_autotype_launch_browser')}
       >
         <Toggle
           checked={settings.autotypeLaunchBrowser !== false}
@@ -170,55 +247,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         />
       </SettingRow>
 
-      <SettingRow
-        label={t('settings.minimize_to_tray')}
-        description={t('settings.minimize_to_tray_desc')}
-      >
-        <Toggle
-          checked={settings.minimizeToTray}
-          onChange={(v) => updateSettings({ minimizeToTray: v })}
-        />
-      </SettingRow>
-
-      <SettingRow label={t('settings.autostart_label')} description={t('settings.autostart_desc')}>
-        <Toggle
-          checked={launchOnStartup}
-          onChange={onToggleLaunch}
-        />
-      </SettingRow>
-
-      <SettingRow
-        label={t('settings.disable_skeleton_delays')}
-        description={t('settings.disable_skeleton_delays_desc')}
-        tooltip={t('settings.tooltip_disable_skeleton_delays')}
-      >
-        <Toggle
-          checked={settings.disableSkeletonDelays}
-          onChange={(v) => updateSettings({ disableSkeletonDelays: v })}
-        />
-      </SettingRow>
-
-      <SettingRow
-        label={t('settings.breach_label')}
-        description={t('settings.breach_desc')}
-        tooltip={t('settings.tooltip_breach')}
-      >
-        <Toggle
-          checked={settings.autoBreachCheck}
-          onChange={(v) => updateSettings({ autoBreachCheck: v })}
-        />
-      </SettingRow>
-
-      <SettingRow
-        label={t('settings.show_breach_in_list')}
-        description={t('settings.show_breach_in_list_desc')}
-      >
-        <Toggle
-          checked={settings.showBreachInList}
-          onChange={(v) => updateSettings({ showBreachInList: v })}
-        />
-      </SettingRow>
-
+      {/* Maintenance & Reset */}
       <SettingSection label={t('onboarding.rerun_setup')}>
         <button
           onClick={() => {

@@ -49,9 +49,6 @@ export default function SettingsPanel() {
   const [showHwModal, setShowHwModal] = useState(false);
   const [hwModalMode, setHwModalMode] = useState<'enroll' | 'test'>('enroll');
 
-  // Primary Unlock State
-  const [primaryUnlock, setPrimaryUnlock] = useState<'master_password' | 'biometric' | 'hardware_2fa'>('master_password');
-
   useEffect(() => {
     if (backend && currentVault?.path) {
       backend.isBiometricEnabled(currentVault.path).then(setBioActive);
@@ -59,32 +56,6 @@ export default function SettingsPanel() {
       backend.isHardware2FaEnabled(currentVault.path).then(setHwActive);
     }
   }, [backend, currentVault]);
-
-  useEffect(() => {
-    if (currentVault?.path) {
-      const saved = localStorage.getItem(`yntra-vault-primary-unlock-${currentVault.path}`);
-      if (saved === 'biometric' || saved === 'hardware_2fa' || saved === 'master_password') {
-        setPrimaryUnlock(saved);
-      } else {
-        setPrimaryUnlock('master_password');
-      }
-    }
-  }, [currentVault]);
-
-  const handleSelectPrimaryUnlock = (method: 'master_password' | 'biometric' | 'hardware_2fa') => {
-    if (!currentVault?.path) return;
-    if (method === 'biometric' && !bioActive) {
-      addToast({ message: 'Enable Windows Hello / Biometrics first', type: 'error' });
-      return;
-    }
-    if (method === 'hardware_2fa' && !hwActive) {
-      addToast({ message: 'Enroll a YubiKey / Hardware 2FA key first', type: 'error' });
-      return;
-    }
-    setPrimaryUnlock(method);
-    localStorage.setItem(`yntra-vault-primary-unlock-${currentVault.path}`, method);
-    addToast({ message: `Primary login method set to ${method.replace('_', ' ')}`, type: 'success' });
-  };
 
   const handleTabsWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     if (tabsRef.current) {
@@ -178,7 +149,7 @@ export default function SettingsPanel() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed right-0 top-0 z-50 flex h-full w-[480px] flex-col border-l border-[var(--border)] bg-[var(--bg-base)]"
+            className="fixed right-0 top-0 z-50 flex h-full w-full sm:w-[480px] max-w-full flex-col border-l border-[var(--border)] bg-[var(--bg-base)] pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] select-none"
           >
             {/* Header */}
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4">
@@ -249,8 +220,6 @@ export default function SettingsPanel() {
                     setShowHwModal(true);
                   }}
                   onDisableHw={handleDisableHw}
-                  primaryUnlock={primaryUnlock}
-                  onSelectPrimaryUnlock={handleSelectPrimaryUnlock}
                   onOpenChangePassword={() => setShowChangePassword(true)}
                 />
               )}

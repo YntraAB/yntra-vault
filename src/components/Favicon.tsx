@@ -33,12 +33,12 @@ export default function Favicon({
 
   if (imgUrl && !error) {
     return (
-      <div className={`relative shrink-0 flex items-center justify-center rounded-[4px] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] overflow-hidden ${sizeClass}`}>
+      <div className={`relative shrink-0 aspect-square flex items-center justify-center rounded-[4px] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] overflow-hidden ${sizeClass}`}>
         <img
           src={imgUrl}
           alt={title}
           onError={() => setError(true)}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-contain p-0.5"
         />
       </div>
     );
@@ -47,7 +47,7 @@ export default function Favicon({
   // Fallback placeholder
   return (
     <div
-      className={`flex shrink-0 items-center justify-center rounded-[4px] font-semibold text-white uppercase ${sizeClass} ${textClass}`}
+      className={`flex shrink-0 aspect-square items-center justify-center rounded-[4px] font-semibold text-white uppercase ${sizeClass} ${textClass}`}
       style={{ backgroundColor: color }}
     >
       {getInitials(title)}

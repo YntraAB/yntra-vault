@@ -94,7 +94,7 @@ export default function CreateTagModal({ open, onClose }: CreateTagModalProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
           onClick={onClose}
         >
           <motion.div
@@ -102,7 +102,7 @@ export default function CreateTagModal({ open, onClose }: CreateTagModalProps) {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.96, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="w-[380px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+            className="w-full max-w-[380px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

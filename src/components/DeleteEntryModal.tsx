@@ -56,7 +56,7 @@ export default function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEn
   return (
     <AnimatePresence>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
         onClick={onClose}
       >
         <motion.div
@@ -64,7 +64,7 @@ export default function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEn
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.98, opacity: 0 }}
           transition={{ duration: 0.15 }}
-          className="w-[380px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] p-5 shadow-2xl"
+          className="w-full max-w-[380px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] p-5 shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">

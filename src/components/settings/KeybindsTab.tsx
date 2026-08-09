@@ -161,19 +161,19 @@ export function KeybindsTab() {
             type: 'info',
           });
         } else {
-          addToast({ message: 'Shortcut updated successfully', type: 'info' });
+          addToast({ message: t('toast.shortcut_updated'), type: 'info' });
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [recordingAction, currentKeybinds, updateSettings, addToast, allItems]);
+  }, [recordingAction, currentKeybinds, updateSettings, addToast, allItems, t]);
 
   const handleResetDefaults = useCallback(() => {
     updateSettings({ keybinds: DEFAULT_KEYBINDS });
-    addToast({ message: 'Reset shortcuts to default', type: 'info' });
-  }, [updateSettings, addToast]);
+    addToast({ message: t('toast.shortcuts_reset'), type: 'info' });
+  }, [updateSettings, addToast, t]);
 
   return (
     <div className="flex flex-col gap-6">

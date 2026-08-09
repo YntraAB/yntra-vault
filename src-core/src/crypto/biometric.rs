@@ -33,6 +33,9 @@ mod win_hello {
 
     #[windows::core::interface("39e050c3-4e74-4414-bdf6-b81185f9263a")]
     unsafe trait IUserConsentVerifierInterop: windows::core::IUnknown {
+        unsafe fn GetIids(&self, count: *mut u32, iids: *mut *mut windows::core::GUID) -> windows::core::HRESULT;
+        unsafe fn GetRuntimeClassName(&self, classname: *mut *mut std::ffi::c_void) -> windows::core::HRESULT;
+        unsafe fn GetTrustLevel(&self, trustlevel: *mut i32) -> windows::core::HRESULT;
         unsafe fn RequestVerificationForWindowAsync(
             &self,
             appwindow: HWND,
@@ -42,58 +45,100 @@ mod win_hello {
         ) -> windows::core::HRESULT;
     }
 
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED};
+
     pub fn check_availability() -> (bool, String) {
-        match UserConsentVerifier::CheckAvailabilityAsync() {
-            Ok(async_op) => match async_op.get() {
-                Ok(UserConsentVerifierAvailability::Available) => (true, "Windows Hello (Fingerprint / Face / PIN)".to_string()),
-                Ok(UserConsentVerifierAvailability::DeviceNotPresent) => (false, "Windows Hello device not present".to_string()),
-                Ok(UserConsentVerifierAvailability::NotConfiguredForUser) => (false, "Windows Hello not configured for user".to_string()),
-                Ok(UserConsentVerifierAvailability::DisabledByPolicy) => (false, "Windows Hello disabled by policy".to_string()),
-                _ => (false, "Windows Hello unavailable".to_string()),
-            },
-            Err(_) => (false, "Windows Hello API unavailable".to_string()),
-        }
+        std::thread::spawn(move || {
+            unsafe {
+                let _ = RoInitialize(RO_INIT_SINGLETHREADED);
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
+            match UserConsentVerifier::CheckAvailabilityAsync() {
+                Ok(async_op) => match async_op.get() {
+                    Ok(UserConsentVerifierAvailability::Available) => (true, "Windows Hello (Fingerprint / Face / PIN)".to_string()),
+                    Ok(UserConsentVerifierAvailability::DeviceNotPresent) => (false, "Windows Hello device not present".to_string()),
+                    Ok(UserConsentVerifierAvailability::NotConfiguredForUser) => (false, "Windows Hello not configured for user".to_string()),
+                    Ok(UserConsentVerifierAvailability::DisabledByPolicy) => (false, "Windows Hello disabled by policy".to_string()),
+                    _ => (false, "Windows Hello unavailable".to_string()),
+                },
+                Err(_) => (false, "Windows Hello API unavailable".to_string()),
+            }
+        })
+        .join()
+        .unwrap_or((false, "Windows Hello thread panicked".to_string()))
     }
 
-    pub fn request_user_consent(prompt: &str) -> crate::Result<()> {
-        let msg = HSTRING::from(prompt);
-        let hwnd = unsafe { GetForegroundWindow() };
+    pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>) -> crate::Result<()> {
+        let prompt_str = prompt.to_string();
+        std::thread::spawn(move || {
+            unsafe {
+                let _ = RoInitialize(RO_INIT_SINGLETHREADED);
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
+            let hwnd = match hwnd_override {
+                Some(h) if h != 0 => HWND(h as _),
+                _ => unsafe { GetForegroundWindow() },
+            };
 
-        let async_op = match factory::<UserConsentVerifier, IUserConsentVerifierInterop>() {
-            Ok(interop) => unsafe {
-                let mut op: Option<windows::Foundation::IAsyncOperation<UserConsentVerificationResult>> = None;
-                let hr = interop.RequestVerificationForWindowAsync(
-                    hwnd,
-                    &msg,
-                    &windows::Foundation::IAsyncOperation::<UserConsentVerificationResult>::IID,
-                    &mut op as *mut _ as _,
-                );
-                if hr.is_ok() && op.is_some() {
-                    op.unwrap()
-                } else {
+            let msg = HSTRING::from(&prompt_str);
+            let async_op = match factory::<UserConsentVerifier, IUserConsentVerifierInterop>() {
+                Ok(interop) => unsafe {
+                    let mut op: Option<windows::Foundation::IAsyncOperation<UserConsentVerificationResult>> = None;
+                    let hr = interop.RequestVerificationForWindowAsync(
+                        hwnd,
+                        &msg,
+                        &windows::Foundation::IAsyncOperation::<UserConsentVerificationResult>::IID,
+                        &mut op as *mut _ as _,
+                    );
+                    if hr.is_ok() && op.is_some() {
+                        op.unwrap()
+                    } else {
+                        UserConsentVerifier::RequestVerificationAsync(&msg)
+                            .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?
+                    }
+                },
+                Err(_) => {
                     UserConsentVerifier::RequestVerificationAsync(&msg)
                         .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?
                 }
-            },
-            Err(_) => {
-                UserConsentVerifier::RequestVerificationAsync(&msg)
-                    .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?
+            };
+
+            let result = async_op.get()
+                .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello verification failed: {}", e)))?;
+
+            match result {
+                UserConsentVerificationResult::Verified => Ok(()),
+                UserConsentVerificationResult::Canceled => Err(VaultError::BiometricCanceled),
+                UserConsentVerificationResult::RetriesExhausted => Err(VaultError::BiometricAuthFailed("Windows Hello attempt limit reached. Please lock & unlock Windows (Win + L) to reset.".into())),
+                UserConsentVerificationResult::DeviceBusy => Err(VaultError::BiometricHardwareError("Windows Hello security cooldown active (Device Busy). Windows OS suppressed the popup — please wait 15 seconds before trying again.".into())),
+                UserConsentVerificationResult::DeviceNotPresent => Err(VaultError::BiometricNotAvailable("Windows Hello device not present".into())),
+                UserConsentVerificationResult::NotConfiguredForUser => Err(VaultError::BiometricNotAvailable("Windows Hello not configured for user".into())),
+                UserConsentVerificationResult::DisabledByPolicy => Err(VaultError::BiometricNotAvailable("Windows Hello disabled by policy".into())),
+                _ => Err(VaultError::BiometricAuthFailed("Windows Hello authentication failed".into())),
             }
-        };
+        })
+        .join()
+        .map_err(|_| VaultError::BiometricHardwareError("Windows Hello thread panicked".into()))?
+    }
 
-        let result = async_op.get()
-            .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello verification failed: {}", e)))?;
+    pub fn request_user_consent(prompt: &str) -> crate::Result<()> {
+        request_user_consent_with_hwnd(prompt, None)
+    }
+}
 
-        match result {
-            UserConsentVerificationResult::Verified => Ok(()),
-            UserConsentVerificationResult::Canceled => Err(VaultError::BiometricCanceled),
-            UserConsentVerificationResult::RetriesExhausted => Err(VaultError::BiometricAuthFailed("Windows Hello retry limit exceeded".into())),
-            UserConsentVerificationResult::DeviceBusy => Err(VaultError::BiometricHardwareError("Windows Hello device busy".into())),
-            UserConsentVerificationResult::DeviceNotPresent => Err(VaultError::BiometricNotAvailable("Windows Hello device not present".into())),
-            UserConsentVerificationResult::NotConfiguredForUser => Err(VaultError::BiometricNotAvailable("Windows Hello not configured".into())),
-            UserConsentVerificationResult::DisabledByPolicy => Err(VaultError::BiometricNotAvailable("Windows Hello disabled by policy".into())),
-            _ => Err(VaultError::BiometricAuthFailed("Windows Hello authentication failed".into())),
-        }
+/// Request user consent with optional native HWND window binding
+pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>) -> crate::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        win_hello::request_user_consent_with_hwnd(prompt, hwnd_override)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = prompt;
+        let _ = hwnd_override;
+        Ok(())
     }
 }
 

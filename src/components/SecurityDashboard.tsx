@@ -251,33 +251,64 @@ const SEVERITY_COLORS: Record<IssueSeverity, string> = {
   Info: '#6b7280',
 };
 
+function getLocalizedIssueDescription(issue: SecurityIssue, t: (key: string, params?: Record<string, string | number>) => string): string {
+  switch (issue.issue_type) {
+    case 'Breached': {
+      const match = issue.description.match(/\d+/);
+      const count = match ? match[0] : '1';
+      return t('security.desc_breached', { count });
+    }
+    case 'WeakPassword': {
+      return t('security.desc_weak');
+    }
+    case 'ReusedPassword': {
+      const parts = issue.description.split(': ');
+      const services = parts.length > 1 ? parts[1] : '';
+      return services ? t('security.desc_reused_with', { services }) : t('security.desc_reused');
+    }
+    case 'OldPassword': {
+      const match = issue.description.match(/\d+/);
+      const days = match ? match[0] : '90';
+      return t('security.desc_old_days', { days });
+    }
+    case 'Missing2FA': {
+      return t('security.desc_missing_2fa');
+    }
+    default:
+      return issue.description;
+  }
+}
+
 const IssueRow: React.FC<{ issue: SecurityIssue; onClick?: () => void }> = ({
   issue,
   onClick,
-}) => (
-  <button
-    onClick={onClick}
-    className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-elevated)]"
-  >
-    <div
-      className="h-1.5 w-1.5 rounded-full shrink-0"
-      style={{ backgroundColor: SEVERITY_COLORS[issue.severity] }}
-    />
-    <div className="flex flex-col gap-0.5 min-w-0">
-      <span className="text-[12px] font-medium text-[var(--text-primary)] truncate">
-        {issue.entry_title}
-      </span>
-      <span className="text-[11px] text-[var(--text-tertiary)] truncate">
-        {issue.description}
-      </span>
-    </div>
-    <AlertTriangle
-      size={12}
-      className="ml-auto shrink-0"
-      style={{ color: SEVERITY_COLORS[issue.severity] }}
-    />
-  </button>
-);
+}) => {
+  const { t } = useTranslation();
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-elevated)]"
+    >
+      <div
+        className="h-1.5 w-1.5 rounded-full shrink-0"
+        style={{ backgroundColor: SEVERITY_COLORS[issue.severity] }}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[12px] font-medium text-[var(--text-primary)] truncate">
+          {issue.entry_title}
+        </span>
+        <span className="text-[11px] text-[var(--text-tertiary)] truncate">
+          {getLocalizedIssueDescription(issue, t)}
+        </span>
+      </div>
+      <AlertTriangle
+        size={12}
+        className="ml-auto shrink-0"
+        style={{ color: SEVERITY_COLORS[issue.severity] }}
+      />
+    </button>
+  );
+};
 
 export default SecurityDashboard;
 

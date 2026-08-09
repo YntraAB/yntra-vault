@@ -120,6 +120,7 @@ export interface AppSettings {
   showTagCounts?: boolean;
   entrySortOrder?: 'title' | 'updated' | 'created';
   keybinds?: KeybindsConfig;
+  forceMobileView?: boolean;
 }
 
 export interface TOTPState {
@@ -136,6 +137,13 @@ export interface ToastMessage {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
+}
+
+export interface InstalledApp {
+  name: string;
+  path: string;
+  category?: string;
+  is_system?: boolean;
 }
 
 

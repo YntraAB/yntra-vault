@@ -19,7 +19,7 @@ import {
 import * as fflate from 'fflate';
 import type { AttachmentInfo } from '@/types';
 import { ActionTooltip } from './ui/tooltip';
-import { getBackend } from '@/lib/backend';
+import { getBackend, isTauri } from '@/lib/backend';
 import { useTranslation } from '@/contexts/LanguageContext';
 
 interface AttachmentPreviewModalProps {
@@ -139,10 +139,16 @@ export default function AttachmentPreviewModal({
   const handleCopyText = async () => {
     if (!textContent) return;
     try {
-      const backend = await getBackend();
-      await backend.copyToClipboard(textContent, false);
+      if (isTauri()) {
+        const backend = await getBackend();
+        await backend.copyToClipboard(textContent, false);
+      } else {
+        await navigator.clipboard.writeText(textContent);
+      }
     } catch {
-      await navigator.clipboard.writeText(textContent).catch(() => {});
+      if (!isTauri()) {
+        await navigator.clipboard.writeText(textContent).catch(() => {});
+      }
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

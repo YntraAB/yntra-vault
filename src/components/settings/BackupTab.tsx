@@ -29,6 +29,23 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Competitor Importer */}
+      <SettingSection
+        label={t('settings.importer_title')}
+        tooltip={t('settings.tooltip_importer')}
+      >
+        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+          {t('settings.importer_desc')}
+        </p>
+        <button
+          onClick={onOpenImportModal}
+          className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 cursor-pointer"
+        >
+          <FolderInput size={14} />
+          <span>{t('settings.import_passwords_btn')}</span>
+        </button>
+      </SettingSection>
+
       {/* WebDAV Cloud Sync */}
       <SettingSection
         label={t('settings.cloud_sync')}
@@ -156,10 +173,11 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 <button
                   onClick={async () => {
                     if (!backend || !currentVault) return;
+                    if (!backend || !currentVault) return;
                     if (!confirm(t('settings.restore_warning'))) return;
                     try {
                       await backend.webdavDownload(webdavUrl, webdavUser, webdavPass || null, currentVault.path);
-                      addToast({ message: 'Database restored from backup! Safety backup created (.vdb.bak)', type: 'success' });
+                      addToast({ message: t('toast.database_restored'), type: 'success' });
                       await refreshEntries();
                     } catch (err) {
                       addToast({ message: `Download failed: ${err}`, type: 'error' });
@@ -200,7 +218,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 addToast({ message: `Listening for P2P connection on ${p2pAddr}...`, type: 'info' });
                 try {
                   await backend.runP2pSyncListener(p2pAddr, currentVault.path);
-                  addToast({ message: 'Received database update successfully!', type: 'success' });
+                  addToast({ message: t('toast.received_db_update'), type: 'success' });
                   await refreshEntries();
                 } catch (err) {
                   addToast({ message: `Sync failed: ${err}`, type: 'error' });
@@ -220,7 +238,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 addToast({ message: `Connecting to ${p2pAddr}...`, type: 'info' });
                 try {
                   await backend.runP2pSyncClient(p2pAddr, currentVault.path);
-                  addToast({ message: 'Database sync sent successfully!', type: 'success' });
+                  addToast({ message: t('toast.db_sync_sent'), type: 'success' });
                 } catch (err) {
                   addToast({ message: `Connection failed: ${err}`, type: 'error' });
                 } finally {
@@ -233,23 +251,6 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
             </button>
           </div>
         </div>
-      </SettingSection>
-
-      {/* Competitor Importer */}
-      <SettingSection
-        label={t('settings.importer_title')}
-        tooltip={t('settings.tooltip_importer')}
-      >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.importer_desc')}
-        </p>
-        <button
-          onClick={onOpenImportModal}
-          className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 cursor-pointer"
-        >
-          <FolderInput size={14} />
-          <span>{t('settings.import_passwords_btn')}</span>
-        </button>
       </SettingSection>
 
       {/* Manual Export */}
@@ -277,7 +278,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 });
                 if (!destPath) return;
                 await backend.exportVault(destPath);
-                addToast({ message: 'Encrypted vault exported successfully!', type: 'success' });
+                addToast({ message: t('toast.encrypted_vault_exported'), type: 'success' });
               } catch (err) {
                 addToast({ message: `Export failed: ${err}`, type: 'error' });
               }
@@ -299,7 +300,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 });
                 if (!destPath) return;
                 await backend.exportVaultCsv(destPath);
-                addToast({ message: 'Decrypted CSV exported successfully!', type: 'success' });
+                addToast({ message: t('toast.decrypted_csv_exported'), type: 'success' });
               } catch (err) {
                 addToast({ message: `Export failed: ${err}`, type: 'error' });
               }
@@ -322,7 +323,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 });
                 if (!destPath) return;
                 await backend.exportVaultJson(destPath);
-                addToast({ message: 'Decrypted JSON exported successfully!', type: 'success' });
+                addToast({ message: t('toast.decrypted_json_exported'), type: 'success' });
               } catch (err) {
                 addToast({ message: `Export failed: ${err}`, type: 'error' });
               }

@@ -1,0 +1,370 @@
+/**
+ * AppPickerModal — SOTA Installed Application Picker & Categorized Filter
+ * 
+ * Scans installed desktop applications, filters out non-login OS utilities,
+ * provides category tabs, and fallbacks to manual OS file browser.
+ */
+
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Search, FolderOpen, AppWindow, Laptop, Filter, ShieldAlert, Check } from 'lucide-react';
+import { useTranslation } from '@/contexts/LanguageContext';
+import { isTauri, getBackend } from '@/lib/backend';
+import type { InstalledApp } from '@/types';
+import { ActionTooltip } from './ui/tooltip';
+
+interface AppPickerModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSelectApp: (appPath: string) => void;
+}
+
+type AppCategoryTab = 'loggable' | 'all' | 'browsers_communication' | 'productivity_dev' | 'gaming' | 'system';
+
+const COMMON_APPS: InstalledApp[] = [
+  // Browsers & Communication
+  { name: 'Google Chrome', path: 'googlechrome://', category: 'browsers_communication', is_system: false },
+  { name: 'Mozilla Firefox', path: 'firefox://', category: 'browsers_communication', is_system: false },
+  { name: 'Discord', path: 'discord://', category: 'browsers_communication', is_system: false },
+  { name: 'Slack', path: 'slack://', category: 'browsers_communication', is_system: false },
+  { name: 'Telegram', path: 'tg://', category: 'browsers_communication', is_system: false },
+  { name: 'WhatsApp', path: 'whatsapp://', category: 'browsers_communication', is_system: false },
+  { name: 'Signal', path: 'sgnl://', category: 'browsers_communication', is_system: false },
+  { name: 'Microsoft Teams', path: 'msteams://', category: 'browsers_communication', is_system: false },
+  { name: 'Thunderbird', path: 'thunderbird://', category: 'browsers_communication', is_system: false },
+
+  // Dev & Productivity
+  { name: 'Visual Studio Code', path: 'vscode://', category: 'productivity_dev', is_system: false },
+  { name: 'Cursor', path: 'cursor://', category: 'productivity_dev', is_system: false },
+  { name: 'Windsurf', path: 'windsurf://', category: 'productivity_dev', is_system: false },
+  { name: 'Antigravity', path: 'antigravity://', category: 'productivity_dev', is_system: false },
+  { name: 'Obsidian', path: 'obsidian://', category: 'productivity_dev', is_system: false },
+  { name: 'Notion', path: 'notion://', category: 'productivity_dev', is_system: false },
+  { name: 'Linear', path: 'linear://', category: 'productivity_dev', is_system: false },
+  { name: 'Docker Desktop', path: 'docker://', category: 'productivity_dev', is_system: false },
+  { name: 'Postman', path: 'postman://', category: 'productivity_dev', is_system: false },
+  { name: 'DBeaver', path: 'dbeaver://', category: 'productivity_dev', is_system: false },
+  { name: 'GitKraken', path: 'gitkraken://', category: 'productivity_dev', is_system: false },
+  { name: 'Figma', path: 'figma://', category: 'productivity_dev', is_system: false },
+
+  // Gaming & Media
+  { name: 'Steam', path: 'steam://', category: 'gaming', is_system: false },
+  { name: 'Spotify', path: 'spotify://', category: 'gaming', is_system: false },
+  { name: 'NVIDIA App', path: 'nvidia://', category: 'gaming', is_system: false },
+  { name: 'Epic Games Store', path: 'com.epicgames.launcher://', category: 'gaming', is_system: false },
+  { name: 'Battle.net', path: 'battlenet://', category: 'gaming', is_system: false },
+  { name: 'Roblox', path: 'roblox://', category: 'gaming', is_system: false },
+  { name: 'VLC Media Player', path: 'vlc://', category: 'gaming', is_system: false },
+];
+
+export default function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalProps) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<AppCategoryTab>('loggable');
+  const [hideSystemUtils, setHideSystemUtils] = useState(true);
+  const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActiveTab('loggable');
+
+    let cancelled = false;
+    async function loadApps() {
+      setLoading(true);
+      try {
+        if (isTauri()) {
+          const backend = await getBackend();
+          if ('getInstalledApps' in backend) {
+            const apps = await (backend as any).getInstalledApps();
+            if (!cancelled && apps && apps.length > 0) {
+              setInstalledApps(apps);
+            }
+          }
+        }
+      } catch {
+        // Fallback to common presets if scan is not available
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadApps();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  if (!open) return null;
+
+  const rawApps = installedApps.length > 0 ? installedApps : COMMON_APPS;
+
+  const filteredApps = rawApps.filter(app => {
+    // Search query filter
+    const matchesQuery = !query.trim() ||
+      app.name.toLowerCase().includes(query.toLowerCase()) ||
+      app.path.toLowerCase().includes(query.toLowerCase());
+
+    if (!matchesQuery) return false;
+
+    // System utility noise filter toggle
+    if (hideSystemUtils && app.is_system && activeTab !== 'system') {
+      return false;
+    }
+
+    // Category Tab filter
+    if (activeTab === 'loggable') {
+      return hideSystemUtils ? !app.is_system : true;
+    }
+    if (activeTab === 'browsers_communication') {
+      return app.category === 'browsers_communication';
+    }
+    if (activeTab === 'productivity_dev') {
+      return app.category === 'productivity_dev';
+    }
+    if (activeTab === 'gaming') {
+      return app.category === 'gaming';
+    }
+    if (activeTab === 'system') {
+      return app.is_system || app.category === 'system';
+    }
+
+    return true; // 'all' tab
+  });
+
+  const handleManualBrowse = async () => {
+    try {
+      const { open: openFileDialog } = await import('@tauri-apps/plugin-dialog');
+      const selected = await openFileDialog({
+        multiple: false,
+        filters: [{ name: t('app_picker.dialog_filter_apps'), extensions: ['exe', 'app', 'desktop', 'bat', 'cmd', 'lnk', '*'] }],
+      });
+      if (typeof selected === 'string' && selected) {
+        onSelectApp(selected);
+        onClose();
+      }
+    } catch {
+      // Fallback
+    }
+  };
+
+  const getCategoryBadge = (cat?: string, isSys?: boolean) => {
+    if (isSys) return <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500 border border-amber-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_system')}</span>;
+    if (cat === 'browsers_communication') return <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 border border-blue-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_browsers')}</span>;
+    if (cat === 'productivity_dev') return <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_dev')}</span>;
+    if (cat === 'gaming') return <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400 border border-purple-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_gaming')}</span>;
+    return <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-tertiary)] border border-[var(--border-subtle)] whitespace-nowrap shrink-0">{t('app_picker.badge_app')}</span>;
+  };
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 select-none">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          transition={{ duration: 0.15 }}
+          className="w-full max-w-xl rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-5 shadow-2xl flex flex-col max-h-[85vh]"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+            <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--text-primary)]">
+              <Laptop size={18} className="text-[var(--accent-primary)]" />
+              <span>{t('app_picker.title')}</span>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Search & Manual Browse Bar */}
+          <div className="mt-3.5 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('app_picker.search_placeholder')}
+                className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-base)] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                autoFocus
+              />
+            </div>
+
+            <ActionTooltip content={t('app_picker.filter_noise_tooltip')}>
+              <button
+                type="button"
+                onClick={() => setHideSystemUtils(!hideSystemUtils)}
+                className={`flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors shrink-0 ${
+                  hideSystemUtils
+                    ? 'border-[var(--accent-primary)]/40 bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
+                    : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Filter size={13} />
+                <span className="hidden sm:inline">{t('app_picker.filter_noise')}</span>
+                {hideSystemUtils && <Check size={12} />}
+              </button>
+            </ActionTooltip>
+
+            <ActionTooltip content={t('app_picker.browse_tooltip')}>
+              <button
+                type="button"
+                onClick={handleManualBrowse}
+                className="flex h-9 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
+              >
+                <FolderOpen size={14} />
+                <span className="hidden sm:inline">{t('app_picker.browse_file_system')}</span>
+              </button>
+            </ActionTooltip>
+          </div>
+
+          {/* Category Tabs */}
+          <div
+            onWheel={(e) => {
+              if (e.deltaY) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+            className="mt-3 flex items-center gap-1 overflow-x-auto border-b border-[var(--border-subtle)] pb-2 text-[12px] scrollbar-none shrink-0"
+          >
+            <button
+              type="button"
+              onClick={() => setActiveTab('loggable')}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'loggable'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t('app_picker.tab_loggable')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('browsers_communication')}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'browsers_communication'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t('app_picker.tab_browsers')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('productivity_dev')}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'productivity_dev'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t('app_picker.tab_dev')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('gaming')}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'gaming'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t('app_picker.tab_gaming')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('system')}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'system'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t('app_picker.tab_system')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('all')}
+              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'all'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t('app_picker.tab_all')} ({rawApps.length})
+            </button>
+          </div>
+
+          {/* Apps List */}
+          <div className="mt-3 flex-1 overflow-y-auto pr-1 space-y-1 min-h-[240px]">
+            {loading ? (
+              <div className="flex h-40 items-center justify-center text-[13px] text-[var(--text-tertiary)]">
+                {t('app_picker.scanning')}
+              </div>
+            ) : filteredApps.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 gap-2 text-[13px] text-[var(--text-tertiary)] text-center">
+                <ShieldAlert size={28} className="text-[var(--text-tertiary)] opacity-60" />
+                <span>{t('app_picker.no_apps_found')}</span>
+                <div className="flex items-center gap-3 mt-1">
+                  {hideSystemUtils && (
+                    <button
+                      type="button"
+                      onClick={() => setHideSystemUtils(false)}
+                      className="text-[12px] text-[var(--accent-primary)] hover:underline font-medium"
+                    >
+                      {t('app_picker.show_os_utilities')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleManualBrowse}
+                    className="text-[12px] text-[var(--accent-primary)] hover:underline font-medium"
+                  >
+                    {t('app_picker.browse_file_system')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              filteredApps.map((app, idx) => (
+                <button
+                  key={`${app.name}-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    onSelectApp(app.path);
+                    onClose();
+                  }}
+                  className="flex w-full items-center justify-between rounded-md p-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] group cursor-pointer border border-transparent hover:border-[var(--border-subtle)]"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] text-[var(--text-secondary)] group-hover:text-[var(--accent-primary)] shrink-0">
+                      <AppWindow size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[13px] font-medium text-[var(--text-primary)] truncate min-w-0">
+                          {app.name}
+                        </span>
+                        {getCategoryBadge(app.category, app.is_system)}
+                      </div>
+                      <ActionTooltip content={app.path}>
+                        <div className="text-[11px] font-mono text-[var(--text-tertiary)] truncate mt-0.5 max-w-full">
+                          {app.path}
+                        </div>
+                      </ActionTooltip>
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-medium text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] shrink-0 pl-2">
+                    {t('app_picker.select')}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+}

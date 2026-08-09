@@ -3,7 +3,7 @@ import { Copy, Check } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useAppState } from '@/contexts/AppStateContext';
 import { ActionTooltip } from './ui/tooltip';
-import { getBackend } from '@/lib/backend';
+import { getBackend, isTauri } from '@/lib/backend';
 
 interface CopyButtonProps {
   value: string;
@@ -32,10 +32,16 @@ export default function CopyButton({
     async (e: React.MouseEvent) => {
       e.stopPropagation();
       try {
-        const backend = await getBackend();
-        await backend.copyToClipboard(value, isSensitive, effectiveClearSecs);
+        if (isTauri()) {
+          const backend = await getBackend();
+          await backend.copyToClipboard(value, isSensitive, effectiveClearSecs);
+        } else {
+          await navigator.clipboard.writeText(value);
+        }
       } catch {
-        await navigator.clipboard.writeText(value).catch(() => {});
+        if (!isTauri()) {
+          await navigator.clipboard.writeText(value).catch(() => {});
+        }
       }
       setCopied(true);
       setTimeout(() => setCopied(false), 800);
@@ -48,7 +54,7 @@ export default function CopyButton({
       <button
         type="button"
         onClick={handleCopy}
-        className={`inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 ${className}`}
+        className={`inline-flex items-center justify-center rounded-[3px] p-2 sm:p-1 min-h-[32px] min-w-[32px] sm:min-h-0 sm:min-w-0 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 ${className}`}
       >
         {copied ? (
           <Check size={size} className="text-[var(--success)]" />

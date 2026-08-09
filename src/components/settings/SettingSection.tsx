@@ -4,7 +4,7 @@ import { ActionTooltip } from '../ui/tooltip';
 
 export function SettingSection({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
   return (
-    <div className="border-b border-[var(--border-subtle)] pb-5">
+    <div className="border-b border-[var(--border-subtle)] pb-5 select-none">
       <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)] flex items-center">
         <span>{label}</span>
         {tooltip && (
@@ -30,7 +30,7 @@ export function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] py-3">
+    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] py-3 select-none">
       <div>
         <div className="text-[13px] text-[var(--text-primary)] flex items-center">
           <span>{label}</span>
@@ -56,7 +56,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
       onClick={() => onChange(!checked)}
       role="switch"
       aria-checked={checked}
-      className={`relative h-5 w-9 rounded-full transition-colors ${
+      className={`shrink-0 relative h-5 w-9 rounded-full transition-colors ${
         checked ? 'bg-[var(--text-primary)]' : 'bg-[var(--border)]'
       }`}
     >

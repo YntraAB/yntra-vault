@@ -4,14 +4,16 @@ import { useBackend } from '@/lib/useBackend';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { ActionTooltip } from './ui/tooltip';
+import { isTauri } from '@/lib/backend';
 
 interface AutotypeButtonProps {
-  value: string;
+  value?: string;
+  entryId?: string;
   className?: string;
   size?: number;
 }
 
-export default function AutotypeButton({ value, className = '', size = 14 }: AutotypeButtonProps) {
+export default function AutotypeButton({ value = '', entryId, className = '', size = 14 }: AutotypeButtonProps) {
   const { t } = useTranslation();
   const { backend } = useBackend();
   const { addToast, settings } = useAppState();
@@ -27,8 +29,12 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
 
       (async () => {
         try {
-          await backend.autotype(value, settings.autotypeCharDelayMs || 15, settings.autotypeSettleDelayMs || 3000);
-          addToast({ message: 'Autotyped successfully', type: 'success' });
+          if (isTauri() && entryId) {
+            await backend.autotypeEntryPassword(entryId, settings.autotypeCharDelayMs || 15, settings.autotypeSettleDelayMs || 3000);
+          } else {
+            await backend.autotype(value, settings.autotypeCharDelayMs || 15, settings.autotypeSettleDelayMs || 3000);
+          }
+          addToast({ message: t('toast.autotyped_success'), type: 'success' });
         } catch (err) {
           addToast({ message: `Autotype failed: ${err}`, type: 'error' });
         } finally {
@@ -36,7 +42,7 @@ export default function AutotypeButton({ value, className = '', size = 14 }: Aut
         }
       })();
     },
-    [backend, autotyping, value, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs]
+    [backend, autotyping, value, entryId, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs]
   );
 
   return (

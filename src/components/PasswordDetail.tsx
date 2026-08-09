@@ -21,10 +21,12 @@ import {
   Image,
   FileArchive,
   Loader2,
+  Zap,
+  Play,
 } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
-import { getBackend } from '@/lib/backend';
+import { getBackend, isTauri } from '@/lib/backend';
 import CopyButton from './CopyButton';
 import AutotypeButton from './AutotypeButton';
 import PasswordInput from './PasswordInput';
@@ -155,11 +157,11 @@ export default function PasswordDetail() {
       await backend.deleteAttachment(selectedEntry.id, attachment.id);
       const updatedAttachments = (selectedEntry.attachments || []).filter(a => a.id !== attachment.id);
       await updateEntry({ ...selectedEntry, attachments: updatedAttachments });
-      addToast({ message: 'Attachment deleted', type: 'success' });
+      addToast({ message: t('toast.attachment_deleted'), type: 'success' });
     } catch (err) {
       addToast({ message: `Failed to delete attachment: ${err}`, type: 'error' });
     }
-  }, [backend, selectedEntry, updateEntry, addToast]);
+  }, [backend, selectedEntry, updateEntry, addToast, t]);
 
   const runSmartLoginAction = useCallback(async () => {
     if (!backend || !selectedEntry) return;
@@ -209,12 +211,14 @@ export default function PasswordDetail() {
         if (!hasSelection && !isInputFocused && selectedEntry.password) {
           e.preventDefault();
           e.stopPropagation();
-          if (backend) {
+          if (isTauri() && backend) {
+            backend.copyEntryPassword(selectedEntry.id, settings.clipboardClearSeconds).catch(() => {});
+          } else if (backend) {
             backend.copyToClipboard(selectedEntry.password, true, settings.clipboardClearSeconds).catch(() => {});
           } else {
             navigator.clipboard.writeText(selectedEntry.password).catch(() => {});
           }
-          addToast({ message: 'Password copied to clipboard', type: 'info' });
+          addToast({ message: t('toast.copied_password'), type: 'info' });
         }
         return;
       }
@@ -224,12 +228,14 @@ export default function PasswordDetail() {
         if (selectedEntry.username) {
           e.preventDefault();
           e.stopPropagation();
-          if (backend) {
+          if (isTauri() && backend) {
+            backend.copyEntryUsername(selectedEntry.id).catch(() => {});
+          } else if (backend) {
             backend.copyToClipboard(selectedEntry.username, false).catch(() => {});
           } else {
             navigator.clipboard.writeText(selectedEntry.username).catch(() => {});
           }
-          addToast({ message: 'Username copied to clipboard', type: 'info' });
+          addToast({ message: t('toast.copied_username'), type: 'info' });
         }
         return;
       }
@@ -244,7 +250,7 @@ export default function PasswordDetail() {
           } else {
             navigator.clipboard.writeText(selectedEntry.url).catch(() => {});
           }
-          addToast({ message: 'Website URL copied to clipboard', type: 'info' });
+          addToast({ message: t('toast.copied_url'), type: 'info' });
         }
         return;
       }
@@ -254,15 +260,19 @@ export default function PasswordDetail() {
         if (selectedEntry.totpSecret) {
           e.preventDefault();
           e.stopPropagation();
-          if (backend) {
+          if (isTauri() && backend) {
+            backend.copyEntryTotp(selectedEntry.id, settings.clipboardClearSeconds)
+              .then(() => addToast({ message: t('toast.copied_totp'), type: 'info' }))
+              .catch(() => addToast({ message: t('toast.totp_failed'), type: 'error' }));
+          } else if (backend) {
             try {
               const totpRes = await backend.generateTotp(selectedEntry.totpSecret);
               if (totpRes && totpRes.code) {
                 await backend.copyToClipboard(totpRes.code, true, settings.clipboardClearSeconds);
-                addToast({ message: `TOTP code (${totpRes.code}) copied to clipboard`, type: 'info' });
+                addToast({ message: t('toast.copied_totp'), type: 'info' });
               }
             } catch {
-              addToast({ message: 'Failed to generate TOTP code', type: 'error' });
+              addToast({ message: t('toast.totp_failed'), type: 'error' });
             }
           }
         }
@@ -391,16 +401,52 @@ export default function PasswordDetail() {
 
   const activeStandard: string[] = [];
   if (data) {
-    if (data.username) activeStandard.push('username');
-    if (data.password) activeStandard.push('password');
-    if (data.url) activeStandard.push('url');
-    if (data.email) activeStandard.push('email');
-    if (data.notes) activeStandard.push('notes');
-    if (data.totpSecret && data.totpSecret !== 'has-totp') activeStandard.push('totpSecret');
+    const layoutCf = data.customFields.find(cf => cf.name === '_field_order');
+    if (layoutCf && layoutCf.value) {
+      const savedOrder = layoutCf.value.split(',').map(s => s.trim()).filter(Boolean);
+      savedOrder.forEach(f => {
+        if (['username', 'password', 'url', 'email', 'notes', 'totpSecret'].includes(f)) {
+          if (isEditing) {
+            activeStandard.push(f);
+          } else {
+            if (f === 'username' && data.username?.trim()) activeStandard.push(f);
+            else if (f === 'password' && data.password && data.password !== '••••••••') activeStandard.push(f);
+            else if (f === 'url' && data.url?.trim()) activeStandard.push(f);
+            else if (f === 'email' && data.email?.trim()) activeStandard.push(f);
+            else if (f === 'notes' && data.notes?.trim()) activeStandard.push(f);
+            else if (f === 'totpSecret' && data.totpSecret && data.totpSecret !== 'has-totp') activeStandard.push(f);
+          }
+        }
+      });
+    } else {
+      if (data.username?.trim()) activeStandard.push('username');
+      if (data.password && data.password !== '••••••••') activeStandard.push('password');
+      if (data.url?.trim()) activeStandard.push('url');
+      if (data.email?.trim()) activeStandard.push('email');
+      if (data.notes?.trim()) activeStandard.push('notes');
+      if (data.totpSecret && data.totpSecret !== 'has-totp') activeStandard.push('totpSecret');
+    }
   }
 
-  const displayCustomFields = data ? data.customFields.filter(cf => cf.name !== '_field_order') : [];
+  const displayCustomFields = data
+    ? data.customFields.filter(cf => cf.name !== '_field_order' && (isEditing || (cf.value && cf.value.trim() !== '')))
+    : [];
   const layoutOrder = data ? getFieldLayout(data.customFields, activeStandard) : [];
+
+  const handleCopyTitle = useCallback(async () => {
+    if (!data?.title) return;
+    try {
+      if (isTauri()) {
+        const backend = await getBackend();
+        await backend.copyToClipboard(data.title, false);
+      } else {
+        await navigator.clipboard.writeText(data.title);
+      }
+      addToast({ message: t('detail.copied_title', { title: data.title }), type: 'info' });
+    } catch {
+      addToast({ message: t('toast.copied_title_failed'), type: 'error' });
+    }
+  }, [data?.title, addToast, t]);
 
   let fieldsContainerClass = 'flex flex-col gap-[2px] p-4';
   let fieldItemPaddingClass = 'px-3 py-2.5';
@@ -414,104 +460,98 @@ export default function PasswordDetail() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <AnimatePresence mode="wait">
-        {isLoadingDetail ? (
-          <motion.div
-            key="loading-skeleton"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.1, ease: 'easeInOut' }}
-            className="flex flex-col"
-          >
-            {/* Header */}
-            <div className="flex items-start justify-between border-b border-[var(--border-subtle)] p-4">
-              <div className="flex items-start gap-3 w-full">
-                <Skeleton className="h-9 w-9 rounded-[3px] shrink-0" />
-                <div className="flex flex-col gap-2 flex-1 min-w-0">
-                  <Skeleton className="h-5 w-40 rounded" />
-                  <Skeleton className="h-4 w-60 rounded" />
-                  <div className="mt-1 flex gap-1">
-                    <Skeleton className="h-5 w-14 rounded-[2px]" />
-                    <Skeleton className="h-5 w-16 rounded-[2px]" />
-                  </div>
+      {isLoadingDetail ? (
+        <div className="flex flex-col">
+          {/* Header */}
+          <div className="flex items-start justify-between border-b border-[var(--border-subtle)] p-4">
+            <div className="flex items-start gap-3 w-full">
+              <Skeleton className="h-9 w-9 rounded-[3px] shrink-0" />
+              <div className="flex flex-col gap-2 flex-1 min-w-0">
+                <Skeleton className="h-5 w-40 rounded" />
+                <Skeleton className="h-4 w-60 rounded" />
+                <div className="mt-1 flex gap-1">
+                  <Skeleton className="h-5 w-14 rounded-[2px]" />
+                  <Skeleton className="h-5 w-16 rounded-[2px]" />
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Fields */}
-            <div className="flex flex-col gap-[2px] p-4">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] px-3 py-2.5">
-                  <Skeleton className="h-6 w-6 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <Skeleton className="h-4 w-32 rounded" />
-                  </div>
+          {/* Fields */}
+          <div className="flex flex-col gap-[2px] p-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] px-3 py-2.5">
+                <Skeleton className="h-6 w-6 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <Skeleton className="h-4 w-32 rounded" />
                 </div>
-              ))}
-            </div>
-          </motion.div>
-        ) : !selectedEntry ? (
-          <motion.div
-            key="no-selection"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.1, ease: 'easeInOut' }}
-            className="flex h-[80vh] flex-col items-center justify-center"
-          >
-            <div className="text-center">
-              <p className="text-[16px] font-semibold text-[var(--text-tertiary)]">{t('detail.select_entry')}</p>
-              <p className="mt-1 text-[13px] text-[var(--text-tertiary)]">
-                {t('detail.select_entry_desc')}
-              </p>
-            </div>
-          </motion.div>
-        ) : !data ? null : (
-          <motion.div
-            key={data.id}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.1, ease: 'easeInOut' }}
-            className="flex flex-col"
-          >
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : !selectedEntry ? (
+        <div className="flex h-[80vh] flex-col items-center justify-center">
+          <div className="text-center">
+            <p className="text-[16px] font-semibold text-[var(--text-tertiary)]">{t('detail.select_entry')}</p>
+            <p className="mt-1 text-[13px] text-[var(--text-tertiary)]">
+              {t('detail.select_entry_desc')}
+            </p>
+          </div>
+        </div>
+      ) : !data ? null : (
+        <div className="flex flex-col">
             {/* Header */}
-            <div className="flex items-start justify-between border-b border-[var(--border-subtle)] p-4">
-              <div className="flex items-start gap-3">
-                {/* Favicon */}
-                <Favicon
-                  url={data.url}
-                  title={data.title}
-                  color={entryTags[0]?.color}
-                  sizeClass="h-9 w-9"
-                  textClass="text-[12px]"
-                />
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-4 select-none">
+              <div className="flex items-start gap-3 min-w-0 flex-1">
+                {/* Favicon with Tooltip */}
+                <ActionTooltip content={data.url ? t('detail.favicon_url_tooltip', { domain: data.url }) : t('detail.favicon_category_tooltip', { title: data.title })}>
+                  <div className="shrink-0">
+                    <Favicon
+                      url={data.url}
+                      title={data.title}
+                      color={entryTags[0]?.color}
+                      sizeClass="h-9 w-9"
+                      textClass="text-[12px]"
+                    />
+                  </div>
+                </ActionTooltip>
 
-                <div className="min-w-0">
-                  <h1 className="text-[20px] font-semibold leading-tight tracking-tight text-[var(--text-primary)]">
-                    {isEditing && editData ? (
-                      <input
-                        type="text"
-                        value={editData.title}
-                        onChange={(e) => setEditData({ ...editData, title: e.target.value })}
-                        className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[20px] font-semibold outline-none focus:border-[var(--border-focus)]"
-                      />
-                    ) : (
-                      data.title
-                    )}
-                  </h1>
+                <div className="flex flex-col min-w-0 flex-1">
+                  {isEditing && editData ? (
+                    <input
+                      type="text"
+                      value={editData.title}
+                      onChange={(e) => setEditData({ ...editData, title: e.target.value })}
+                      className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[20px] font-semibold outline-none focus:border-[var(--border-focus)]"
+                    />
+                  ) : (
+                    <div className="min-w-0 max-w-full">
+                      <ActionTooltip content={t('detail.copy_title_tooltip')}>
+                        <h1
+                          onClick={handleCopyTitle}
+                          className="text-[20px] font-semibold leading-tight tracking-tight text-[var(--text-primary)] truncate max-w-full cursor-pointer select-text hover:text-[var(--text-secondary)] transition-colors inline-block"
+                        >
+                          {data.title}
+                        </h1>
+                      </ActionTooltip>
+                    </div>
+                  )}
                   {data.url && !isEditing && (
-                    <a
-                      href={/^https?:\/\//i.test(data.url) ? data.url : `https://${data.url}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openExternalUrl(data.url);
-                      }}
-                      className="mt-0.5 block truncate text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-                    >
-                      {data.url}
-                    </a>
+                    <div className="min-w-0 max-w-full">
+                      <a
+                        href={/^https?:\/\//i.test(data.url) ? data.url : `https://${data.url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openExternalUrl(data.url);
+                        }}
+                        className="mt-0.5 inline-block truncate text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] max-w-full"
+                      >
+                        {data.url}
+                      </a>
+                    </div>
                   )}
                   {isEditing && editData && (
                     <input
@@ -545,18 +585,18 @@ export default function PasswordDetail() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 {isEditing ? (
                   <>
                     <button
                       onClick={handleSave}
-                      className="h-8 rounded-[3px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)]"
+                      className="h-8 rounded-[3px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)] shrink-0"
                     >
                       {t('common.save')}
                     </button>
                     <button
                       onClick={() => setIsEditing(false)}
-                      className="h-8 rounded-[3px] px-3 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className="h-8 rounded-[3px] px-3 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
                     >
                       {t('common.cancel')}
                     </button>
@@ -567,7 +607,7 @@ export default function PasswordDetail() {
                     <ActionTooltip content={data.pinned ? t('menu.unpin') : t('menu.pin')}>
                       <button
                         onClick={() => togglePin(data.id)}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors ${data.pinned
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors shrink-0 ${data.pinned
                           ? 'text-yellow-500 hover:bg-yellow-500/10'
                           : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                           }`}
@@ -580,7 +620,7 @@ export default function PasswordDetail() {
                     <ActionTooltip content={data.favorite ? t('detail.fav_remove') : t('detail.fav_add')}>
                       <button
                         onClick={() => toggleFavorite(data.id)}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors ${data.favorite
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors shrink-0 ${data.favorite
                           ? 'text-orange-500 hover:bg-orange-500/10'
                           : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                           }`}
@@ -589,33 +629,35 @@ export default function PasswordDetail() {
                       </button>
                     </ActionTooltip>
 
-                    <div className="w-[1px] h-4 bg-[var(--border-subtle)] mx-1" />
+                    <div className="w-[1px] h-4 bg-[var(--border-subtle)] mx-1 shrink-0" />
 
                     <ActionTooltip content={t('detail.run_smart_login')}>
                       <button
                         onClick={handleSmartLoginClick}
-                        className="inline-flex h-8 items-center rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
                       >
-                        <span>{t('detail.smart_login')}</span>
+                        <Zap size={14} className="shrink-0" />
+                        <span className="hidden xl:inline">{t('detail.smart_login')}</span>
                       </button>
                     </ActionTooltip>
 
                     <ActionTooltip content={t('common.edit')}>
                       <button
                         onClick={() => setShowEditModal(true)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
                       >
-                        <Pencil size={14} />
-                        {t('common.edit')}
+                        <Pencil size={14} className="shrink-0" />
+                        <span className="hidden lg:inline">{t('common.edit')}</span>
                       </button>
                     </ActionTooltip>
+
                     <ActionTooltip content={t('common.delete')}>
                       <button
                         onClick={() => setShowDelConfirm(true)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8"
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8 shrink-0"
                       >
-                        <Trash2 size={14} />
-                        {t('common.delete')}
+                        <Trash2 size={14} className="shrink-0" />
+                        <span className="hidden lg:inline">{t('common.delete')}</span>
                       </button>
                     </ActionTooltip>
                   </>
@@ -635,14 +677,14 @@ export default function PasswordDetail() {
                         key="username"
                         initial={{ opacity: 0, y: 2 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.1, delay: i * 0.02 }}
+                        transition={{ duration: 0.05 }}
                         className={`flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] ${fieldItemPaddingClass} transition-colors hover:bg-[var(--bg-hover)]`}
                       >
                         <span className="shrink-0 text-[var(--text-secondary)]">
                           <User size={15} />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
                             {t('detail.username')}
                           </div>
                           {isEditing && editData ? (
@@ -670,18 +712,18 @@ export default function PasswordDetail() {
 
                   if (id === 'password') {
                     return (
-                      <div key="password-group" className="flex flex-col gap-2">
+                      <div key="password-group" className="flex flex-col gap-1">
                         <motion.div
                           initial={{ opacity: 0, y: 2 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.1, delay: i * 0.02 }}
+                          transition={{ duration: 0.05 }}
                           className={`flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] ${fieldItemPaddingClass} transition-colors hover:bg-[var(--bg-hover)]`}
                         >
                           <span className="shrink-0 text-[var(--text-secondary)]">
                             <Key size={15} />
                           </span>
                           <div className="min-w-0 flex-1">
-                            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
                               {t('detail.password')}
                             </div>
                             {isEditing && editData ? (
@@ -706,7 +748,7 @@ export default function PasswordDetail() {
                                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                                 </button>
                               </ActionTooltip>
-                              <AutotypeButton value={data.password} />
+                              <AutotypeButton value={data.password} entryId={selectedEntry.id} />
                               <CopyButton value={data.password} />
                             </div>
                           )}
@@ -723,19 +765,20 @@ export default function PasswordDetail() {
                   }
 
                   if (id === 'url') {
+                    const isAppPath = /[\\\/]|\.exe$|\.app$/i.test(data.url);
                     return (
                       <motion.div
                         key="url"
                         initial={{ opacity: 0, y: 2 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.1, delay: i * 0.02 }}
+                        transition={{ duration: 0.05 }}
                         className={`flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] ${fieldItemPaddingClass} transition-colors hover:bg-[var(--bg-hover)]`}
                       >
                         <span className="shrink-0 text-[var(--text-secondary)]">
                           <Link size={15} />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
                             {t('detail.url')}
                           </div>
                           {isEditing && editData ? (
@@ -743,10 +786,11 @@ export default function PasswordDetail() {
                               type="text"
                               value={editData.url}
                               onChange={(e) => setEditData({ ...editData, url: e.target.value })}
-                              className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-0.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                              placeholder={t('entry_modal.url_app_placeholder')}
+                              className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-0.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono text-[12px]"
                             />
                           ) : (
-                            <div className="truncate text-[13px] text-[var(--text-primary)]">
+                            <div className="truncate text-[13px] text-[var(--text-primary)] font-mono text-[12px]">
                               {data.url}
                             </div>
                           )}
@@ -754,7 +798,7 @@ export default function PasswordDetail() {
                         {!isEditing && (
                           <div className="flex items-center gap-1">
                             {data.url && (
-                              <ActionTooltip content={t('detail.open_website')}>
+                              <ActionTooltip content={isAppPath ? 'Launch Application' : t('detail.open_website')}>
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -764,7 +808,7 @@ export default function PasswordDetail() {
                                   }}
                                   className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95"
                                 >
-                                  <ExternalLink size={14} />
+                                  {isAppPath ? <Play size={14} /> : <ExternalLink size={14} />}
                                 </button>
                               </ActionTooltip>
                             )}
@@ -781,14 +825,14 @@ export default function PasswordDetail() {
                         key="email"
                         initial={{ opacity: 0, y: 2 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.1, delay: i * 0.02 }}
+                        transition={{ duration: 0.05 }}
                         className={`flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] ${fieldItemPaddingClass} transition-colors hover:bg-[var(--bg-hover)]`}
                       >
                         <span className="shrink-0 text-[var(--text-secondary)]">
                           <Mail size={15} />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
                             {t('detail.email')}
                           </div>
                           {isEditing && editData ? (
@@ -820,14 +864,14 @@ export default function PasswordDetail() {
                         key="notes"
                         initial={{ opacity: 0, y: 2 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.1, delay: i * 0.02 }}
+                        transition={{ duration: 0.05 }}
                         className={`flex items-start gap-3 rounded-[3px] bg-[var(--bg-elevated)] ${fieldItemPaddingClass} transition-colors hover:bg-[var(--bg-hover)]`}
                       >
                         <span className="mt-0.5 shrink-0 text-[var(--text-secondary)]">
                           <FileText size={15} />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
                             {t('detail.notes')}
                           </div>
                           {isEditing && editData ? (
@@ -838,11 +882,16 @@ export default function PasswordDetail() {
                               className="mt-1 w-full resize-none rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-1 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                             />
                           ) : (
-                            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--text-primary)]">
+                            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--text-primary)] select-text">
                               {data.notes}
                             </p>
                           )}
                         </div>
+                        {!isEditing && data.notes && (
+                          <div className="shrink-0 mt-0.5">
+                            <CopyButton value={data.notes} />
+                          </div>
+                        )}
                       </motion.div>
                     );
                   }
@@ -895,12 +944,18 @@ export default function PasswordDetail() {
                                   <button
                                     onClick={async () => {
                                       try {
-                                        const backend = await getBackend();
-                                        await backend.copyToClipboard(data.recoveryCodes || '', true, 30);
+                                        if (isTauri()) {
+                                          const backend = await getBackend();
+                                          await backend.copyToClipboard(data.recoveryCodes || '', true, 30);
+                                        } else {
+                                          await navigator.clipboard.writeText(data.recoveryCodes || '');
+                                        }
                                       } catch {
-                                        navigator.clipboard.writeText(data.recoveryCodes || '').catch(() => {});
+                                        if (!isTauri()) {
+                                          navigator.clipboard.writeText(data.recoveryCodes || '').catch(() => {});
+                                        }
                                       }
-                                      addToast({ message: 'All recovery codes copied', type: 'success' });
+                                      addToast({ message: t('detail.copied_all_recovery'), type: 'success' });
                                     }}
                                     className="rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                                   >
@@ -917,16 +972,30 @@ export default function PasswordDetail() {
                 } else {
                   const cf = displayCustomFields.find(c => c.id === id);
                   if (!cf) return null;
+
+                  if (cf.type === 'totp' && cf.value && !isEditing) {
+                    return (
+                      <TOTPField
+                        key={cf.id}
+                        secret={cf.value}
+                        index={i}
+                        label={cf.name || t('detail.totp')}
+                      />
+                    );
+                  }
+
                   const isPassword = cf.type === 'password';
                   const isUrl = cf.type === 'url';
                   const isEmail = cf.type === 'email';
                   const isUsername = cf.type === 'username';
+                  const isTotp = cf.type === 'totp';
 
                   let fieldIcon = <FileText size={15} />;
                   if (isPassword) fieldIcon = <Key size={15} />;
                   else if (isEmail) fieldIcon = <Mail size={15} />;
                   else if (isUrl) fieldIcon = <Globe size={15} />;
                   else if (isUsername) fieldIcon = <User size={15} />;
+                  else if (isTotp) fieldIcon = <ShieldCheck size={15} />;
 
                   return (
                     <motion.div
@@ -940,8 +1009,8 @@ export default function PasswordDetail() {
                         {fieldIcon}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
-                          {cf.name || 'Custom Field'}
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
+                          {cf.name || t('entry.custom_field')}
                         </div>
                         {isEditing && editData ? (
                           <input
@@ -1018,7 +1087,7 @@ export default function PasswordDetail() {
                         if (!window.confirm('Remove the passkey from this entry?')) return;
                         try {
                           await updateEntry({ ...selectedEntry, passkeyAction: 'remove' });
-                          addToast({ message: 'Passkey removed', type: 'success' });
+                          addToast({ message: t('toast.passkey_removed'), type: 'success' });
                         } catch (err) {
                           addToast({ message: `Failed to remove passkey: ${err}`, type: 'error' });
                         }
@@ -1122,9 +1191,8 @@ export default function PasswordDetail() {
                 {t('detail.updated')}: {formatDate(data.updatedAt)}
               </span>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
       {/* Delete confirmation */}
       <DeleteEntryModal
@@ -1198,7 +1266,7 @@ export default function PasswordDetail() {
                     className="accent-[var(--accent)] h-3.5 w-3.5 rounded-[3px] border-[var(--border)] cursor-pointer"
                   />
                   <label htmlFor="dont-show-again" className="text-[11.5px] text-[var(--text-secondary)] cursor-pointer select-none">
-                    Don't show this warning again
+                    {t('smart_login.dont_show_again')}
                   </label>
                 </div>
 
@@ -1208,7 +1276,7 @@ export default function PasswordDetail() {
                     onClick={() => setShowWarningModal(false)}
                     className="h-9 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-[0.98]"
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <button
                     disabled={warningTimer > 0}
@@ -1225,7 +1293,7 @@ export default function PasswordDetail() {
                         : 'bg-[var(--accent)] text-[var(--bg-base)] hover:opacity-90 active:scale-[0.98]'
                     }`}
                   >
-                    {warningTimer > 0 ? `I Understand (${warningTimer}s)` : 'I Understand'}
+                    {warningTimer > 0 ? t('smart_login.i_understand_timer', { seconds: warningTimer }) : t('smart_login.i_understand')}
                   </button>
                 </div>
               </div>
@@ -1254,15 +1322,22 @@ export default function PasswordDetail() {
 }
 
 function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number; onCopy: () => void }) {
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      const backend = await getBackend();
-      await backend.copyToClipboard(code, true, 30);
+      if (isTauri()) {
+        const backend = await getBackend();
+        await backend.copyToClipboard(code, true, 30);
+      } else {
+        await navigator.clipboard.writeText(code);
+      }
     } catch {
-      await navigator.clipboard.writeText(code).catch(() => {});
+      if (!isTauri()) {
+        await navigator.clipboard.writeText(code).catch(() => {});
+      }
     }
     setCopied(true);
     onCopy();
@@ -1270,7 +1345,7 @@ function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number
   };
 
   return (
-    <ActionTooltip content={copied ? 'Copied code!' : 'Click to copy recovery code'}>
+    <ActionTooltip content={copied ? t('detail.copied_code') : t('detail.click_copy_recovery_code')}>
       <button
         onClick={handleCopy}
         onMouseEnter={() => setHovered(true)}
@@ -1281,21 +1356,22 @@ function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number
           {hovered ? code : '••••••••'}
         </span>
         <span className="text-[9px] text-[var(--text-tertiary)] shrink-0 select-none group-hover:text-[var(--text-secondary)] transition-colors ml-2">
-          {copied ? 'Copied' : `#${index + 1}`}
+          {copied ? t('common.copied') : `#${index + 1}`}
         </span>
       </button>
     </ActionTooltip>
   );
 }
 
-function TOTPField({ secret, index }: { secret: string; index: number }) {
+function TOTPField({ secret, index, label = '2FA Code' }: { secret: string; index: number; label?: string }) {
+  const { t } = useTranslation();
   const code = useTotp(secret);
   const isUrgent = code ? code.seconds_remaining <= 5 : false;
 
   // Format code with space in middle: "123 456"
   const formattedCode = code
     ? (code.code.length === 6 ? `${code.code.slice(0, 3)} ${code.code.slice(3)}` : code.code)
-    : 'Generating...';
+    : t('detail.generating');
 
   const progress = code ? code.seconds_remaining / code.period : 1;
 
@@ -1311,7 +1387,7 @@ function TOTPField({ secret, index }: { secret: string; index: number }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] flex items-center gap-1.5">
-          <span>2FA Code</span>
+          <span>{label}</span>
           {code && (
             <CountdownRing progress={progress} size={10} urgent={isUrgent} />
           )}
@@ -1397,12 +1473,17 @@ const PasswordSafetySection: React.FC<{
 
   if (!shouldShowContainer) return null;
 
+  const isBreached = breachStatus?.type === 'Breached';
+  const borderAccentClass = isBreached
+    ? 'border-l-2 border-l-red-500/80 bg-red-500/5'
+    : 'border-l-2 border-l-[var(--border-focus)]';
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 2 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -2 }}
-      className="flex flex-col gap-2 rounded-[3px] bg-[var(--bg-elevated)] px-3 py-2.5 mt-2"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className={`flex flex-col gap-2 rounded-r-[3px] rounded-l-[2px] bg-[var(--bg-elevated)] px-3 py-2 mt-0.5 mb-2 transition-colors ${borderAccentClass}`}
     >
       {showTemporaryStats && <PasswordStrength password={password} />}
       <BreachIndicator

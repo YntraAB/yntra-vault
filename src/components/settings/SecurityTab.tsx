@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Fingerprint, KeyRound, ShieldCheck } from 'lucide-react';
+import { Fingerprint, KeyRound } from 'lucide-react';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
 import { SecurityDashboard } from '../SecurityDashboard';
 import { SettingSection } from './SettingSection';
-import type { BiometricInfo } from '@/lib/backend';
+import { isTauri, type BiometricInfo } from '@/lib/backend';
 
 interface SecurityTabProps {
   bioActive: boolean;
@@ -14,8 +14,6 @@ interface SecurityTabProps {
   hwActive: boolean;
   onOpenHwModal: (mode: 'enroll' | 'test') => void;
   onDisableHw: () => void;
-  primaryUnlock: 'master_password' | 'biometric' | 'hardware_2fa';
-  onSelectPrimaryUnlock: (val: 'master_password' | 'biometric' | 'hardware_2fa') => void;
   onOpenChangePassword: () => void;
 }
 
@@ -26,8 +24,6 @@ export function SecurityTab({
   hwActive,
   onOpenHwModal,
   onDisableHw,
-  primaryUnlock,
-  onSelectPrimaryUnlock,
   onOpenChangePassword,
 }: SecurityTabProps) {
   const { addToast } = useAppState();
@@ -43,6 +39,27 @@ export function SecurityTab({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Security Health Dashboard */}
+      <SettingSection label={t('security.title')}>
+        <SecurityDashboard />
+      </SettingSection>
+
+      {/* Master Password */}
+      <SettingSection
+        label={t('settings.master_password')}
+        tooltip={t('settings.tooltip_change_password')}
+      >
+        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+          {t('security.master_password')}
+        </p>
+        <button
+          onClick={onOpenChangePassword}
+          className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+        >
+          {t('settings.change_password')}
+        </button>
+      </SettingSection>
+
       {/* Biometric Unlock */}
       <SettingSection
         label={t('settings.biometric_unlock')}
@@ -124,82 +141,6 @@ export function SecurityTab({
         </div>
       </SettingSection>
 
-      {/* Primary Choice of Login */}
-      <SettingSection
-        label={t('settings.primary_login')}
-        tooltip={t('settings.tooltip_primary_login')}
-      >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.primary_login_desc')}
-        </p>
-        <div className="grid grid-cols-3 gap-2.5">
-          <button
-            type="button"
-            onClick={() => onSelectPrimaryUnlock('master_password')}
-            className={`flex flex-col items-center justify-center p-3 rounded-[3px] border transition-all text-center ${
-              primaryUnlock === 'master_password'
-                ? 'border-[var(--text-primary)] bg-[var(--text-primary)]/10 text-[var(--text-primary)] font-medium'
-                : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-            }`}
-          >
-            <KeyRound size={18} className="mb-1 text-white" />
-            <span className="text-[12px]">{t('settings.primary_master_password')}</span>
-            <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">{t('settings.always_required')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onSelectPrimaryUnlock('biometric')}
-            disabled={!bioActive}
-            className={`flex flex-col items-center justify-center p-3 rounded-[3px] border transition-all text-center ${
-              !bioActive
-                ? 'opacity-40 cursor-not-allowed border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)]'
-                : primaryUnlock === 'biometric'
-                ? 'border-[var(--text-primary)] bg-[var(--text-primary)]/10 text-[var(--text-primary)] font-medium'
-                : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-            }`}
-          >
-            <Fingerprint size={18} className="mb-1 text-white" />
-            <span className="text-[12px] truncate max-w-full">{bioInfo?.biometric_type?.replace(/\s*\(.*\)/, '') || 'Windows Hello'}</span>
-            <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-              {bioActive ? t('settings.enrolled') : t('settings.not_enrolled')}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onSelectPrimaryUnlock('hardware_2fa')}
-            disabled={!hwActive}
-            className={`flex flex-col items-center justify-center p-3 rounded-[3px] border transition-all text-center ${
-              !hwActive
-                ? 'opacity-40 cursor-not-allowed border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)]'
-                : primaryUnlock === 'hardware_2fa'
-                ? 'border-[var(--text-primary)] bg-[var(--text-primary)]/10 text-[var(--text-primary)] font-medium'
-                : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-            }`}
-          >
-            <ShieldCheck size={18} className="mb-1 text-white" />
-            <span className="text-[12px]">{t('settings.yubikey_title')}</span>
-            <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-              {hwActive ? t('settings.enrolled') : t('settings.not_enrolled')}
-            </span>
-          </button>
-        </div>
-      </SettingSection>
-
-      {/* Master Password */}
-      <SettingSection label={t('settings.master_password')}>
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('security.master_password')}
-        </p>
-        <button
-          onClick={onOpenChangePassword}
-          className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-        >
-          {t('settings.change_password')}
-        </button>
-      </SettingSection>
-
       {/* Emergency Recovery */}
       <SettingSection
         label={t('settings.emergency_recovery')}
@@ -223,7 +164,7 @@ export function SecurityTab({
                 try {
                   const res = await backend.splitMasterPassword(shamirPass);
                   setShares(res);
-                  addToast({ message: 'Recovery shares generated!', type: 'success' });
+                  addToast({ message: t('toast.recovery_shares_generated'), type: 'success' });
                 } catch (err) {
                   addToast({ message: `Split failed: ${err}`, type: 'error' });
                 }
@@ -242,8 +183,8 @@ export function SecurityTab({
                   <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">{s}</span>
                   <button
                     onClick={() => {
-                      if (backend) {
-                        backend.copyToClipboard(s, true, 30).catch(() => {});
+                      if (isTauri()) {
+                        backend?.copyToClipboard(s, true, 30).catch(() => {});
                       } else {
                         navigator.clipboard.writeText(s).catch(() => {});
                       }
@@ -282,7 +223,7 @@ export function SecurityTab({
                 try {
                   const res = await backend.reconstructMasterPasswordHash(shareA, shareB);
                   setReconstructedHash(res);
-                  addToast({ message: 'Hash reconstructed successfully', type: 'success' });
+                  addToast({ message: t('toast.hash_reconstructed'), type: 'success' });
                 } catch (err) {
                   addToast({ message: `Reconstruction failed: ${err}`, type: 'error' });
                 }
@@ -299,11 +240,6 @@ export function SecurityTab({
             )}
           </div>
         </div>
-      </SettingSection>
-
-      {/* Security Health Dashboard */}
-      <SettingSection label={t('security.title')}>
-        <SecurityDashboard />
       </SettingSection>
     </div>
   );
