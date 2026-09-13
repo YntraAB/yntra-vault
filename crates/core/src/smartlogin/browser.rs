@@ -169,6 +169,16 @@ pub async fn launch_and_connect(
         "Launching {} with CDP...", browser_info.name
     ));
 
+    // Clean up stale lock files if left over from taskkill
+    let lock1 = browser_info.profile_dir.join("SingletonLock");
+    if lock1.exists() {
+        let _ = std::fs::remove_file(&lock1);
+    }
+    let lock2 = browser_info.profile_dir.join("lockfile");
+    if lock2.exists() {
+        let _ = std::fs::remove_file(&lock2);
+    }
+
     let exe = browser_info.exe_path.to_string_lossy().to_string();
     let profile = browser_info.profile_dir.to_string_lossy().to_string();
 
@@ -181,18 +191,21 @@ pub async fn launch_and_connect(
         "--disable-extensions-except=".to_string(),
         "--disable-component-update".to_string(),
     ];
+
+    // If running with Administrator privileges on Windows, Chromium sandbox initialization
+    // fails unless sandboxing is explicitly disabled for the elevated broker process.
+    if is_elevated() {
+        logger.log(LoginState::LaunchingBrowser, "Elevated execution detected — configuring browser sandbox flags...");
+        args.push("--no-sandbox".to_string());
+        args.push("--disable-gpu-sandbox".to_string());
+    }
+
     args.push(url.to_string());
 
     let mut cmd = std::process::Command::new(&exe);
     cmd.args(&args);
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-
-    let child = cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         crate::error::VaultError::SmartLoginError(format!(
             "Failed to launch {}: {e}", browser_info.name
         ))
@@ -202,7 +215,7 @@ pub async fn launch_and_connect(
         "Browser PID: {}. Waiting for CDP endpoint...", child.id()
     ));
 
-    let ws_url = wait_for_cdp_endpoint(port, config.page_load_timeout_secs * 1000).await?;
+    let ws_url = wait_for_cdp_endpoint(&mut child, port, config.page_load_timeout_secs * 1000).await?;
     connect_and_get_page(url, &ws_url, config, logger).await
 }
 
@@ -376,13 +389,30 @@ async fn connect_and_get_page(
 
 // ─── Process Management ─────────────────────────────────────────────────
 
+/// Check if current process has Administrator privileges on Windows.
+#[cfg(windows)]
+pub fn is_elevated() -> bool {
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn IsUserAnAdmin() -> i32;
+    }
+    unsafe { IsUserAnAdmin() != 0 }
+}
+
+#[cfg(not(windows))]
+pub fn is_elevated() -> bool {
+    false
+}
+
 /// Close a browser gracefully by process name.
 pub fn close_browser(process_name: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("taskkill")
-            .args(["/IM", process_name, "/F"])
-            .output()
+        use std::os::windows::process::CommandExt;
+        let mut kill_cmd = std::process::Command::new("taskkill");
+        kill_cmd.args(["/IM", process_name, "/F"]);
+        kill_cmd.creation_flags(0x08000000);
+        let output = kill_cmd.output()
             .map_err(|e| format!("Failed to run taskkill: {e}"))?;
 
         if !output.status.success() {
@@ -393,13 +423,15 @@ pub fn close_browser(process_name: &str) -> Result<(), String> {
             }
         }
 
-        // Poll for up to 300ms for process exit
-        for _ in 0..10 {
+        // Poll for up to 3500ms for all browser processes to fully exit
+        for _ in 0..35 {
             if !is_process_running(process_name) {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(30));
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
+        // Additional delay to allow Windows to release file handles on the user profile
+        std::thread::sleep(std::time::Duration::from_millis(300));
         Ok(())
     }
 
@@ -410,7 +442,7 @@ pub fn close_browser(process_name: &str) -> Result<(), String> {
             .output()
             .map_err(|e| format!("Failed to run pkill: {e}"))?;
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(200));
         Ok(())
     }
 }
@@ -419,9 +451,11 @@ pub fn close_browser(process_name: &str) -> Result<(), String> {
 fn get_running_process_list() -> Vec<String> {
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("tasklist")
-            .args(["/NH", "/FO", "CSV"])
-            .output();
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("tasklist");
+        cmd.args(["/NH", "/FO", "CSV"]);
+        cmd.creation_flags(0x08000000);
+        let output = cmd.output();
 
         match output {
             Ok(o) => {
@@ -458,12 +492,23 @@ fn is_process_running(process_name: &str) -> bool {
 // ─── CDP Endpoint Discovery ─────────────────────────────────────────────
 
 /// Poll the CDP debug endpoint until it returns the WebSocket URL.
-async fn wait_for_cdp_endpoint(port: u16, timeout_ms: u64) -> crate::Result<String> {
+async fn wait_for_cdp_endpoint(
+    child: &mut std::process::Child,
+    port: u16,
+    timeout_ms: u64,
+) -> crate::Result<String> {
     let endpoint = format!("http://127.0.0.1:{port}/json/version");
     let deadline = tokio::time::Instant::now()
         + tokio::time::Duration::from_millis(timeout_ms);
 
     loop {
+        // Fast-fail if browser process exited on startup
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(crate::error::VaultError::SmartLoginError(format!(
+                "Browser process exited prematurely with status: {status}. Check if another browser instance or profile lock is active."
+            )));
+        }
+
         if tokio::time::Instant::now() > deadline {
             return Err(crate::error::VaultError::SmartLoginError(
                 "Timeout waiting for CDP endpoint. Browser may have failed to start.".into(),
@@ -485,7 +530,7 @@ async fn wait_for_cdp_endpoint(port: u16, timeout_ms: u64) -> crate::Result<Stri
             }
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
     }
 }
 
