@@ -170,13 +170,11 @@ pub async fn launch_and_connect(
     ));
 
     // Clean up stale lock files if left over from taskkill
-    let lock1 = browser_info.profile_dir.join("SingletonLock");
-    if lock1.exists() {
-        let _ = std::fs::remove_file(&lock1);
-    }
-    let lock2 = browser_info.profile_dir.join("lockfile");
-    if lock2.exists() {
-        let _ = std::fs::remove_file(&lock2);
+    for lock_name in &["SingletonLock", "lockfile", "SingletonCookie", "SingletonSocket"] {
+        let lock_path = browser_info.profile_dir.join(lock_name);
+        if lock_path.exists() {
+            let _ = std::fs::remove_file(&lock_path);
+        }
     }
 
     let exe = browser_info.exe_path.to_string_lossy().to_string();
@@ -188,32 +186,13 @@ pub async fn launch_and_connect(
         "--no-first-run".to_string(),
         "--no-default-browser-check".to_string(),
         "--disable-background-networking".to_string(),
-        "--disable-extensions-except=".to_string(),
+        "--disable-extensions".to_string(),
         "--disable-component-update".to_string(),
     ];
 
-    // If running with Administrator privileges on Windows, Chromium sandbox initialization
-    // fails unless sandboxing is explicitly disabled for the elevated broker process.
-    if is_elevated() {
-        logger.log(LoginState::LaunchingBrowser, "Elevated execution detected — configuring browser sandbox flags...");
-        args.push("--no-sandbox".to_string());
-        args.push("--disable-gpu-sandbox".to_string());
-    }
-
     args.push(url.to_string());
 
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.args(&args);
-
-    let mut child = cmd.spawn().map_err(|e| {
-        crate::error::VaultError::SmartLoginError(format!(
-            "Failed to launch {}: {e}", browser_info.name
-        ))
-    })?;
-
-    logger.log(LoginState::LaunchingBrowser, format!(
-        "Browser PID: {}. Waiting for CDP endpoint...", child.id()
-    ));
+    let mut child = spawn_browser_process(&exe, &args, browser_info, logger)?;
 
     let ws_url = wait_for_cdp_endpoint(&mut child, port, config.page_load_timeout_secs * 1000).await?;
     connect_and_get_page(url, &ws_url, config, logger).await
@@ -489,11 +468,305 @@ fn is_process_running(process_name: &str) -> bool {
     running.iter().any(|p| p.to_lowercase() == p_lower)
 }
 
+/// Browser process handle, either a direct spawned process or a de-elevated process.
+enum BrowserChild {
+    Process(std::process::Child),
+    #[allow(dead_code)]
+    DeElevated { pid: u32 },
+}
+
+impl BrowserChild {
+    fn check_exited(&mut self) -> Option<String> {
+        match self {
+            BrowserChild::Process(c) => {
+                if let Ok(Some(status)) = c.try_wait() {
+                    Some(format!("{status}"))
+                } else {
+                    None
+                }
+            }
+            BrowserChild::DeElevated { pid } => {
+                #[cfg(windows)]
+                {
+                    if !unsafe { win32_deelevate::is_pid_alive(*pid) } {
+                        return Some("process terminated".into());
+                    }
+                    None
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = pid;
+                    None
+                }
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+mod win32_deelevate {
+    use std::ptr;
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[repr(C)]
+    struct StartupInfoW {
+        cb: u32,
+        lp_reserved: *mut u16,
+        lp_desktop: *mut u16,
+        lp_title: *mut u16,
+        dw_x: u32,
+        dw_y: u32,
+        dw_x_size: u32,
+        dw_y_size: u32,
+        dw_x_count_chars: u32,
+        dw_y_count_chars: u32,
+        dw_fill_attribute: u32,
+        dw_flags: u32,
+        w_show_window: u16,
+        cb_reserved2: u16,
+        lp_reserved2: *mut u8,
+        h_std_input: *mut std::ffi::c_void,
+        h_std_output: *mut std::ffi::c_void,
+        h_std_error: *mut std::ffi::c_void,
+    }
+
+    #[repr(C)]
+    struct ProcessInformation {
+        h_process: *mut std::ffi::c_void,
+        h_thread: *mut std::ffi::c_void,
+        dw_process_id: u32,
+        dw_thread_id: u32,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetShellWindow() -> *mut std::ffi::c_void;
+        fn GetWindowThreadProcessId(hwnd: *mut std::ffi::c_void, lpdw_process_id: *mut u32) -> u32;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> *mut std::ffi::c_void;
+        fn GetExitCodeProcess(h_process: *mut std::ffi::c_void, lp_exit_code: *mut u32) -> i32;
+        fn CloseHandle(h_object: *mut std::ffi::c_void) -> i32;
+    }
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn OpenProcessToken(process_handle: *mut std::ffi::c_void, desired_access: u32, token_handle: *mut *mut std::ffi::c_void) -> i32;
+        fn DuplicateTokenEx(
+            h_existing_token: *mut std::ffi::c_void,
+            dw_desired_access: u32,
+            lp_token_attributes: *mut std::ffi::c_void,
+            impersonation_level: i32,
+            token_type: i32,
+            ph_new_token: *mut *mut std::ffi::c_void,
+        ) -> i32;
+        fn CreateProcessWithTokenW(
+            h_token: *mut std::ffi::c_void,
+            dw_logon_flags: u32,
+            lp_application_name: *const u16,
+            lp_command_line: *mut u16,
+            dw_creation_flags: u32,
+            lp_environment: *mut std::ffi::c_void,
+            lp_current_directory: *const u16,
+            lp_startup_info: *const StartupInfoW,
+            lp_process_information: *mut ProcessInformation,
+        ) -> i32;
+    }
+
+    pub unsafe fn is_pid_alive(pid: u32) -> bool {
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut exit_code: u32 = 0;
+            let res = GetExitCodeProcess(handle, &mut exit_code);
+            CloseHandle(handle);
+
+            res != 0 && exit_code == STILL_ACTIVE
+        }
+    }
+
+    pub fn spawn_de_elevated(
+        exe: &str,
+        args: &[String],
+        cwd: &std::path::Path,
+    ) -> Result<u32, String> {
+        unsafe {
+            let shell_wnd = GetShellWindow();
+            if shell_wnd.is_null() {
+                return Err("Explorer shell window not found".into());
+            }
+
+            let mut explorer_pid: u32 = 0;
+            GetWindowThreadProcessId(shell_wnd, &mut explorer_pid);
+            if explorer_pid == 0 {
+                return Err("Failed to get Explorer process ID".into());
+            }
+
+            const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+            let proc_handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, explorer_pid);
+            if proc_handle.is_null() {
+                return Err("Failed to open Explorer process".into());
+            }
+
+            const TOKEN_DUPLICATE: u32 = 0x0002;
+            const TOKEN_QUERY: u32 = 0x0008;
+            const TOKEN_ASSIGN_PRIMARY: u32 = 0x0001;
+            let mut token_handle = ptr::null_mut();
+            let token_res = OpenProcessToken(
+                proc_handle,
+                TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY,
+                &mut token_handle,
+            );
+            CloseHandle(proc_handle);
+
+            if token_res == 0 || token_handle.is_null() {
+                return Err("Failed to open Explorer token".into());
+            }
+
+            const MAXIMUM_ALLOWED: u32 = 0x02000000;
+            const SECURITY_IMPERSONATION: i32 = 2;
+            const TOKEN_PRIMARY: i32 = 1;
+            let mut primary_token = ptr::null_mut();
+            let dup_res = DuplicateTokenEx(
+                token_handle,
+                MAXIMUM_ALLOWED,
+                ptr::null_mut(),
+                SECURITY_IMPERSONATION,
+                TOKEN_PRIMARY,
+                &mut primary_token,
+            );
+            CloseHandle(token_handle);
+
+            if dup_res == 0 || primary_token.is_null() {
+                return Err("Failed to duplicate primary token".into());
+            }
+
+            let mut cmd_line_str = format!("\"{}\"", exe);
+            for arg in args {
+                cmd_line_str.push(' ');
+                if arg.contains(' ') || arg.contains('\t') {
+                    cmd_line_str.push('"');
+                    cmd_line_str.push_str(arg);
+                    cmd_line_str.push('"');
+                } else {
+                    cmd_line_str.push_str(arg);
+                }
+            }
+
+            let mut cmd_line_wide: Vec<u16> = OsStr::new(&cmd_line_str)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let cwd_wide: Vec<u16> = OsStr::new(cwd.as_os_str())
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let mut si: StartupInfoW = std::mem::zeroed();
+            si.cb = std::mem::size_of::<StartupInfoW>() as u32;
+
+            let mut pi: ProcessInformation = std::mem::zeroed();
+
+            let create_res = CreateProcessWithTokenW(
+                primary_token,
+                0,
+                ptr::null(),
+                cmd_line_wide.as_mut_ptr(),
+                0,
+                ptr::null_mut(),
+                cwd_wide.as_ptr(),
+                &si,
+                &mut pi,
+            );
+            CloseHandle(primary_token);
+
+            if create_res == 0 {
+                return Err("CreateProcessWithTokenW failed".into());
+            }
+
+            if !pi.h_thread.is_null() {
+                CloseHandle(pi.h_thread);
+            }
+            if !pi.h_process.is_null() {
+                CloseHandle(pi.h_process);
+            }
+
+            Ok(pi.dw_process_id)
+        }
+    }
+}
+
+fn spawn_browser_process(
+    exe: &str,
+    args: &[String],
+    browser_info: &BrowserInfo,
+    logger: &SmartLoginLogger,
+) -> crate::Result<BrowserChild> {
+    #[cfg(windows)]
+    if is_elevated() {
+        logger.log(LoginState::LaunchingBrowser, "Elevated execution detected — de-elevating browser to interactive desktop session...");
+        let cwd = browser_info.exe_path.parent().unwrap_or(&browser_info.profile_dir);
+        match win32_deelevate::spawn_de_elevated(exe, args, cwd) {
+            Ok(pid) => {
+                logger.log(LoginState::LaunchingBrowser, format!("De-elevated browser PID: {pid}. Waiting for CDP endpoint..."));
+                return Ok(BrowserChild::DeElevated { pid });
+            }
+            Err(e) => {
+                logger.log(LoginState::LaunchingBrowser, format!("De-elevation fallback ({e}) — launching directly with sandbox compatibility flags..."));
+                let mut elevated_args = args.to_vec();
+                elevated_args.push("--no-sandbox".to_string());
+                elevated_args.push("--disable-gpu-sandbox".to_string());
+                elevated_args.push("--test-type".to_string());
+                let mut cmd = std::process::Command::new(exe);
+                cmd.args(&elevated_args);
+                if let Some(parent) = browser_info.exe_path.parent() {
+                    cmd.current_dir(parent);
+                }
+                cmd.stdin(std::process::Stdio::null());
+                cmd.stdout(std::process::Stdio::null());
+                cmd.stderr(std::process::Stdio::null());
+                let c = cmd.spawn().map_err(|err| {
+                    crate::error::VaultError::SmartLoginError(format!(
+                        "Failed to launch {}: {err}", browser_info.name
+                    ))
+                })?;
+                logger.log(LoginState::LaunchingBrowser, format!("Browser PID: {}. Waiting for CDP endpoint...", c.id()));
+                return Ok(BrowserChild::Process(c));
+            }
+        }
+    }
+
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
+    if let Some(parent) = browser_info.exe_path.parent() {
+        cmd.current_dir(parent);
+    }
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+    let c = cmd.spawn().map_err(|e| {
+        crate::error::VaultError::SmartLoginError(format!(
+            "Failed to launch {}: {e}", browser_info.name
+        ))
+    })?;
+    logger.log(LoginState::LaunchingBrowser, format!("Browser PID: {}. Waiting for CDP endpoint...", c.id()));
+    Ok(BrowserChild::Process(c))
+}
+
 // ─── CDP Endpoint Discovery ─────────────────────────────────────────────
 
 /// Poll the CDP debug endpoint until it returns the WebSocket URL.
 async fn wait_for_cdp_endpoint(
-    child: &mut std::process::Child,
+    child: &mut BrowserChild,
     port: u16,
     timeout_ms: u64,
 ) -> crate::Result<String> {
@@ -503,7 +776,7 @@ async fn wait_for_cdp_endpoint(
 
     loop {
         // Fast-fail if browser process exited on startup
-        if let Ok(Some(status)) = child.try_wait() {
+        if let Some(status) = child.check_exited() {
             return Err(crate::error::VaultError::SmartLoginError(format!(
                 "Browser process exited prematurely with status: {status}. Check if another browser instance or profile lock is active."
             )));

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-09-13
+
+### Fixed
+- **Smart Login Release Mode & Administrator Elevation Compatibility**:
+  - Implemented automatic process de-elevation via Windows Explorer primary token duplication (`CreateProcessWithTokenW`) when Yntra Vault is executed with Administrator privileges, enabling Chromium-based browsers (Brave, Chrome, Edge) to launch with full sandbox security under the interactive desktop user session.
+  - Added fallback compatibility mode with `--no-sandbox`, `--disable-gpu-sandbox`, and `--test-type` for non-shell/headless environments.
+  - Corrected Chromium CLI extension flag from malformed `--disable-extensions-except=` to `--disable-extensions`.
+  - Isolated standard streams (`Stdio::null()`) to prevent broken console handle inheritance under Windows GUI subsystem (`windows_subsystem = "windows"`).
+  - Enforced browser executable parent directory as current working directory to prevent permission errors when launched from `Program Files`.
+  - Enhanced stale lock cleanup by removing `SingletonCookie` and `SingletonSocket` alongside `SingletonLock` and `lockfile`.
+
+---
+
 ## [0.1.3] - 2026-09-13
 
 ### Added
@@ -25,8 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed typo in `login.err_enter_password` key reference in `Login.tsx`.
 - **Smart Login Browser Visibility**:
   - Removed `CREATE_NO_WINDOW` (`0x08000000`) flag during browser process spawn on Windows to ensure browser windows always open visibly in production release builds.
-- **Administrator Elevation Sandbox Compatibility**:
-  - Detected elevated UAC execution via Windows `shell32::IsUserAnAdmin` and automatically appended `--no-sandbox` and `--disable-gpu-sandbox` flags when running with Administrator privileges to prevent Chromium sandbox initialization aborts.
 - **Process & Stale Lockfile Cleanup**:
   - Enhanced browser shutdown polling (3.5-second timeout) and automated purging of orphaned `SingletonLock` / lockfile artifacts in user data directories.
 
