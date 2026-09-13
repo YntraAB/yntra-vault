@@ -158,6 +158,7 @@ export const de = {
   'settings.tab_security': 'Sicherheit',
   'settings.tab_backup': 'Sicherung',
   'settings.tab_trash': 'Papierkorb',
+  'settings.trash': 'Papierkorb',
 
   'settings.active_vault': 'Aktiver Tresor',
   'settings.vault_name': 'Tresor-Name',
@@ -213,8 +214,8 @@ export const de = {
   'settings.verify_master_placeholder': 'Master-Passwort bestätigen',
   'settings.split_button': 'Aufteilen',
   'settings.recovery_shares_label': 'Ihre Wiederherstellungsteile:',
-  'settings.share1_placeholder': 'Teil 1 eingeben (SL-SHARE...)',
-  'settings.share2_placeholder': 'Teil 2 eingeben (SL-SHARE...)',
+  'settings.share1_placeholder': 'Teil 1 eingeben (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Teil 2 eingeben (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Rekonstruierter SHA-256 Hash',
   'settings.reconstruct_hash': 'Master-Hash rekonstruieren',
   'settings.cloud_sync': 'Cloud-Synchronisation (WebDAV)',

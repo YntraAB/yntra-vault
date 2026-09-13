@@ -158,6 +158,7 @@ export const fi = {
   'settings.tab_security': 'Turvallisuus',
   'settings.tab_backup': 'Varmuuskopio',
   'settings.tab_trash': 'Roskakori',
+  'settings.trash': 'Roskakori',
 
   'settings.active_vault': 'Aktiivinen holvi',
   'settings.vault_name': 'Holvin nimi',
@@ -213,8 +214,8 @@ export const fi = {
   'settings.verify_master_placeholder': 'Vahvista pääsalasana',
   'settings.split_button': 'Jaa',
   'settings.recovery_shares_label': 'Palautusosasi:',
-  'settings.share1_placeholder': 'Syötä osa 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Syötä osa 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Syötä osa 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Syötä osa 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Uudelleenmuodostettu SHA-256-tiiviste',
   'settings.reconstruct_hash': 'Muodosta päätiiviste uudelleen',
   'settings.cloud_sync': 'Pilvisynchronointi (WebDAV)',

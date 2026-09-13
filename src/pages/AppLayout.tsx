@@ -2,37 +2,26 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
-import { useAppState } from '@/contexts/AppStateContext';
+import { useAuth, useAutoLock } from '@/features/auth';
+import { useSettings, SettingsPanel } from '@/features/settings';
+import { useUi } from '@/contexts/UiContext';
+import { useEntries, PasswordList, PasswordDetail } from '@/features/entries';
+import { useToast } from '@/contexts/ToastContext';
 import { useMobile } from '@/hooks/use-mobile';
 import { useTranslation } from '@/contexts/LanguageContext';
-import Sidebar from '@/components/Sidebar';
-import PasswordList from '@/components/PasswordList';
-import PasswordDetail from '@/components/PasswordDetail';
-import SettingsPanel from '@/components/SettingsPanel';
-import ToastContainer from '@/components/ToastContainer';
-import MobileHeader from '@/components/mobile/MobileHeader';
-import MobileBottomNav from '@/components/mobile/MobileBottomNav';
-import MobileDrawer from '@/components/mobile/MobileDrawer';
-import MobileBottomSheet from '@/components/mobile/MobileBottomSheet';
-import PasswordGenerator from '@/components/PasswordGenerator';
+import { Sidebar, MobileHeader, MobileBottomNav, MobileDrawer, MobileBottomSheet } from '@/components/layout';
+import { ToastContainer } from '@/components/ui';
+import { PasswordGenerator } from '@/features/generator';
 import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
 
 export default function AppLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const {
-    currentVault,
-    isLocked,
-    setIsLocked,
-    settings,
-    settingsOpen,
-    setSettingsOpen,
-    isEntryModalOpen,
-    setIsEntryModalOpen,
-    selectedEntry,
-    selectEntryById,
-    addToast,
-  } = useAppState();
+  const { currentVault, isLocked, lockVault } = useAuth();
+  const { settings } = useSettings();
+  const { settingsOpen, setSettingsOpen, isEntryModalOpen, setIsEntryModalOpen } = useUi();
+  const { selectedEntry, selectEntryById } = useEntries();
+  const { addToast } = useToast();
 
   const { isMobile } = useMobile();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -40,7 +29,6 @@ export default function AppLayout() {
   const [mobileTab, setMobileTab] = useState<'entries' | 'favorites' | 'generator' | 'settings'>('entries');
   const [mobileSearchVisible, setMobileSearchVisible] = useState(false);
 
-  const autoLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Global Keybinds (Lock Vault, New Entry)
   useEffect(() => {
@@ -51,7 +39,7 @@ export default function AppLayout() {
       if (matchesShortcut(e, kb.lockVault)) {
         e.preventDefault();
         e.stopPropagation();
-        setIsLocked(true);
+        lockVault();
         addToast({ message: t('toast.vault_locked'), type: 'info' });
         navigate('/login');
         return;
@@ -77,14 +65,16 @@ export default function AppLayout() {
 
     window.addEventListener('keydown', handleGlobalShortcuts, true);
     return () => window.removeEventListener('keydown', handleGlobalShortcuts, true);
-  }, [settings.keybinds, settingsOpen, isEntryModalOpen, setIsEntryModalOpen, setIsLocked, navigate, addToast]);
+  }, [settings.keybinds, settingsOpen, isEntryModalOpen, setIsEntryModalOpen, lockVault, navigate, addToast, t]);
 
-  // Redirect if not authenticated
+  // Redirect if not authenticated or locked
   useEffect(() => {
     if (!currentVault) {
       navigate('/');
+    } else if (isLocked) {
+      navigate('/login');
     }
-  }, [currentVault, navigate]);
+  }, [currentVault, isLocked, navigate]);
 
   // Native Android & Browser Back Button / Gesture handling on mobile
   useEffect(() => {
@@ -114,28 +104,18 @@ export default function AppLayout() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [isMobile, mobileDrawerOpen, mobileGeneratorOpen, settingsOpen, selectedEntry, setSettingsOpen, selectEntryById]);
 
-  // Auto-lock timer
-  useEffect(() => {
-    if (settings.autoLockMinutes <= 0) return;
+  // Configured Inactivity Auto-Lock
+  const handleAutoLock = useCallback(() => {
+    lockVault();
+    addToast({ message: t('toast.vault_locked'), type: 'info' });
+    navigate('/login');
+  }, [lockVault, addToast, t, navigate]);
 
-    const resetTimer = () => {
-      if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current);
-      autoLockTimerRef.current = setTimeout(() => {
-        setIsLocked(true);
-        navigate('/login');
-      }, settings.autoLockMinutes * 60 * 1000);
-    };
-
-    // Reset on user activity
-    const events = ['mousemove', 'keypress', 'click', 'scroll', 'touchstart'];
-    events.forEach((e) => window.addEventListener(e, resetTimer, { passive: true }));
-    resetTimer();
-
-    return () => {
-      if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current);
-      events.forEach((e) => window.removeEventListener(e, resetTimer));
-    };
-  }, [settings.autoLockMinutes, setIsLocked, navigate]);
+  useAutoLock({
+    autoLockMinutes: settings.autoLockMinutes,
+    isLocked,
+    onLock: handleAutoLock,
+  });
 
   // Apply font size & density
   useEffect(() => {
@@ -160,6 +140,7 @@ export default function AppLayout() {
     isDraggingRef.current = 'sidebar';
     startXRef.current = e.clientX;
     startWidthRef.current = sidebarWidthRef.current;
+    document.body.style.userSelect = 'none';
     e.preventDefault();
   }, []);
 
@@ -167,6 +148,7 @@ export default function AppLayout() {
     isDraggingRef.current = 'list';
     startXRef.current = e.clientX;
     startWidthRef.current = listWidthRef.current;
+    document.body.style.userSelect = 'none';
     e.preventDefault();
   }, []);
 
@@ -188,13 +170,17 @@ export default function AppLayout() {
     };
 
     const handleMouseUp = () => {
-      isDraggingRef.current = null;
+      if (isDraggingRef.current) {
+        document.body.style.userSelect = '';
+        isDraggingRef.current = null;
+      }
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
+      document.body.style.userSelect = '';
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
@@ -206,7 +192,6 @@ export default function AppLayout() {
   }, [updateCSSVars]);
 
   if (isLocked) {
-    navigate('/login');
     return null;
   }
 
@@ -248,7 +233,7 @@ export default function AppLayout() {
               className="flex flex-1 flex-col overflow-hidden"
             >
               {/* Mobile Back Header */}
-              <div className="sticky top-0 z-20 flex h-14 w-full shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-[env(safe-area-inset-top,0px)]">
+              <div className="sticky top-0 z-20 flex h-14 w-full shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-[env(safe-area-inset-top,0px)] select-none">
                 <button
                   onClick={() => selectEntryById(null)}
                   className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[14px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)]"

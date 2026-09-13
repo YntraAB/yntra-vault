@@ -158,6 +158,7 @@ export const cs = {
   'settings.tab_security': 'Zabezpečení',
   'settings.tab_backup': 'Záloha',
   'settings.tab_trash': 'Koš',
+  'settings.trash': 'Koš',
 
   'settings.active_vault': 'Aktivní trezor',
   'settings.vault_name': 'Název trezoru',
@@ -213,8 +214,8 @@ export const cs = {
   'settings.verify_master_placeholder': 'Potvrdit hlavní heslo',
   'settings.split_button': 'Rozdělit',
   'settings.recovery_shares_label': 'Vaše části obnovení:',
-  'settings.share1_placeholder': 'Zadejte část 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Zadejte část 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Zadejte část 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Zadejte část 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Rekonstruovaný SHA-256 Hash',
   'settings.reconstruct_hash': 'Rekonstruovat hlavní hash',
   'settings.cloud_sync': 'Cloudová synchronizace (WebDAV)',

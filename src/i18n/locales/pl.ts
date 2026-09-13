@@ -158,6 +158,7 @@ export const pl = {
   'settings.tab_security': 'Bezpieczeństwo',
   'settings.tab_backup': 'Kopia zapasowa',
   'settings.tab_trash': 'Kosz',
+  'settings.trash': 'Kosz',
 
   'settings.active_vault': 'Aktywna krypta',
   'settings.vault_name': 'Nazwa krypty',
@@ -213,8 +214,8 @@ export const pl = {
   'settings.verify_master_placeholder': 'Potwierdź hasło główne',
   'settings.split_button': 'Podziel',
   'settings.recovery_shares_label': 'Twoje udziały odzyskiwania:',
-  'settings.share1_placeholder': 'Wprowadź Udział 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Wprowadź Udział 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Wprowadź Udział 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Wprowadź Udział 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Zrekonstruowany hash SHA-256',
   'settings.reconstruct_hash': 'Zrekonstruuj hash główny',
   'settings.cloud_sync': 'Synchronizacja w chmurze (WebDAV)',

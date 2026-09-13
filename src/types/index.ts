@@ -37,7 +37,6 @@ export interface AttachmentInfo {
 
 export interface NewAttachment {
   name: string;
-  mimeType: string;
   mime_type: string;
   data: Uint8Array | number[];
 }
@@ -124,6 +123,11 @@ export interface AppSettings {
   windowCaptureProtection?: boolean;
   lockOnFocusLoss?: boolean;
   lockOnSystemLock?: boolean;
+  webdavEnabled?: boolean;
+  webdavUrl?: string;
+  webdavUser?: string;
+  webdavAutoSync?: boolean;
+  p2pAddr?: string;
 }
 
 export interface TOTPState {
@@ -149,5 +153,10 @@ export interface InstalledApp {
   is_system?: boolean;
 }
 
-
-
+export type {
+  IpcCommands,
+  IpcCommandName,
+  IpcCommandArgs,
+  IpcCommandReturn,
+} from './ipc';
+export { invokeIpc } from './ipc';

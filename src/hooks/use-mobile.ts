@@ -1,5 +1,5 @@
-import * as React from "react"
-import { useAppState } from '@/contexts/AppStateContext'
+import * as React from "react";
+import { useSettings } from '@/features/settings';
 
 const MOBILE_BREAKPOINT = 768
 const TABLET_BREAKPOINT = 1024
@@ -25,7 +25,7 @@ export function useIsMobile() {
 
 export function useMobile() {
   const isMobileScreen = useIsMobile();
-  const { settings } = useAppState();
+  const { settings } = useSettings();
   const [isTouch, setIsTouch] = React.useState<boolean>(false);
   const [isTablet, setIsTablet] = React.useState<boolean>(false);
 

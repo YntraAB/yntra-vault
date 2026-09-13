@@ -9,9 +9,9 @@ export default defineConfig({
   server: {
     port: 5173,
     watch: {
-      // Exclude Rust build artifacts from Vite's file watcher
-      // to prevent EBUSY errors on Windows during cargo tauri dev
-      ignored: ['**/src-tauri/**'],
+      // Exclude Rust build artifacts and database files from Vite's file watcher
+      // to prevent EBUSY locks on Windows during cargo tauri dev and atomic saves
+      ignored: ['**/src-tauri/**', '**/target/**', '**/*.vdb*', '**/crates/**'],
     },
   },
   resolve: {

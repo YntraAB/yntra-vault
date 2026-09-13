@@ -158,6 +158,7 @@ export const it = {
   'settings.tab_security': 'Sicurezza',
   'settings.tab_backup': 'Backup',
   'settings.tab_trash': 'Cestino',
+  'settings.trash': 'Cestino',
 
   'settings.active_vault': 'Cassaforte Attiva',
   'settings.vault_name': 'Nome Cassaforte',
@@ -213,8 +214,8 @@ export const it = {
   'settings.verify_master_placeholder': 'Verifica Password Master',
   'settings.split_button': 'Dividi',
   'settings.recovery_shares_label': 'Le Tue Quote di Recupero:',
-  'settings.share1_placeholder': 'Inserisci Quota 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Inserisci Quota 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Inserisci Quota 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Inserisci Quota 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Hash SHA-256 Ricostruito',
   'settings.reconstruct_hash': 'Ricostruisci Hash Master',
   'settings.cloud_sync': 'Sincronizzazione Cloud (WebDAV)',

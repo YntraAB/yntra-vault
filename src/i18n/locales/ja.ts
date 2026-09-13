@@ -158,6 +158,7 @@ export const ja = {
   'settings.tab_security': 'セキュリティ',
   'settings.tab_backup': 'バックアップ',
   'settings.tab_trash': 'ゴミ箱',
+  'settings.trash': 'ゴミ箱',
 
   'settings.active_vault': 'アクティブなボルト',
   'settings.vault_name': 'ボルト名',
@@ -213,8 +214,8 @@ export const ja = {
   'settings.verify_master_placeholder': 'マスターパスワードを確認',
   'settings.split_button': '分割',
   'settings.recovery_shares_label': 'あなたのリカバリーシェア:',
-  'settings.share1_placeholder': 'シェア1を入力 (SL-SHARE...)',
-  'settings.share2_placeholder': 'シェア2を入力 (SL-SHARE...)',
+  'settings.share1_placeholder': 'シェア1を入力 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'シェア2を入力 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': '復元されたSHA-256ハッシュ',
   'settings.reconstruct_hash': 'マスターハッシュを復元',
   'settings.cloud_sync': 'クラウド同期 (WebDAV)',

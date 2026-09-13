@@ -158,6 +158,7 @@ export const el = {
   'settings.tab_security': 'Ασφάλεια',
   'settings.tab_backup': 'Αντίγραφο ασφαλείας',
   'settings.tab_trash': 'Κάδος απορριμμάτων',
+  'settings.trash': 'Κάδος απορριμμάτων',
 
   'settings.active_vault': 'Ενεργό θησαυροφυλάκιο',
   'settings.vault_name': 'Όνομα θησαυροφυλακίου',
@@ -213,8 +214,8 @@ export const el = {
   'settings.verify_master_placeholder': 'Επιβεβαίωση κύριου κωδικού',
   'settings.split_button': 'Διαχωρισμός',
   'settings.recovery_shares_label': 'Τα μερίδια ανάκτησής σας:',
-  'settings.share1_placeholder': 'Εισαγάγετε Μερίδιο 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Εισαγάγετε Μερίδιο 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Εισαγάγετε Μερίδιο 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Εισαγάγετε Μερίδιο 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Ανακατασκευασμένο SHA-256 Hash',
   'settings.reconstruct_hash': 'Ανακατασκευή κύριου hash',
   'settings.cloud_sync': 'Συγχρονισμός cloud (WebDAV)',

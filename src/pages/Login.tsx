@@ -1,12 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen, ShieldCheck, Copy, Fingerprint } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useAppState } from '@/contexts/AppStateContext';
+import { useAuth } from '@/features/auth';
 import { useTranslation } from '@/contexts/LanguageContext';
-import { isTauri, getBackend } from '@/lib/backend';
+import { isTauri, getBackend, openFileDialog } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
-import SecureSecretInput, { type SecureSecretInputRef } from '@/components/SecureSecretInput';
+import { SecureSecretInput, type SecureSecretInputRef } from '@/components/ui';
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_DELAYS = [0, 0, 0, 5000, 15000, 30000]; // ms delay per attempt
@@ -14,7 +14,7 @@ const LOCKOUT_DELAYS = [0, 0, 0, 5000, 15000, 30000]; // ms delay per attempt
 export default function Login() {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { currentVault, setIsLocked, setCurrentVault } = useAppState();
+  const { currentVault, setIsLocked, setCurrentVault } = useAuth();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [useKeyFile, setUseKeyFile] = useState(false);
@@ -25,10 +25,19 @@ export default function Login() {
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricType, setBiometricType] = useState('Windows Hello');
+  const [biometricPrompting, setBiometricPrompting] = useState(false);
   const [hardware2FaRequired, setHardware2FaRequired] = useState(false);
-  const [activeView, setActiveView] = useState<'master_password' | 'biometric' | 'hardware_2fa'>('master_password');
+  const [activeView, setActiveView] = useState<'master_password' | 'biometric' | 'hardware_2fa' | 'emergency_recovery'>('master_password');
+  const [recoveryShareA, setRecoveryShareA] = useState('');
+  const [recoveryShareB, setRecoveryShareB] = useState('');
+  const [recoveredPassword, setRecoveredPassword] = useState('');
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [copiedRecovered, setCopiedRecovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const secretInputRef = useRef<SecureSecretInputRef>(null);
+  const autoBioTriggered = useRef(false);
 
   const isLockedOut = Date.now() < lockedUntil;
   const lockoutRemaining = Math.ceil((lockedUntil - Date.now()) / 1000);
@@ -85,10 +94,16 @@ export default function Login() {
 
           const enabled = await backend.isBiometricEnabled(currentVault.path);
           const info = await backend.checkBiometricAvailable();
-          setBiometricAvailable(enabled && info.available);
+          const isBio = enabled && info.available;
+          setBiometricAvailable(isBio);
+          if (info.biometric_type) {
+            setBiometricType(info.biometric_type);
+          }
 
           if (hwEnabled) {
             setActiveView('hardware_2fa');
+          } else if (isBio) {
+            setActiveView('biometric');
           } else {
             setActiveView('master_password');
           }
@@ -102,19 +117,70 @@ export default function Login() {
   const handleBrowseKeyFile = async () => {
     if (!isTauri()) return;
     try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
+      const selected = await openFileDialog({
         title: 'Select Key File',
         multiple: false,
         filters: [{ name: 'Key File (*.key, *.*)', extensions: ['key', '*'] }],
       });
       if (selected) {
-        setKeyFilePath(typeof selected === 'string' ? selected : String(selected));
+        setKeyFilePath(typeof selected === 'string' ? selected : String(selected[0]));
       }
     } catch (e) {
       console.error('Key file selection failed:', e);
     }
   };
+
+  const handleUnlockBiometric = useCallback(async () => {
+    if (!currentVault?.path || !isTauri()) return;
+    setError('');
+    setBiometricPrompting(true);
+    setLoading(true);
+
+    try {
+      const backend = await getBackend();
+      const info = await backend.unlockVaultBiometric(currentVault.path);
+
+      // Save to recent vaults list & update search paths using internal ID
+      const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+      const newVault = { id: info.id, name: info.name, path: info.path };
+      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+
+      // Update currentVault state in global context with real ID & path
+      setCurrentVault(newVault);
+
+      // Success
+      setIsLocked(false);
+      setAttempts(0);
+      navigate('/app');
+    } catch (err: any) {
+      const msg = err?.message || String(err) || '';
+      console.warn('Biometric unlock attempt:', msg);
+
+      if (msg.toLowerCase().includes('canceled') || msg.toLowerCase().includes('cancelled')) {
+        setError(t('login.biometric_canceled') || 'Biometric prompt was dismissed');
+      } else if (msg.includes('Hardware2FaRequired')) {
+        setHardware2FaRequired(true);
+        setActiveView('hardware_2fa');
+      } else {
+        setError(msg || t('login.biometric_failed') || 'Biometric verification failed');
+        triggerShake();
+      }
+    } finally {
+      setBiometricPrompting(false);
+      setLoading(false);
+    }
+  }, [currentVault, navigate, setCurrentVault, setIsLocked, t, triggerShake]);
+
+  useEffect(() => {
+    if (activeView === 'biometric' && biometricAvailable && !autoBioTriggered.current && !loading) {
+      autoBioTriggered.current = true;
+      const timer = setTimeout(() => {
+        handleUnlockBiometric();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [activeView, biometricAvailable, handleUnlockBiometric, loading]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -141,42 +207,17 @@ export default function Login() {
         return;
       }
 
+      if (hardware2FaRequired) {
+        return handleHardwareUnlock(e);
+      }
+
       setLoading(true);
       try {
         let info;
         if (isTauri() && currentVault) {
           const backend = await getBackend();
           const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
-          if (hardware2FaRequired) {
-            const sampleChallenge = Array.from(crypto.getRandomValues(new Uint8Array(32)));
-            const hwResp = await backend.performHardware2FaChallenge('YubiKeyChallengeResponse', sampleChallenge);
-            info = await backend.openVaultWithHardware2Fa(currentVault.path, password, kf, hwResp);
-          } else {
-            info = await backend.openVaultBytes(currentVault.path, passBytes, kf);
-          }
-
-          // Windows Hello / Biometrics strictly as 2FA Second Factor
-          let isBio2Fa = biometricAvailable;
-          if (!isBio2Fa && isTauri() && currentVault?.path) {
-            const bioEnabled = await backend.isBiometricEnabled(currentVault.path);
-            const bioAvail = await backend.checkBiometricAvailable();
-            isBio2Fa = bioEnabled && bioAvail.available;
-          }
-
-          if (isBio2Fa) {
-            try {
-              await backend.verifyBiometric2Fa("Unlock Yntra Vault");
-            } catch (bioErr: any) {
-              const msg = bioErr?.toString() || 'Windows Hello 2FA failed';
-              if (!msg.includes('canceled')) {
-                setError(`Windows Hello 2FA failed: ${msg}`);
-                triggerShake();
-              } else {
-                setError('Windows Hello 2FA verification cancelled');
-              }
-              return;
-            }
-          }
+          info = await backend.openVaultBytes(currentVault.path, passBytes, kf);
         } else {
           info = { id: currentVault?.id || crypto.randomUUID(), name: currentVault?.name || 'Vault', path: currentVault?.path || '' };
         }
@@ -213,7 +254,8 @@ export default function Login() {
         const errMsg = err.toString();
         if (errMsg.includes('Hardware 2FA / YubiKey required') || errMsg.includes('Hardware2FaRequired')) {
           setHardware2FaRequired(true);
-          setError('Hardware 2FA required. YubiKey challenge initialized — press Submit again.');
+          setActiveView('hardware_2fa');
+          setError(t('error.hardware_2fa_required') || 'Security key required. Touch your hardware key to unlock.');
           triggerShake();
         } else {
           const newAttempts = attempts + 1;
@@ -247,6 +289,151 @@ export default function Login() {
     [password, useKeyFile, keyFilePath, hardware2FaRequired, biometricAvailable, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining]
   );
 
+  const handleHardwareUnlock = useCallback(async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setError('');
+    if (isLockedOut) {
+      setError(`Too many attempts. Try again in ${lockoutRemaining}s`);
+      return;
+    }
+
+    if (!password) {
+      setError(t('login.enter_password') || 'Please enter your master password');
+      inputRef.current?.focus();
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (isTauri() && currentVault) {
+        const backend = await getBackend();
+        const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
+
+        // Retrieve persistent challenge salt and protocol from vault file header
+        const challInfo = await backend.getHardware2FaChallenge(currentVault.path);
+        if (!challInfo || !challInfo.enabled) {
+          throw new Error('Hardware 2FA header not found in vault file');
+        }
+
+        const hwResp = await backend.performHardware2FaChallenge(
+          challInfo.protocol,
+          challInfo.challenge_salt,
+          challInfo.credential_id?.length ? challInfo.credential_id : undefined,
+        );
+
+        const info = await backend.openVaultWithHardware2Fa(currentVault.path, password, kf, hwResp);
+
+        try {
+          const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
+          if (kf) {
+            savedKeyFiles[info.path] = kf;
+          } else {
+            delete savedKeyFiles[info.path];
+          }
+          localStorage.setItem('yntra-vault-keyfiles', JSON.stringify(savedKeyFiles));
+        } catch (e) {
+          console.error('Failed to save key file preference:', e);
+        }
+
+        // Save to recent vaults list & update search paths using internal ID
+        const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+        const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+        const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
+        localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+
+        setCurrentVault(newVault);
+        setIsLocked(false);
+        setPassword('');
+        setAttempts(0);
+        navigate('/app');
+      }
+    } catch (err: any) {
+      console.error('Hardware unlock error:', err);
+      const nextAttempts = attempts + 1;
+      setAttempts(nextAttempts);
+
+      if (nextAttempts >= MAX_ATTEMPTS) {
+        const delay = LOCKOUT_DELAYS[Math.min(nextAttempts, LOCKOUT_DELAYS.length - 1)];
+        setLockedUntil(Date.now() + delay);
+        setError(`Too many failed attempts. Locked for ${delay / 1000}s`);
+      } else {
+        const errMsg = err?.toString() || 'Hardware key authentication failed';
+        if (errMsg.includes('InvalidPassword')) {
+          setError('Incorrect master password');
+        } else if (errMsg.includes('Hardware2FaAuthFailed')) {
+          setError('Security key authentication failed. Touch rejected or timed out.');
+        } else {
+          setError(errMsg);
+        }
+      }
+      triggerShake();
+    } finally {
+      setLoading(false);
+    }
+  }, [password, isLockedOut, lockoutRemaining, currentVault, useKeyFile, keyFilePath, attempts, triggerShake, setCurrentVault, setIsLocked, navigate, t]);
+
+  const handleEmergencyRecovery = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryError('');
+
+    const sA = recoveryShareA.trim();
+    const sB = recoveryShareB.trim();
+
+    if (!sA || !sB) {
+      setRecoveryError('Please provide both recovery shares');
+      return;
+    }
+
+    if (sA === sB) {
+      setRecoveryError('Cannot reconstruct using two identical shares');
+      return;
+    }
+
+    setRecovering(true);
+    try {
+      const backend = await getBackend();
+      const reconstructed = await backend.reconstructMasterPassword(sA, sB);
+      setRecoveredPassword(reconstructed);
+    } catch (err: any) {
+      setRecoveryError(err?.message || String(err) || 'Failed to reconstruct password from shares');
+    } finally {
+      setRecovering(false);
+    }
+  }, [recoveryShareA, recoveryShareB]);
+
+  const handleUnlockWithRecovered = useCallback(async () => {
+    if (!recoveredPassword || !currentVault) return;
+    setLoading(true);
+    setRecoveryError('');
+    const passBytes = new TextEncoder().encode(recoveredPassword);
+    try {
+      let info;
+      if (isTauri() && currentVault) {
+        const backend = await getBackend();
+        const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
+        info = await backend.openVaultBytes(currentVault.path, passBytes, kf);
+      } else {
+        info = { id: currentVault?.id || crypto.randomUUID(), name: currentVault?.name || 'Vault', path: currentVault?.path || '' };
+      }
+
+      const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
+      const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+      const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
+      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+
+      setCurrentVault(newVault);
+      setIsLocked(false);
+      setRecoveredPassword('');
+      navigate('/app');
+    } catch (err: any) {
+      setRecoveryError(err?.message || String(err) || 'Failed to unlock vault with recovered password');
+    } finally {
+      passBytes.fill(0);
+      setLoading(false);
+    }
+  }, [recoveredPassword, currentVault, useKeyFile, keyFilePath, hardware2FaRequired, biometricAvailable, setCurrentVault, setIsLocked, navigate]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -268,26 +455,158 @@ export default function Login() {
           {hardware2FaRequired && (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-medium text-cyan-400">
               <KeyRound size={12} />
-              <span>Hardware 2FA / YubiKey Required</span>
+              <span>{t('login.hardware_key_enrolled') || 'Hardware Key Enrolled'}</span>
             </div>
           )}
           <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
-            {t('login.enter_master')}
+            {activeView === 'biometric'
+              ? (t('login.biometric_desc', { bioType: biometricType.split('(')[0].trim() }) || `Use ${biometricType.split('(')[0].trim()} to unlock your vault`)
+              : activeView === 'hardware_2fa'
+              ? (t('login.hardware_key_desc') || 'Touch your security key to unlock')
+              : activeView === 'emergency_recovery'
+              ? t('login.emergency_recovery')
+              : t('login.enter_master')}
           </p>
         </div>
 
         {/* Views depending on vault capabilities */}
         {activeView === 'hardware_2fa' ? (
-          <div className="mt-6 flex flex-col gap-3">
-            <div className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-5 text-center shadow-sm">
+          <form onSubmit={handleHardwareUnlock} className="mt-6 flex flex-col gap-4">
+            <motion.div
+              animate={shake ? { x: [0, -4, 4, -4, 4, 0] } : {}}
+              transition={{ duration: 0.3 }}
+              className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-5 text-center shadow-sm"
+            >
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
                 <ShieldCheck size={24} />
               </div>
               <h2 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-                YubiKey Primary Login
+                {t('login.hardware_key_title') || 'Two-Factor Authentication'}
               </h2>
               <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                Touch your YubiKey hardware key when prompted
+                {t('login.hardware_key_touch') || 'Enter your master password and touch your security key'}
+              </p>
+
+              {error && (
+                <div className="mt-3 flex w-full items-center gap-1.5 rounded-[3px] bg-[var(--destructive)]/10 px-3 py-1.5 text-[12px] text-[var(--destructive)]">
+                  <AlertTriangle size={13} className="shrink-0" />
+                  <span className="select-text">{error}</span>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Master Password Input (Factor 1) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-medium text-[var(--text-secondary)]">
+                {t('login.master_password') || 'Master Password'}
+              </label>
+              <div className="relative">
+                <input
+                  ref={inputRef}
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (error) setError('');
+                  }}
+                  placeholder={t('login.password_placeholder') || 'Enter master password'}
+                  disabled={loading || isLockedOut}
+                  autoFocus
+                  className="h-10 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] pl-3 pr-10 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none transition-colors focus:border-cyan-500 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                >
+                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Key File Option */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+                  <input
+                    type="checkbox"
+                    checked={useKeyFile}
+                    onChange={(e) => setUseKeyFile(e.target.checked)}
+                    className="rounded border-[var(--border)] text-cyan-500 focus:ring-0"
+                  />
+                  <span>{t('login.use_keyfile') || 'Use Key File'}</span>
+                </label>
+              </div>
+              {useKeyFile && (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={keyFilePath}
+                    onChange={(e) => setKeyFilePath(e.target.value)}
+                    placeholder={t('login.keyfile_path_ph') || 'Path to .key file'}
+                    className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none focus:border-cyan-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleBrowseKeyFile}
+                    className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    {t('common.browse') || 'Browse'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading || !password || isLockedOut}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] bg-cyan-500 text-[13px] font-semibold text-black transition-colors hover:bg-cyan-400 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>{t('login.authenticating_key') || 'Awaiting Key Touch...'}</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck size={16} />
+                  <span>{t('login.touch_key_btn') || 'Unlock with Security Key'}</span>
+                </>
+              )}
+            </button>
+
+            {/* Emergency Recovery */}
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setActiveView('emergency_recovery');
+              }}
+              className="mt-1 text-center text-[12px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer"
+            >
+              {t('login.emergency_recovery_btn') || 'Lost security key? Use emergency recovery shares'}
+            </button>
+          </form>
+        ) : activeView === 'biometric' ? (
+          <div className="mt-6 flex flex-col gap-3">
+            <motion.div
+              animate={shake ? { x: [0, -4, 4, -4, 4, 0] } : {}}
+              transition={{ duration: 0.3 }}
+              className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-5 text-center shadow-sm"
+            >
+              <div className="relative mb-3 flex h-14 w-14 items-center justify-center rounded-full border border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[var(--accent)]">
+                {biometricPrompting ? (
+                  <Loader2 size={26} className="animate-spin text-[var(--accent)]" />
+                ) : (
+                  <Fingerprint size={28} />
+                )}
+              </div>
+              <h2 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+                {t('login.biometric_title') || 'Biometric Unlock'}
+              </h2>
+              <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
+                {biometricType}
               </p>
 
               {error && (
@@ -296,7 +615,31 @@ export default function Login() {
                   <span>{error}</span>
                 </div>
               )}
-            </div>
+            </motion.div>
+
+            {/* Unlock with Biometric button */}
+            <button
+              type="button"
+              onClick={handleUnlockBiometric}
+              disabled={loading}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] bg-[var(--text-primary)] text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>{t('login.biometric_unlocking') || 'Awaiting verification...'}</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint size={16} />
+                  <span>
+                    {error
+                      ? (t('login.biometric_retry') || 'Try Again')
+                      : (t('login.biometric_btn', { bioType: biometricType.split('(')[0].trim() }) || `Unlock with ${biometricType.split('(')[0].trim()}`)}
+                  </span>
+                </>
+              )}
+            </button>
 
             {/* Master Password Fallback */}
             <button
@@ -305,10 +648,123 @@ export default function Login() {
                 setError('');
                 setActiveView('master_password');
               }}
-              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              disabled={loading}
+              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
             >
               <KeyRound size={13} />
-              <span>Master Password Fallback</span>
+              <span>{t('login.use_master_password') || 'Use Master Password'}</span>
+            </button>
+          </div>
+        ) : activeView === 'emergency_recovery' ? (
+          <div className="mt-6 flex flex-col gap-3">
+            <div className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-4 text-center shadow-sm">
+              <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400">
+                <KeyRound size={20} />
+              </div>
+              <h2 className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)]">
+                {t('login.emergency_recovery')}
+              </h2>
+              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                {t('login.emergency_recovery_desc')}
+              </p>
+
+              {recoveryError && (
+                <div className="mt-3 flex w-full items-center gap-1.5 rounded-[3px] bg-[var(--destructive)]/10 px-3 py-1.5 text-left text-[11px] text-[var(--destructive)]">
+                  <AlertTriangle size={13} className="shrink-0" />
+                  <span className="select-text">{recoveryError}</span>
+                </div>
+              )}
+
+              {!recoveredPassword ? (
+                <form onSubmit={handleEmergencyRecovery} className="mt-3 flex w-full flex-col gap-2">
+                  <input
+                    type="text"
+                    value={recoveryShareA}
+                    onChange={(e) => {
+                      setRecoveryShareA(e.target.value);
+                      setRecoveryError('');
+                    }}
+                    placeholder={t('settings.share1_placeholder')}
+                    className="h-8.5 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] placeholder:font-sans placeholder:text-[var(--text-tertiary)]"
+                  />
+                  <input
+                    type="text"
+                    value={recoveryShareB}
+                    onChange={(e) => {
+                      setRecoveryShareB(e.target.value);
+                      setRecoveryError('');
+                    }}
+                    placeholder={t('settings.share2_placeholder')}
+                    className="h-8.5 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] placeholder:font-sans placeholder:text-[var(--text-tertiary)]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={recovering || !recoveryShareA.trim() || !recoveryShareB.trim()}
+                    className="flex h-9 w-full items-center justify-center gap-2 rounded-[3px] bg-[var(--text-primary)] text-[12px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 mt-1 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {recovering ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Reconstructing...</span>
+                      </>
+                    ) : (
+                      <span>{t('login.reconstruct_and_unlock')}</span>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <div className="mt-3 flex w-full flex-col gap-2.5">
+                  <div className="flex flex-col gap-1 rounded-[3px] border border-green-500/30 bg-green-500/10 p-2.5 text-left">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-green-400">
+                      {t('login.recovered_password_title')}
+                    </span>
+                    <span className="font-mono text-[12px] font-semibold text-green-300 break-all select-all">
+                      {recoveredPassword}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isTauri()) {
+                          getBackend().then(b => b.copyToClipboard(recoveredPassword, true, 30)).catch(() => {});
+                        } else {
+                          navigator.clipboard.writeText(recoveredPassword).catch(() => {});
+                        }
+                        setCopiedRecovered(true);
+                        setTimeout(() => setCopiedRecovered(false), 2000);
+                      }}
+                      className="flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                    >
+                      <Copy size={12} />
+                      <span>{copiedRecovered ? (t('common.copied') || 'Copied') : (t('common.copy') || 'Copy')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUnlockWithRecovered}
+                      disabled={loading}
+                      className="flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] text-[11px] font-semibold text-[var(--bg-base)] hover:opacity-90 active:scale-[0.99] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {loading ? <Loader2 size={12} className="animate-spin" /> : null}
+                      <span>{t('login.unlock_btn')}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Back to master password */}
+            <button
+              type="button"
+              onClick={() => {
+                setRecoveryError('');
+                setRecoveredPassword('');
+                setActiveView('master_password');
+              }}
+              className="flex h-8.5 w-full items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+            >
+              <span>{t('login.back_to_password')}</span>
             </button>
           </div>
         ) : (
@@ -318,9 +774,28 @@ export default function Login() {
               animate={shake ? { x: [0, -4, 4, -4, 4, 0] } : {}}
               transition={{ duration: 0.3 }}
             >
+              {hardware2FaRequired && (
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-cyan-400">
+                    {t('login.master_password_fallback') || 'Master Password Fallback Active'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setActiveView('hardware_2fa');
+                    }}
+                    className="text-[11px] text-[var(--text-secondary)] hover:text-cyan-400 transition-colors cursor-pointer"
+                  >
+                    {t('login.use_hardware_key') || 'Use Hardware Key'}
+                  </button>
+                </div>
+              )}
               <div className="relative">
                 <SecureSecretInput
                   ref={secretInputRef}
+                  value={password}
+                  onChange={setPassword}
                   show={showPassword}
                   disabled={loading || isLockedOut}
                   placeholder={t('login.master_password')}
@@ -390,7 +865,7 @@ export default function Login() {
               {error && (
                 <div className="mt-2 flex items-center gap-1.5">
                   <AlertTriangle size={12} className="shrink-0 text-[var(--destructive)]" />
-                  <p className="text-[12px] text-[var(--destructive)]">{error}</p>
+                  <p className="text-[12px] text-[var(--destructive)] select-text">{error}</p>
                 </div>
               )}
             </motion.div>
@@ -412,6 +887,38 @@ export default function Login() {
               )}
             </button>
 
+            {/* Emergency Recovery Option */}
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setActiveView('emergency_recovery');
+              }}
+              disabled={loading}
+              className="mt-1 text-center text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors underline-offset-2 hover:underline cursor-pointer disabled:opacity-50"
+            >
+              {t('login.emergency_recovery_btn')}
+            </button>
+
+            {/* Switch to Biometric Primary if available */}
+            {biometricAvailable && (
+              <div className="mt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setActiveView('biometric');
+                    handleUnlockBiometric();
+                  }}
+                  disabled={loading || isLockedOut}
+                  className="w-full flex h-8 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Fingerprint size={13} className="text-[var(--accent)]" />
+                  <span>{t('login.use_biometric', { bioType: biometricType.split('(')[0].trim() }) || `Unlock with ${biometricType.split('(')[0].trim()}`}</span>
+                </button>
+              </div>
+            )}
+
             {/* Switch to YubiKey Primary if available */}
             {hardware2FaRequired && (
               <div className="mt-1">
@@ -425,7 +932,7 @@ export default function Login() {
                   className="w-full flex h-8 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
                   <ShieldCheck size={13} />
-                  <span>Switch to YubiKey Primary</span>
+                  <span>{t('login.switch_to_hardware_key') || 'Switch to Hardware Key Primary'}</span>
                 </button>
               </div>
             )}

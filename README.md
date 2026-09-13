@@ -4,16 +4,16 @@ An offline-first, zero-knowledge desktop password manager engineered with Rust, 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-red.svg)](SECURITY.md)
-[![Format Spec](https://img.shields.io/badge/.vdb-Format_Spec-purple.svg)](VDB_SPEC.md)
+[![Format Spec](https://img.shields.io/badge/.vdb-Format_Spec-purple.svg)](docs/architecture/VDB_SPEC.md)
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue.svg)](https://tauri.app/)
 
-All credentials remain fully local on your device. Yntra Vault operates with zero cloud servers, zero telemetry, and zero mandatory third-party network connections. Full binary format specification is available in [VDB_SPEC.md](VDB_SPEC.md).
+All credentials remain fully local on your device. Yntra Vault operates with zero cloud servers, zero telemetry, and zero mandatory third-party network connections. Full binary format specification is available in [VDB_SPEC.md](docs/architecture/VDB_SPEC.md).
 
 ---
 
 > [!WARNING]
-> **Pre-Audit Security Notice**: Yntra Vault is currently in active development. While built using multi-layer defense-in-depth cryptography and strict memory zeroization, the codebase **has not yet undergone an independent third-party security audit**. It is provided for community evaluation and testing. Please review [SECURITY.md](SECURITY.md) for details on our threat model and security invariants.
+> **Pre-Audit Security Notice**: Yntra Vault is currently in active development. While built using multi-layer defense-in-depth cryptography and strict memory zeroization, the codebase **has not yet undergone an independent third-party security audit**. It is provided for community evaluation and testing. Please review [SECURITY.md](SECURITY.md) for vulnerability disclosure and [docs/security/cryptographic-proofs.md](docs/security/cryptographic-proofs.md) for formal proofs and security invariants.
 
 ---
 
@@ -42,7 +42,7 @@ graph TD
 ```mermaid
 graph TD
     A["React 19 Frontend<br/><code>src/</code>"] -->|"IPC (Tauri Invoke)"| B["Tauri Shell<br/><code>src-tauri/</code>"]
-    B -->|"Direct Core Calls"| C["Core Engine<br/><code>yntra-vault-core (src-core/)</code>"]
+    B -->|"Direct Core Calls"| C["Core Engine<br/><code>yntra-vault-core (crates/core/)</code>"]
     C -->|"Encrypted I/O"| D["Storage Payload<br/><code>.vdb File</code>"]
 ```
 
@@ -61,7 +61,7 @@ graph TD
 
 ## Feature Matrix & OS Compatibility
 
-| Feature | Backend (`src-core`) | Frontend (`src`) | Supported OS | Status |
+| Feature | Backend (`crates/core`) | Frontend (`src`) | Supported OS | Status |
 |:---|:---:|:---:|:---:|:---:|
 | Vault Create / Unlock / Lock | `manager.rs` | `CreateVaultModal.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Entry CRUD + Custom Fields | `manager.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
@@ -70,11 +70,11 @@ graph TD
 | Password Generator & Diceware | `generator/` | `PasswordGenerator.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Security Audit & Breach Check | `breach/` | `SecurityDashboard.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Encrypted Search (Trigram) | `vault/search.rs` | `PasswordList.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Autotype Engine | `vault/autotype.rs` | `AutotypeButton.tsx` | Windows (UIA) | ✅ Windows |
+| Autotype Engine | `services/autotype/` | `AutotypeButton.tsx` | Windows (UIA) | ✅ Windows |
 | Master Password Re-keying | `manager.rs` | `ChangeMasterPasswordModal.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Password History & Rollback | `vault/history.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Shamir Secret Sharing | `crypto/sharing.rs` | — | Cross-Platform | ⚙️ Core Only |
-| WebDAV Cloud & P2P Vault Sync | `vault/sync.rs` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
+| WebDAV Cloud & P2P Vault Sync | `services/sync/` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
 | Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
 
 ---
@@ -97,7 +97,7 @@ Yntra Vault features an ultra-fast, SOTA command-line interface (`yntra` / `yntr
 
 ```bash
 # Build CLI binary
-cargo build --manifest-path src-core/Cargo.toml --release --bin yntra
+cargo build --manifest-path crates/cli/Cargo.toml --release --bin yntra
 
 # Unlock vault session daemon (sub-5ms command latency)
 yntra unlock
@@ -159,7 +159,7 @@ bun run tauri build
 
 ```bash
 # Core unit tests
-cargo test --lib --manifest-path src-core/Cargo.toml
+cargo test --manifest-path crates/core/Cargo.toml
 
 # Core micro-benchmark suite
 bun run bench
@@ -171,8 +171,11 @@ bun run bench
 ## Documentation & Format Specifications
 
 * **Security Policy & Vulnerability Reporting**: [SECURITY.md](SECURITY.md)
-* **Reproducible Builds Specification & Verification**: [REPRODUCIBLE_BUILDS.md](REPRODUCIBLE_BUILDS.md)
-* **Vault Storage Format (.vdb)**: [INTEGRATION-SDK.md](INTEGRATION-SDK.md)
+* **Cryptographic Proofs & Security Model**: [docs/security/cryptographic-proofs.md](docs/security/cryptographic-proofs.md)
+* **Storage Format Specification (.vdb)**: [VDB_SPEC.md](docs/architecture/VDB_SPEC.md)
+* **Integration SDK & Architecture Reference**: [INTEGRATION-SDK.md](docs/development/INTEGRATION-SDK.md)
+* **Reproducible Builds Specification & Verification**: [REPRODUCIBLE_BUILDS.md](docs/development/REPRODUCIBLE_BUILDS.md)
+* **Documentation Index**: See [docs/README.md](docs/README.md)
 
 ---
 

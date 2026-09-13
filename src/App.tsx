@@ -25,6 +25,7 @@ export default function App() {
             <Route path="/setup" element={<Onboarding />} />
             <Route path="/login" element={<Login />} />
             <Route path="/app" element={<AppLayout />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </LanguageProvider>
       </AppStateProvider>

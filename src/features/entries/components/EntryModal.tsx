@@ -1,0 +1,1432 @@
+/**
+ * EntryModal — Create / Edit password entry
+ * 
+ * Full form with PasswordGenerator integration,
+ * live PasswordStrength, tag selector, custom fields.
+ */
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
+import {
+  X, Plus, Eye, EyeOff, Wand2, GripVertical,
+  Globe, User, Mail, Key, FileText, ShieldCheck, Loader2,
+  Paperclip, Upload, QrCode, FolderOpen,
+} from 'lucide-react';
+import { useEntries } from '../context/EntriesContext';
+import { useUi } from '@/contexts/UiContext';
+import { useToast } from '@/contexts/ToastContext';
+import { useTranslation } from '@/contexts/LanguageContext';
+import { PasswordStrength, BreachIndicator } from '@/features/audit';
+import { PasswordGenerator } from '@/features/generator';
+import { CreateTagModal } from './CreateTagModal';
+import type { PasswordEntry, CustomField, Tag, FieldType, AttachmentInfo } from '@/types';
+import { getFieldLayout, deriveTitle } from '@/lib/utils';
+import { formatBytes, getAttachmentIcon } from '@/lib/formatters';
+import { getBackend } from '@/lib/backend';
+import { ActionTooltip } from '@/components/ui/tooltip';
+import { AttachmentPreviewModal } from './AttachmentPreviewModal';
+import { AppPickerModal } from './AppPickerModal';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+
+interface EntryModalProps {
+  open: boolean;
+  onClose: () => void;
+  /** If provided, opens in edit mode with this entry's data */
+  editEntry?: PasswordEntry | null;
+}
+
+const EMPTY_ENTRY: Omit<PasswordEntry, 'id' | 'createdAt' | 'updatedAt'> = {
+  title: '',
+  username: '',
+  password: '',
+  url: '',
+  email: '',
+  notes: '',
+  tags: [],
+  favorite: false,
+  pinned: false,
+  totpSecret: undefined,
+  customFields: [],
+  hasPasskey: false,
+  passkeyPublicKey: undefined,
+  generatePasskey: undefined,
+  passkeyAction: undefined,
+};
+
+type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret' | 'passkey' | 'attachments';
+
+const PRESETS = [
+  { id: 'login-user', nameKey: 'preset.login_user', fields: ['username', 'password', 'url'] as StandardFieldKey[] },
+  { id: 'login-email', nameKey: 'preset.login_email', fields: ['email', 'password', 'url'] as StandardFieldKey[] },
+  { id: 'note', nameKey: 'preset.secure_note', fields: ['notes'] as StandardFieldKey[] },
+  { id: 'password-only', nameKey: 'preset.password_only', fields: ['password'] as StandardFieldKey[] },
+  { id: 'custom', nameKey: 'preset.custom', fields: [] as StandardFieldKey[] },
+];
+
+export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
+  const { t } = useTranslation();
+  const { addEntry, updateEntry, tags: allTags } = useEntries();
+  const { filterCategory } = useUi();
+  const { addToast } = useToast();
+  const isEdit = !!editEntry;
+
+  const [form, setForm] = useState(EMPTY_ENTRY);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showCustomPasswords, setShowCustomPasswords] = useState<Record<string, boolean>>({});
+  const [showGenerator, setShowGenerator] = useState(false);
+  const [customGeneratorId, setCustomGeneratorId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [fieldsOrder, setFieldsOrder] = useState<string[]>(['username', 'password', 'url']);
+  const [showCreateTagModal, setShowCreateTagModal] = useState(false);
+  const [showAppPicker, setShowAppPicker] = useState(false);
+
+  const [stagedAttachments, setStagedAttachments] = useState<{ name: string; mimeType: string; data: Uint8Array; size: number }[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<AttachmentInfo[]>([]);
+  const [deleteAttachmentIds, setDeleteAttachmentIds] = useState<string[]>([]);
+  const [previewStagedAtt, setPreviewStagedAtt] = useState<{ att: AttachmentInfo; data: Uint8Array } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const qrFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleQrImageScan = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    try {
+      let rawValue: string | null = null;
+
+      if ('BarcodeDetector' in window) {
+        try {
+          const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+          const imageBitmap = await createImageBitmap(file);
+          const barcodes = await detector.detect(imageBitmap);
+          if (barcodes && barcodes.length > 0) {
+            rawValue = barcodes[0].rawValue;
+          }
+        } catch {}
+      }
+
+      if (rawValue) {
+        setForm(prev => ({ ...prev, totpSecret: rawValue! }));
+        setErrors(prev => ({ ...prev, totpSecret: '' }));
+        if (!fieldsOrder.includes('totpSecret')) {
+          setFieldsOrder(prev => [...prev, 'totpSecret']);
+        }
+        addToast({ message: t('entry_modal.qr_scanned_success'), type: 'success' });
+      } else {
+        addToast({
+          message: t('entry_modal.qr_detect_error'),
+          type: 'info',
+        });
+      }
+    } catch (err) {
+      addToast({ message: t('toast.qr_scan_error', { err: String(err) }), type: 'error' });
+    }
+  }, [addToast, fieldsOrder, t]);
+
+  const handleFileSelect = useCallback(async (files: FileList | File[]) => {
+    const newStaged: { name: string; mimeType: string; data: Uint8Array; size: number }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 25 * 1024 * 1024) {
+        addToast({ message: t('toast.file_size_exceeded', { name: file.name }), type: 'error' });
+        continue;
+      }
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        newStaged.push({
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          data: bytes,
+          size: file.size,
+        });
+      } catch (err) {
+        addToast({ message: t('toast.file_read_failed', { name: file.name, err: String(err) }), type: 'error' });
+      }
+    }
+    if (newStaged.length > 0) {
+      setStagedAttachments(prev => [...prev, ...newStaged]);
+      setFieldsOrder(prev => prev.includes('attachments') ? prev : [...prev, 'attachments']);
+    }
+  }, [addToast]);
+
+  const prevTagsRef = useRef<Tag[]>(allTags);
+  useEffect(() => {
+    if (allTags.length > prevTagsRef.current.length) {
+      const newTag = allTags.find(t => !prevTagsRef.current.some(pt => pt.id === t.id));
+      if (newTag && !form.tags.includes(newTag.name)) {
+        setForm(prev => ({ ...prev, tags: [...prev.tags, newTag.name] }));
+      }
+    }
+    prevTagsRef.current = allTags;
+  }, [allTags, form.tags]);
+
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  const activeFields = fieldsOrder.filter((f): f is StandardFieldKey =>
+    ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(f)
+  );
+
+  // Populate form on open
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (open) {
+      if (editEntry) {
+        const populateForm = (target: PasswordEntry) => {
+          const layoutCf = target.customFields.find(cf => cf.name === '_field_order');
+          let initialStandard: StandardFieldKey[] = [];
+
+          if (layoutCf && layoutCf.value) {
+            const savedOrder = layoutCf.value.split(',').map(s => s.trim()).filter(Boolean);
+            initialStandard = savedOrder.filter((f): f is StandardFieldKey =>
+              ['username', 'password', 'url', 'email', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(f)
+            );
+          } else {
+            if (target.username) initialStandard.push('username');
+            if (target.password && target.password !== '••••••••') initialStandard.push('password');
+            if (target.url) initialStandard.push('url');
+            if (target.email) initialStandard.push('email');
+            if (target.notes) initialStandard.push('notes');
+            if (target.totpSecret && target.totpSecret !== 'has-totp') initialStandard.push('totpSecret');
+            if (target.hasPasskey) initialStandard.push('passkey');
+            if (target.attachments && target.attachments.length > 0) initialStandard.push('attachments');
+            if (initialStandard.length === 0) {
+              initialStandard.push('username', 'password', 'url');
+            }
+          }
+
+          const hasAttachments = (target.attachments && target.attachments.length > 0) || ((target.attachmentCount || 0) > 0);
+          if (hasAttachments && !initialStandard.includes('attachments')) {
+            initialStandard.push('attachments');
+          }
+
+          const layout = getFieldLayout(target.customFields, initialStandard);
+          setFieldsOrder(layout);
+
+          setForm({
+            title: target.title,
+            username: target.username,
+            password: target.password === '••••••••' ? '' : target.password,
+            url: target.url,
+            email: target.email,
+            notes: target.notes,
+            tags: [...target.tags],
+            favorite: target.favorite,
+            pinned: target.pinned,
+            totpSecret: target.totpSecret === 'has-totp' ? '' : target.totpSecret,
+            customFields: target.customFields.map(f => ({ ...f })),
+            hasPasskey: target.hasPasskey,
+            passkeyPublicKey: target.passkeyPublicKey,
+            generatePasskey: undefined,
+            passkeyAction: undefined,
+          });
+          setExistingAttachments(target.attachments || []);
+        };
+
+        // Populate with current target first
+        populateForm(editEntry);
+
+        // Fetch full decrypted entry to guarantee complete customFields metadata
+        getBackend().then(backend => {
+          return backend.getEntry(editEntry.id);
+        }).then((decrypted: any) => {
+          if (isCancelled || !decrypted) return;
+          const attachments = (decrypted.attachments || []).map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            size: a.size,
+            mimeType: a.mime_type || a.mimeType,
+            createdAt: a.created_at || a.createdAt,
+          }));
+          const fullEntry: PasswordEntry = {
+            id: decrypted.id,
+            title: decrypted.title,
+            username: decrypted.username,
+            password: decrypted.password,
+            url: decrypted.url,
+            email: decrypted.email,
+            notes: decrypted.notes,
+            tags: decrypted.tags,
+            favorite: decrypted.favorite,
+            pinned: decrypted.pinned,
+            totpSecret: decrypted.totp_secret ?? undefined,
+            customFields: (decrypted.custom_fields || []).map((f: any) => ({
+              id: f.id,
+              name: f.name,
+              type: f.field_type.toLowerCase() as any,
+              value: f.value,
+            })),
+            hasPasskey: decrypted.has_passkey,
+            passkeyPublicKey: decrypted.passkey_public_key ?? undefined,
+            createdAt: decrypted.created_at,
+            updatedAt: decrypted.updated_at,
+            attachments,
+            attachmentCount: attachments.length,
+          };
+          populateForm(fullEntry);
+        }).catch(() => {});
+      } else {
+        setFieldsOrder(['username', 'password', 'url']);
+        const initialTags: string[] = [];
+        let initialFavorite = false;
+
+        if (filterCategory === 'favorites') {
+          initialFavorite = true;
+        } else if (filterCategory && filterCategory !== 'all') {
+          initialTags.push(filterCategory);
+        }
+
+        setForm({
+          ...EMPTY_ENTRY,
+          tags: initialTags,
+          favorite: initialFavorite,
+          customFields: [],
+        });
+        setExistingAttachments([]);
+      }
+      setStagedAttachments([]);
+      setDeleteAttachmentIds([]);
+      setErrors({});
+      setShowGenerator(false);
+      setTimeout(() => titleRef.current?.focus(), 100);
+    }
+
+    return () => {
+      isCancelled = true;
+      stagedAttachments.forEach(att => {
+        try { att.data.fill(0); } catch {}
+      });
+    };
+  }, [open, editEntry, filterCategory]);
+
+  const stagedAttachmentsRef = useRef(stagedAttachments);
+  stagedAttachmentsRef.current = stagedAttachments;
+
+  // Clear sensitive data on close and zeroize staged attachment buffers in RAM
+  useEffect(() => {
+    if (!open) {
+      setForm(prev => ({ ...prev, password: '' }));
+      setShowPassword(false);
+      if (stagedAttachmentsRef.current.length > 0) {
+        stagedAttachmentsRef.current.forEach(att => att.data.fill(0));
+        setStagedAttachments([]);
+      }
+    }
+  }, [open]);
+
+  // Esc to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open && !showGenerator) onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose, showGenerator]);
+
+  const updateField = useCallback(<K extends keyof typeof form>(key: K, value: typeof form[K]) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+    setErrors(prev => ({ ...prev, [key]: '' }));
+  }, []);
+
+  const removeField = useCallback((fieldKey: StandardFieldKey) => {
+    setFieldsOrder(prev => prev.filter(f => f !== fieldKey));
+  }, []);
+
+  const toggleTag = useCallback((tagName: string) => {
+    setForm(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tagName)
+        ? prev.tags.filter(t => t !== tagName)
+        : [...prev.tags, tagName],
+    }));
+  }, []);
+
+  const getFieldSuffix = useCallback((type: FieldType): string => {
+    switch (type) {
+      case 'password': return t('detail.password');
+      case 'email': return t('detail.email');
+      case 'username': return t('detail.username');
+      case 'url': return t('detail.url');
+      case 'totp': return t('detail.totp');
+      case 'notes': return t('preset.secure_note');
+      default: return t('entry.custom_field');
+    }
+  }, [t]);
+
+  const getOrdinal = useCallback((count: number): string => {
+    const ordinalKeys = [
+      'ordinal.1', 'ordinal.2', 'ordinal.3', 'ordinal.4', 'ordinal.5',
+      'ordinal.6', 'ordinal.7', 'ordinal.8', 'ordinal.9'
+    ];
+    if (count <= 0) return '';
+    if (count - 1 < ordinalKeys.length) return t(ordinalKeys[count - 1]);
+    return `${count + 1}`;
+  }, [t]);
+
+  const getFieldCount = useCallback((type: FieldType | StandardFieldKey): number => {
+    let count = 0;
+    if (type === 'username' && fieldsOrder.includes('username')) count++;
+    if (type === 'password' && fieldsOrder.includes('password')) count++;
+    if (type === 'email' && fieldsOrder.includes('email')) count++;
+    if (type === 'url' && fieldsOrder.includes('url')) count++;
+    if ((type === 'totpSecret' || type === 'totp') && fieldsOrder.includes('totpSecret')) count++;
+    if (type === 'notes' && fieldsOrder.includes('notes')) count++;
+    if (type === 'attachments' && fieldsOrder.includes('attachments')) count++;
+
+    const targetType = type === 'totpSecret' ? 'totp' : type;
+    count += form.customFields.filter(f => f.type === targetType).length;
+    return count;
+  }, [fieldsOrder, form.customFields]);
+
+  const getPrefix = useCallback((name: string, suffix: string): string => {
+    if (!suffix) return name;
+    const regex = new RegExp(`\\s+${suffix}$`, 'i');
+    return name.replace(regex, '');
+  }, []);
+
+  const formatFullName = useCallback((prefix: string, suffix: string, defaultOrdinal: string): string => {
+    const p = prefix.trim();
+    if (p) {
+      const regex = new RegExp(`\\s+${suffix}$`, 'i');
+      if (regex.test(p)) return p;
+      return `${p} ${suffix}`;
+    }
+    return defaultOrdinal ? `${defaultOrdinal} ${suffix}` : suffix;
+  }, []);
+
+  const getDropdownLabel = useCallback((key: StandardFieldKey | FieldType, baseLabel: string): string => {
+    const count = getFieldCount(key);
+    if (count === 0) return baseLabel;
+    const ordinal = getOrdinal(count);
+    return `${ordinal} ${baseLabel}`;
+  }, [getFieldCount, getOrdinal]);
+
+  const applyTemplatePreset = useCallback((presetFields: StandardFieldKey[]) => {
+    setFieldsOrder(prev => {
+      const hasAttachments = prev.includes('attachments');
+      return hasAttachments ? [...presetFields, 'attachments'] : presetFields;
+    });
+
+    setForm(prev => {
+      let updatedEmail = prev.email;
+
+      // Transfer username -> email if user entered an email in username before switching to Email template
+      if (presetFields.includes('email') && !updatedEmail.trim() && prev.username.includes('@')) {
+        updatedEmail = prev.username;
+      }
+
+      return {
+        ...prev,
+        email: updatedEmail,
+      };
+    });
+  }, []);
+
+  const addCustomField = useCallback((type: FieldType = 'text', defaultName: string = '') => {
+    const id = crypto.randomUUID();
+    setForm(prev => ({
+      ...prev,
+      customFields: [
+        ...prev.customFields,
+        { id, name: defaultName, type, value: '' },
+      ],
+    }));
+    setFieldsOrder(prev => [...prev, id]);
+  }, []);
+
+  const handleAddField = useCallback((key: StandardFieldKey | FieldType | 'custom') => {
+    if (key === 'attachments') {
+      if (!fieldsOrder.includes('attachments')) {
+        setFieldsOrder(prev => [...prev, 'attachments']);
+      }
+      setDeleteAttachmentIds([]);
+      setTimeout(() => fileInputRef.current?.click(), 50);
+      return;
+    }
+
+    const isStandardKey = ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(key);
+
+    if (isStandardKey && !fieldsOrder.includes(key)) {
+      setFieldsOrder(prev => [...prev, key]);
+
+      if (key === 'email') {
+        setForm(prev => {
+          if (!prev.email.trim() && prev.username.includes('@')) {
+            return { ...prev, email: prev.username };
+          }
+          return prev;
+        });
+      } else if (key === 'username') {
+        setForm(prev => {
+          if (!prev.username.trim() && prev.email.trim()) {
+            return { ...prev, username: prev.email };
+          }
+          return prev;
+        });
+      }
+    } else {
+      let type: FieldType = 'text';
+
+      if (key === 'password') type = 'password';
+      else if (key === 'email') type = 'email';
+      else if (key === 'username') type = 'username';
+      else if (key === 'url') type = 'url';
+      else if (key === 'totpSecret' || key === 'totp') type = 'totp';
+      else if (key === 'notes') type = 'notes';
+      else if (key === 'text') type = 'text';
+
+      const count = getFieldCount(type);
+      const ordinal = getOrdinal(count);
+      const suffix = getFieldSuffix(type);
+      const defaultName = formatFullName(ordinal, suffix, ordinal);
+
+      addCustomField(type, defaultName);
+    }
+  }, [fieldsOrder, addCustomField, getFieldCount, getOrdinal, getFieldSuffix, formatFullName]);
+
+  const updateCustomField = useCallback((id: string, updates: Partial<CustomField>) => {
+    setForm(prev => ({
+      ...prev,
+      customFields: prev.customFields.map(f =>
+        f.id === id ? { ...f, ...updates } : f
+      ),
+    }));
+  }, []);
+
+  const removeCustomField = useCallback((id: string) => {
+    setForm(prev => ({
+      ...prev,
+      customFields: prev.customFields.filter(f => f.id !== id),
+    }));
+    setFieldsOrder(prev => prev.filter(fId => fId !== id));
+  }, []);
+
+  const validate = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (activeFields.includes('password') && !form.password.trim() && !isEdit) {
+      errs.password = 'Password is required';
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    setLoading(true);
+    try {
+      const now = new Date().toISOString();
+      const cleanedForm = { ...form };
+      cleanedForm.title = deriveTitle(cleanedForm.title, cleanedForm.url, cleanedForm.email, cleanedForm.username);
+      if (!activeFields.includes('username')) cleanedForm.username = '';
+      if (!activeFields.includes('password')) cleanedForm.password = '';
+      if (!activeFields.includes('url')) cleanedForm.url = '';
+      if (!activeFields.includes('email')) cleanedForm.email = '';
+      if (!activeFields.includes('notes')) cleanedForm.notes = '';
+      if (!activeFields.includes('totpSecret')) {
+        cleanedForm.totpSecret = undefined;
+        cleanedForm.recoveryCodes = undefined;
+      }
+
+      // Passkey creation/destruction logic based on active fields list
+      if (isEdit && editEntry) {
+        if (activeFields.includes('passkey')) {
+          if (!editEntry.hasPasskey) {
+            cleanedForm.passkeyAction = 'generate';
+          }
+        } else {
+          if (editEntry.hasPasskey) {
+            cleanedForm.passkeyAction = 'remove';
+          }
+        }
+      } else {
+        if (activeFields.includes('passkey')) {
+          cleanedForm.generatePasskey = true;
+        }
+      }
+
+      // Save fields order as metadata
+      let customFields = form.customFields.filter(cf => cf.name !== '_field_order');
+      customFields.push({
+        id: crypto.randomUUID(),
+        name: '_field_order',
+        type: 'text',
+        value: fieldsOrder.join(','),
+      });
+      cleanedForm.customFields = customFields;
+
+      if (stagedAttachments.length > 0) {
+        cleanedForm.newAttachments = stagedAttachments.map(a => ({
+          name: a.name,
+          mime_type: a.mimeType,
+          data: Array.from(a.data),
+        }));
+      }
+      if (deleteAttachmentIds.length > 0) {
+        cleanedForm.deleteAttachmentIds = deleteAttachmentIds;
+      }
+
+      if (isEdit && editEntry) {
+        const updated: PasswordEntry = {
+          ...editEntry,
+          ...cleanedForm,
+          updatedAt: now,
+        };
+        await updateEntry(updated);
+        addToast({ message: t('toast.entry_updated'), type: 'success' });
+      } else {
+        const newEntry: PasswordEntry = {
+          ...cleanedForm,
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now,
+        };
+        await addEntry(newEntry);
+        addToast({ message: t('toast.entry_created'), type: 'success' });
+      }
+      onClose();
+    } catch (err: any) {
+      addToast({ message: t('toast.action_failed', { err: String(err) }), type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            key="entry-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
+            onClick={onClose}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex max-h-[90vh] w-full max-w-[520px] mx-3 flex-col rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
+                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">
+                  {isEdit ? t('common.edit') : t('list.new_entry')}
+                </h2>
+                <button
+                  onClick={onClose}
+                  className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {/* Form */}
+              <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-5 flex-1 min-h-0">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      handleFileSelect(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+
+                {/* Presets / Templates */}
+                <div className="flex flex-col gap-1.5 pb-2 border-b border-[var(--border-subtle)] mb-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                    {t('entry.template')}
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRESETS.map((p) => {
+                      const coreFields = fieldsOrder.filter(f => f !== 'attachments');
+                      const isMatch = p.id === 'custom'
+                        ? !PRESETS.filter(x => x.id !== 'custom').some(x => {
+                            const standardFields = x.fields;
+                            return (
+                              coreFields.length === standardFields.length &&
+                              standardFields.every(f => coreFields.includes(f))
+                            );
+                          })
+                        : (
+                            coreFields.length === p.fields.length &&
+                            p.fields.every(f => coreFields.includes(f))
+                          );
+
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            if (p.id === 'custom') {
+                              setFieldsOrder(prev => prev.includes('attachments') ? ['attachments'] : []);
+                            } else {
+                              applyTemplatePreset(p.fields);
+                            }
+                          }}
+                          className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all ${
+                            isMatch
+                              ? 'bg-[var(--text-primary)] text-[var(--bg-base)] shadow-sm'
+                              : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)]'
+                          }`}
+                        >
+                          {t(p.nameKey)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Title (Locked at the top) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                    <Globe size={14} /> {t('entry.title')}
+                  </label>
+                  <input
+                    ref={titleRef}
+                    type="text"
+                    value={form.title}
+                    onChange={(e) => updateField('title', e.target.value)}
+                    placeholder={deriveTitle('', form.url, form.email, form.username)}
+                    className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+                      errors.title ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
+                    }`}
+                  />
+                  {errors.title && <span className="text-[11px] text-[var(--destructive)]">{errors.title}</span>}
+                </div>
+
+                {/* Reorderable Fields list */}
+                <Reorder.Group axis="y" values={fieldsOrder} onReorder={setFieldsOrder} className="flex flex-col gap-3">
+                  {fieldsOrder
+                    .filter((id) => ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(id) || form.customFields.some((f) => f.id === id))
+                    .map((id) => {
+                    const isStandard = ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(id);
+                    let icon = <FileText size={13} />;
+                    let label = 'Custom Field';
+                    let content = null;
+                    let onRemove = () => {};
+
+                    if (isStandard) {
+                      onRemove = () => removeField(id as StandardFieldKey);
+                      if (id === 'username') {
+                        icon = <User size={13} />;
+                        label = t('detail.username');
+                        content = (
+                          <input
+                            type="text"
+                            value={form.username}
+                            onChange={(e) => updateField('username', e.target.value)}
+                            placeholder="john_doe"
+                            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                          />
+                        );
+                      } else if (id === 'email') {
+                        icon = <Mail size={13} />;
+                        label = t('detail.email');
+                        content = (
+                          <input
+                            type="text"
+                            value={form.email}
+                            onChange={(e) => updateField('email', e.target.value)}
+                            placeholder="john@example.com"
+                            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                          />
+                        );
+                      } else if (id === 'url') {
+                        icon = <Globe size={13} />;
+                        label = t('detail.url');
+                        content = (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={form.url}
+                              onChange={(e) => updateField('url', e.target.value)}
+                              placeholder={t('entry_modal.url_app_placeholder')}
+                              className="h-9 flex-1 min-w-0 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] font-mono text-[12px]"
+                            />
+                            <ActionTooltip content={t('entry_modal.browse_apps_tooltip')}>
+                              <button
+                                type="button"
+                                onClick={() => setShowAppPicker(true)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0"
+                              >
+                                <FolderOpen size={15} />
+                              </button>
+                            </ActionTooltip>
+                          </div>
+                        );
+                      } else if (id === 'totpSecret') {
+                        icon = <ShieldCheck size={13} />;
+                        label = 'TOTP Secret Key (2FA)';
+                        content = (
+                          <div className="flex flex-col gap-2.5">
+                            <input
+                              ref={qrFileInputRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleQrImageScan}
+                            />
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  value={form.totpSecret || ''}
+                                  onChange={(e) => updateField('totpSecret', e.target.value || undefined)}
+                                  placeholder={t('entry.totp_placeholder')}
+                                  className="h-9 flex-1 min-w-0 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 font-mono text-[13px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                                />
+                                <ActionTooltip content={t('entry_modal.scan_qr_tooltip')}>
+                                  <button
+                                    type="button"
+                                    onClick={() => qrFileInputRef.current?.click()}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0"
+                                  >
+                                    <QrCode size={15} />
+                                  </button>
+                                </ActionTooltip>
+                              </div>
+                              <span className="text-[11px] text-[var(--text-tertiary)]">
+                                {t('entry_modal.totp_help_text')}
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[11px] font-medium text-[var(--text-secondary)]">
+                                {t('entry_modal.recovery_codes_label')}
+                              </span>
+                              <textarea
+                                value={form.recoveryCodes || ''}
+                                onChange={(e) => updateField('recoveryCodes', e.target.value || undefined)}
+                                placeholder={t('entry.recovery_placeholder')}
+                                rows={3}
+                                className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                              />
+                            </div>
+                          </div>
+                        );
+                      } else if (id === 'notes') {
+                        icon = <FileText size={13} />;
+                        label = t('preset.secure_note');
+                        content = (
+                          <textarea
+                            value={form.notes}
+                            onChange={(e) => updateField('notes', e.target.value)}
+                            placeholder={t('entry.notes_placeholder')}
+                            rows={2}
+                            className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                          />
+                        );
+                      } else if (id === 'password') {
+                        icon = <Key size={13} />;
+                        label = t('detail.password');
+                        content = (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex gap-1.5">
+                              <div className="relative flex-1">
+                                <input
+                                  type={showPassword ? 'text' : 'password'}
+                                  value={form.password}
+                                  onChange={(e) => updateField('password', e.target.value)}
+                                  placeholder={t('entry.password_placeholder')}
+                                  className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 pr-9 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+                                    errors.password ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
+                                  }`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                                >
+                                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                              </div>
+                              <ActionTooltip content={t('entry.generate_pw')}>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowGenerator(!showGenerator)}
+                                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                    showGenerator
+                                      ? 'border-[var(--text-primary)] bg-[var(--bg-active)] text-[var(--text-primary)]'
+                                      : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                                  }`}
+                                >
+                                  <Wand2 size={15} />
+                                </button>
+                              </ActionTooltip>
+                            </div>
+                            {errors.password && (
+                              <span className="text-[11px] text-[var(--destructive)]">{errors.password}</span>
+                            )}
+                            {form.password && !showGenerator && (
+                              <div className="flex flex-col gap-1.5 mt-1.5 px-0.5">
+                                <PasswordStrength password={form.password} compact />
+                                <BreachIndicator password={form.password} compact />
+                              </div>
+                            )}
+                            <AnimatePresence>
+                              {showGenerator && (
+                                <motion.div
+                                  key="password-generator"
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden rounded-md border border-[var(--border)] mt-1.5"
+                                >
+                                  <PasswordGenerator
+                                    url={form.url}
+                                    onSelect={(pw) => {
+                                      updateField('password', pw);
+                                      setShowGenerator(false);
+                                    }}
+                                    onClose={() => setShowGenerator(false)}
+                                  />
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      } else if (id === 'attachments') {
+                        icon = <Paperclip size={13} />;
+                        label = 'Attachments';
+                        onRemove = () => {
+                          setFieldsOrder(prev => prev.filter(f => f !== 'attachments'));
+                          stagedAttachments.forEach(att => att.data.fill(0));
+                          setStagedAttachments([]);
+                          if (existingAttachments.length > 0) {
+                            setDeleteAttachmentIds(existingAttachments.map(a => a.id));
+                          }
+                        };
+                        content = (
+                          <div className="flex flex-col gap-2">
+                            {(existingAttachments.some(a => !deleteAttachmentIds.includes(a.id)) || stagedAttachments.length > 0) ? (
+                              <div
+                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (e.dataTransfer.files?.length) handleFileSelect(e.dataTransfer.files);
+                                }}
+                                className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto pr-1"
+                              >
+                                {existingAttachments
+                                  .filter(att => !deleteAttachmentIds.includes(att.id))
+                                  .map(att => (
+                                    <div
+                                      key={att.id}
+                                      className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        {getAttachmentIcon(att.mime_type || att.mimeType, att.name)}
+                                        <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                                        <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
+                                      </div>
+                                      <ActionTooltip content={t('entry.remove_attachment')}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setDeleteAttachmentIds(prev => [...prev, att.id])}
+                                          className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                        >
+                                          <X size={13} />
+                                        </button>
+                                      </ActionTooltip>
+                                    </div>
+                                  ))}
+
+                                {stagedAttachments.map((att, idx) => (
+                                  <div
+                                    key={`staged-${idx}`}
+                                    className="flex items-center justify-between rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[12px]"
+                                  >
+                                    <div
+                                      onClick={() => setPreviewStagedAtt({
+                                        att: {
+                                          id: `staged-${idx}`,
+                                          name: att.name,
+                                          mimeType: att.mimeType,
+                                          size: att.size,
+                                          createdAt: new Date().toISOString(),
+                                        },
+                                        data: att.data,
+                                      })}
+                                      className="flex items-center gap-2 min-w-0 cursor-pointer group/att"
+                                    >
+                                      {getAttachmentIcon(att.mimeType, att.name)}
+                                      <span className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-indigo-400 transition-colors text-[12px]">{att.name}</span>
+                                      <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
+                                      <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <ActionTooltip content={t('entry.preview_file')}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewStagedAtt({
+                                            att: {
+                                              id: `staged-${idx}`,
+                                              name: att.name,
+                                              mimeType: att.mimeType,
+                                              size: att.size,
+                                              createdAt: new Date().toISOString(),
+                                            },
+                                            data: att.data,
+                                          })}
+                                          className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                                        >
+                                          <Eye size={13} />
+                                        </button>
+                                      </ActionTooltip>
+                                      <ActionTooltip content={t('entry.remove_file')}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
+                                          className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                        >
+                                          <X size={13} />
+                                        </button>
+                                      </ActionTooltip>
+                                    </div>
+                                  </div>
+                                ))}
+
+                                <button
+                                  type="button"
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border)] py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] mt-1"
+                                >
+                                  <Upload size={12} /> Add More Files
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (e.dataTransfer.files?.length) handleFileSelect(e.dataTransfer.files);
+                                }}
+                                className="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                              >
+                                <Upload size={16} className="text-[var(--text-tertiary)]" />
+                                <span className="text-[11px] font-medium text-[var(--text-secondary)]">{t('entry_modal.drop_files')}</span>
+                                <span className="text-[10px] text-[var(--text-tertiary)]">Files are encrypted with per-entry key (max 25 MB)</span>
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+                    } else {
+                      const cf = form.customFields.find(f => f.id === id);
+                      if (!cf) return null;
+                      onRemove = () => removeCustomField(id);
+
+                      let cfIcon = <FileText size={13} />;
+                      if (cf.type === 'password') cfIcon = <Key size={13} />;
+                      else if (cf.type === 'email') cfIcon = <Mail size={13} />;
+                      else if (cf.type === 'url') cfIcon = <Globe size={13} />;
+                      else if (cf.type === 'username') cfIcon = <User size={13} />;
+                      else if (cf.type === 'totp') cfIcon = <ShieldCheck size={13} />;
+
+                      icon = cfIcon;
+                      label = cf.name || t('entry.custom_field');
+
+                      const suffix = getFieldSuffix(cf.type);
+                      const currentPrefix = getPrefix(cf.name, suffix);
+                      const isPasswordType = cf.type === 'password';
+
+                      content = (
+                        <div className="flex gap-1.5 items-center w-full">
+                          <input
+                            type="text"
+                            value={currentPrefix}
+                            onChange={(e) => {
+                              const newPrefix = e.target.value;
+                              const otherFields = form.customFields.filter(f => f.type === cf.type && f.id !== cf.id);
+                              const count = otherFields.length + (fieldsOrder.includes(cf.type as any) ? 1 : 0);
+                              const defaultOrd = getOrdinal(count);
+                              const updatedName = formatFullName(newPrefix, suffix, defaultOrd);
+                              updateCustomField(cf.id, { name: updatedName });
+                            }}
+                            placeholder={currentPrefix || suffix}
+                            className="h-9 w-[120px] rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-medium shrink-0"
+                          />
+                          <select
+                            value={cf.type || 'text'}
+                            onChange={(e) => {
+                              const newType = e.target.value as FieldType;
+                              const newSuffix = getFieldSuffix(newType);
+                              const otherFields = form.customFields.filter(f => f.type === newType && f.id !== cf.id);
+                              const count = otherFields.length + (fieldsOrder.includes(newType as any) ? 1 : 0);
+                              const defaultOrd = getOrdinal(count);
+                              const updatedName = formatFullName(currentPrefix, newSuffix, defaultOrd);
+                              updateCustomField(cf.id, { type: newType, name: updatedName });
+                            }}
+                            className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--border-focus)] shrink-0"
+                          >
+                            <option value="password">{t('detail.password')}</option>
+                            <option value="email">{t('detail.email')}</option>
+                            <option value="username">{t('detail.username')}</option>
+                            <option value="url">{t('detail.url')}</option>
+                            <option value="notes">{t('preset.secure_note')}</option>
+                            <option value="totp">{t('detail.totp')}</option>
+                            <option value="text">{t('entry.custom_field')}</option>
+                          </select>
+                          <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <div className="relative flex-1 min-w-0">
+                                <input
+                                  type={isPasswordType && !showCustomPasswords[cf.id] ? 'password' : 'text'}
+                                  value={cf.value}
+                                  onChange={(e) => updateCustomField(cf.id, { value: e.target.value })}
+                                  placeholder={isPasswordType ? '••••••••' : 'Value'}
+                                  className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] pl-2.5 pr-8 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono"
+                                />
+                                {isPasswordType && (
+                                  <ActionTooltip content={showCustomPasswords[cf.id] ? t('login.hide_password') : t('login.show_password')}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowCustomPasswords(prev => ({ ...prev, [cf.id]: !prev[cf.id] }))}
+                                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-0.5"
+                                    >
+                                      {showCustomPasswords[cf.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                    </button>
+                                  </ActionTooltip>
+                                )}
+                              </div>
+                              {isPasswordType && (
+                                <ActionTooltip content={t('entry.generate_pw')}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCustomGeneratorId(customGeneratorId === cf.id ? null : cf.id)}
+                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                      customGeneratorId === cf.id
+                                        ? 'border-[var(--text-primary)] bg-[var(--bg-active)] text-[var(--text-primary)]'
+                                        : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                                    }`}
+                                  >
+                                    <Wand2 size={14} />
+                                  </button>
+                                </ActionTooltip>
+                              )}
+                            </div>
+                            <AnimatePresence>
+                              {isPasswordType && customGeneratorId === cf.id && (
+                                <motion.div
+                                  key={`gen-${cf.id}`}
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden rounded-md border border-[var(--border)] mt-1"
+                                >
+                                  <PasswordGenerator
+                                    url={form.url}
+                                    onSelect={(pw) => {
+                                      updateCustomField(cf.id, { value: pw });
+                                      setShowCustomPasswords(prev => ({ ...prev, [cf.id]: true }));
+                                      setCustomGeneratorId(null);
+                                    }}
+                                    onClose={() => setCustomGeneratorId(null)}
+                                  />
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Reorder.Item
+                        key={id}
+                        value={id}
+                        className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3.5 shadow-sm hover:border-[var(--border)] transition-colors cursor-default select-none"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)]">
+                            <span className="cursor-grab text-[var(--text-tertiary)] active:cursor-grabbing hover:text-[var(--text-primary)] transition-colors p-0.5">
+                              <GripVertical size={13} />
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              {icon} {label}
+                            </span>
+                          </div>
+                          <ActionTooltip content={t('common.delete')}>
+                            <button
+                              type="button"
+                              onClick={onRemove}
+                              className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+                            >
+                              <X size={12} />
+                            </button>
+                          </ActionTooltip>
+                        </div>
+
+                        {content}
+                      </Reorder.Item>
+                    );
+                  })}
+                </Reorder.Group>
+
+                {/* Tags */}
+                <div className="flex flex-col gap-1.5 mt-1">
+                  <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('sidebar.tags')}</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allTags.map((tag: Tag) => {
+                      const active = form.tags.includes(tag.name);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleTag(tag.name)}
+                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-all ${
+                            active
+                              ? 'text-white shadow-sm opacity-100'
+                              : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] opacity-60'
+                          }`}
+                          style={{
+                            backgroundColor: active ? tag.color : undefined,
+                          }}
+                        >
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: active ? '#ffffff' : tag.color }}
+                          />
+                          {tag.name}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateTagModal(true)}
+                      className="flex items-center gap-1.5 rounded-md border border-dashed border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-focus)] hover:text-[var(--text-primary)]"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Add Field Dropdown */}
+                <div className="flex gap-2 pt-1">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      >
+                        <Plus size={14} />
+                        <span>{t('entry.add_field')}</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-48">
+                      {!fieldsOrder.includes('username') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('username')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <User size={13} />
+                          <span>{getDropdownLabel('username', t('detail.username'))}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('password') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('password')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <Key size={13} />
+                          <span>{getDropdownLabel('password', t('detail.password'))}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('email') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('email')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <Mail size={13} />
+                          <span>{getDropdownLabel('email', t('detail.email'))}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('url') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('url')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <Globe size={13} />
+                          <span>{getDropdownLabel('url', t('detail.url'))}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('totpSecret') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('totpSecret')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <ShieldCheck size={13} />
+                          <span>{getDropdownLabel('totpSecret', t('detail.totp'))}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('notes') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('notes')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <FileText size={13} />
+                          <span>{getDropdownLabel('notes', t('preset.secure_note'))}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('attachments') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('attachments')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <Paperclip size={13} />
+                          <span>Attachments</span>
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => handleAddField('text')}
+                        className="flex items-center gap-2 text-[12px] cursor-pointer"
+                      >
+                        <Plus size={13} />
+                        <span>{t('entry.custom_field')}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-between border-t border-[var(--border-subtle)] pt-4 mt-2">
+                  <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer select-none hover:text-[var(--text-primary)] transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={form.favorite}
+                      onChange={(e) => updateField('favorite', e.target.checked)}
+                      className="accent-[var(--accent)] h-3.5 w-3.5 cursor-pointer"
+                    />
+                    {t('detail.favorite')}
+                  </label>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      {t('common.cancel')}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-5 text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-50"
+                    >
+                      {loading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          {t('common.loading')}
+                        </>
+                      ) : isEdit ? (
+                        t('common.save')
+                      ) : (
+                        t('list.new_entry')
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <CreateTagModal
+        open={showCreateTagModal}
+        onClose={() => setShowCreateTagModal(false)}
+      />
+
+      <AttachmentPreviewModal
+        open={!!previewStagedAtt}
+        onClose={() => setPreviewStagedAtt(null)}
+        attachment={previewStagedAtt?.att || null}
+        data={previewStagedAtt?.data || null}
+      />
+
+      <AppPickerModal
+        open={showAppPicker}
+        onClose={() => setShowAppPicker(false)}
+        onSelectApp={(appPath) => updateField('url', appPath)}
+      />
+    </>
+  );
+}
+
+// ─── Field Component (Only used for Title input compatibility if needed) ───
+
+import React from 'react';
+
+interface FieldProps {
+  icon?: React.ReactNode;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  error?: string;
+  required?: boolean;
+  type?: string;
+  onRemove?: () => void;
+}
+
+const Field = React.forwardRef<HTMLInputElement, FieldProps>(
+  ({ icon, label, value, onChange, placeholder, error, required, type = 'text', onRemove }, ref) => (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between text-[12px] font-medium text-[var(--text-secondary)]">
+        <span className="flex items-center gap-1.5">
+          {icon} {label}
+          {required && <span className="text-[var(--destructive)]">*</span>}
+        </span>
+        {onRemove && (
+          <ActionTooltip content={`Remove ${label}`}>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </ActionTooltip>
+        )}
+      </div>
+      <input
+        ref={ref}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+          error ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
+        }`}
+      />
+      {error && <span className="text-[11px] text-[var(--destructive)]">{error}</span>}
+    </div>
+  )
+);
+Field.displayName = 'Field';
+
+export default EntryModal;

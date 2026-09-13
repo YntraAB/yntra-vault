@@ -158,6 +158,7 @@ export const zhCN = {
   'settings.tab_security': '安全',
   'settings.tab_backup': '备份',
   'settings.tab_trash': '回收站',
+  'settings.trash': '回收站',
 
   'settings.active_vault': '当前密码库',
   'settings.vault_name': '密码库名称',
@@ -213,8 +214,8 @@ export const zhCN = {
   'settings.verify_master_placeholder': '验证主密码',
   'settings.split_button': '切分',
   'settings.recovery_shares_label': '您的恢复碎片：',
-  'settings.share1_placeholder': '输入碎片 1 (SL-SHARE...)',
-  'settings.share2_placeholder': '输入碎片 2 (SL-SHARE...)',
+  'settings.share1_placeholder': '输入碎片 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': '输入碎片 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': '重构的 SHA-256 哈希',
   'settings.reconstruct_hash': '重构主哈希',
   'settings.cloud_sync': '云端同步 (WebDAV)',

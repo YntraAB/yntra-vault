@@ -158,6 +158,7 @@ export const ko = {
   'settings.tab_security': '보안',
   'settings.tab_backup': '백업',
   'settings.tab_trash': '휴지통',
+  'settings.trash': '휴지통',
 
   'settings.active_vault': '활성 보관함',
   'settings.vault_name': '보관함 이름',
@@ -213,8 +214,8 @@ export const ko = {
   'settings.verify_master_placeholder': '마스터 비밀번호 확인',
   'settings.split_button': '분할',
   'settings.recovery_shares_label': '귀하의 복구 조각:',
-  'settings.share1_placeholder': '조각 1 입력 (SL-SHARE...)',
-  'settings.share2_placeholder': '조각 2 입력 (SL-SHARE...)',
+  'settings.share1_placeholder': '조각 1 입력 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': '조각 2 입력 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': '재구성된 SHA-256 해시',
   'settings.reconstruct_hash': '마스터 해시 재구성',
   'settings.cloud_sync': '클라우드 동기화 (WebDAV)',

@@ -43,6 +43,14 @@ export interface Hardware2FaInfo {
   connected_keys: HardwareKeyInfo[];
 }
 
+export interface Hardware2FaChallengeInfo {
+  enabled: boolean;
+  protocol: Hardware2FaProtocol;
+  key_name: string;
+  challenge_salt: number[];
+  credential_id: number[];
+}
+
 export interface MergeStats {
   entries_added: number;
   entries_updated: number;
@@ -269,14 +277,14 @@ export interface ParsedImportEntry {
   totp_secret: string | null;
   tags: string[];
   is_duplicate: boolean;
-  duplicate_reason?: string;
+  duplicate_reason?: string | null;
 }
 
 export interface ImportPreviewResult {
   format_detected: string;
   detected_format_key: string;
   is_format_mismatch: boolean;
-  suggested_brand_name?: string;
+  suggested_brand_name?: string | null;
   total_found: number;
   entries: ParsedImportEntry[];
   duplicates_count: number;
@@ -311,6 +319,28 @@ export interface AutofillDatasetPayload {
   asset_links_verified: boolean;
 }
 
+export interface DialogFilter {
+  name: string;
+  extensions: string[];
+}
+
+export interface OpenDialogOptions {
+  title?: string;
+  filters?: DialogFilter[];
+  defaultPath?: string;
+  multiple?: boolean;
+  directory?: boolean;
+  recursive?: boolean;
+  canCreateDirectories?: boolean;
+}
+
+export interface SaveDialogOptions {
+  title?: string;
+  filters?: DialogFilter[];
+  defaultPath?: string;
+  canCreateDirectories?: boolean;
+}
+
 
 
 
@@ -330,12 +360,15 @@ export interface YntraVaultBackend {
   getEntry(id: string): Promise<DecryptedEntry>;
   addEntry(entry: NewEntry): Promise<string>;
   updateEntry(id: string, update: UpdateEntry): Promise<void>;
+  updateEntryBreachStatus(id: string, breachStatus: BreachStatus): Promise<void>;
+  saveVault(): Promise<void>;
+  reloadVault(): Promise<void>;
   deleteEntry(id: string): Promise<void>;
   toggleFavorite(id: string): Promise<boolean>;
   togglePin(id: string): Promise<boolean>;
 
   // Attachments
-  getAttachmentData(entryId: string, attachmentId: string): Promise<number[]>;
+  getAttachmentData(entryId: string, attachmentId: string): Promise<number[] | Uint8Array>;
   addAttachment(entryId: string, name: string, mimeType: string, data: number[]): Promise<AttachmentInfo>;
   deleteAttachment(entryId: string, attachmentId: string): Promise<void>;
 
@@ -382,6 +415,7 @@ export interface YntraVaultBackend {
   enableAutostart(): Promise<void>;
   disableAutostart(): Promise<void>;
   isAutostartEnabled(): Promise<boolean>;
+  getFavicon(domain: string): Promise<string | null>;
   setMinimizeToTray(enabled: boolean): Promise<void>;
   setWindowCaptureProtection(enable: boolean): Promise<void>;
   setLockOnFocusLoss(enabled: boolean): Promise<void>;
@@ -390,9 +424,10 @@ export interface YntraVaultBackend {
   webdavUpload(url: string, username: string, password: string | null, dbPath: string, ifMatchEtag?: string | null): Promise<string | null>;
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
   webdavSync(url: string, username: string, password: string | null): Promise<MergeStats>;
-  runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void>;
-  runP2pSyncClient(serverAddr: string, dbPath: string): Promise<void>;
+  runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats>;
+  runP2pSyncClient(serverAddr: string, dbPath: string): Promise<MergeStats>;
   splitMasterPassword(password: string): Promise<string[]>;
+  reconstructMasterPassword(shareA: string, shareB: string): Promise<string>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
 
   // Export & Import
@@ -415,9 +450,10 @@ export interface YntraVaultBackend {
   checkHardware2FaAvailable(): Promise<Hardware2FaInfo>;
   listHardwareKeys(): Promise<HardwareKeyInfo[]>;
   isHardware2FaEnabled(path: string): Promise<boolean>;
+  getHardware2FaChallenge(path: string): Promise<Hardware2FaChallengeInfo | null>;
   openVaultWithHardware2Fa(path: string, password: string, keyFilePath: string | undefined, hardwareResponse: number[]): Promise<VaultInfo>;
-  performHardware2FaChallenge(protocol: Hardware2FaProtocol, challenge?: number[]): Promise<number[]>;
-  enableHardware2Fa(protocol: Hardware2FaProtocol, keyName: string, hardwareResponse: number[]): Promise<void>;
+  performHardware2FaChallenge(protocol: Hardware2FaProtocol, challenge?: number[], credentialId?: number[]): Promise<number[]>;
+  enableHardware2Fa(password: string, keyFilePath: string | undefined, protocol: Hardware2FaProtocol, keyName: string, challengeSalt: number[] | undefined, credentialId: number[] | undefined, hardwareResponse: number[]): Promise<void>;
   disableHardware2Fa(): Promise<void>;
 
   // Clipboard Defense
@@ -438,6 +474,65 @@ export interface YntraVaultBackend {
   // Mobile Native Autofill Integration
   queryMobileAutofillStatus(): Promise<MobileAutofillStatus>;
   getAutofillCredentialsForPackage(packageName: string, webDomain?: string): Promise<AutofillDatasetPayload>;
+
+  // Smart Login
+  smartLoginPrecheck(): Promise<SmartLoginPreCheckResult>;
+  smartLoginCloseBrowser(processName: string): Promise<void>;
+  smartLoginStart(entryId: string, browserIndex: number): Promise<void>;
+  smartLoginCancel(): Promise<void>;
+  onSmartLoginProgress(callback: (event: any) => void): Promise<() => void>;
+  onSmartLoginResult(callback: (result: any) => void): Promise<() => void>;
+
+  // File Dialogs
+  openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null>;
+  saveFileDialog(options?: SaveDialogOptions): Promise<string | null>;
+}
+
+// ─── Smart Login Types ──────────────────────────────────────────────────
+
+export interface SmartLoginBrowserInfo {
+  name: string;
+  exe_path: string;
+  profile_dir: string;
+  process_name: string;
+  is_default: boolean;
+  is_running: boolean;
+}
+
+export interface SmartLoginPreCheckResult {
+  browsers: SmartLoginBrowserInfo[];
+  recommended_index: number | null;
+  needs_close: boolean;
+  error: string | null;
+}
+
+
+// ─── File Dialog Abstraction ────────────────────────────────────────────
+
+/**
+ * Opens a file picker dialog.
+ * In desktop (Tauri) mode, invokes `@tauri-apps/plugin-dialog`.
+ * In web/mock environments, safely returns null.
+ */
+export async function openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null> {
+  if (isTauri()) {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    return open(options as any);
+  }
+  return null;
+}
+
+/**
+ * Opens a file save dialog.
+ * In desktop (Tauri) mode, invokes `@tauri-apps/plugin-dialog`.
+ * In web/mock environments, safely returns null.
+ */
+export async function saveFileDialog(options?: SaveDialogOptions): Promise<string | null> {
+  if (isTauri()) {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    return save(options as any);
+  }
+  return null;
 }
 
 

@@ -4,14 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import { Moon, Sun, Monitor, Check, ArrowRight, ArrowLeft, Clock, Clipboard, ChevronDown, ChevronUp, Search, X, FolderInput } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAppState } from '@/contexts/AppStateContext';
-import ImportModal from '@/components/ImportModal';
+import { useSettings } from '@/features/settings';
+import { ImportModal } from '@/features/sync';
 
 export default function Onboarding() {
   const navigate = useNavigate();
   const { t, language, setLanguage, languages } = useTranslation();
   const { theme, setTheme } = useTheme();
-  const { settings, updateSettings } = useAppState();
+  const { settings, updateSettings } = useSettings();
 
   const [step, setStep] = useState(0);
   const [showAllLanguages, setShowAllLanguages] = useState(false);

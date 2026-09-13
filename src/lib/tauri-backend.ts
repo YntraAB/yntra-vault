@@ -4,7 +4,7 @@
  * Each method maps 1:1 to a #[tauri::command] in src-tauri/src/commands.rs
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeIpc as invoke } from '@/types/ipc';
 import type {
   YntraVaultBackend,
   VaultInfo,
@@ -27,9 +27,12 @@ import type {
   ImportPreviewResult,
   BiometricInfo,
   Hardware2FaInfo,
+  Hardware2FaChallengeInfo,
   HardwareKeyInfo,
   AttachmentInfo,
   Hardware2FaProtocol,
+  OpenDialogOptions,
+  SaveDialogOptions,
 } from './backend';
 
 export class TauriBackend implements YntraVaultBackend {
@@ -59,7 +62,7 @@ export class TauriBackend implements YntraVaultBackend {
   // ─── Entries ────────────────────────────────────────────────────
 
   async listEntries(): Promise<EntryPreview[]> {
-    const raw = await invoke<any[]>('list_entries');
+    const raw = await invoke('list_entries');
     return raw.map(entry => ({
       ...entry,
       breach_status: deserializeBreachStatus(entry.breach_status),
@@ -67,7 +70,7 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   async searchEntries(query: string): Promise<EntryPreview[]> {
-    const raw = await invoke<any[]>('search_entries', { query });
+    const raw = await invoke('search_entries', { query });
     return raw.map(entry => ({
       ...entry,
       breach_status: deserializeBreachStatus(entry.breach_status),
@@ -75,7 +78,7 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   async getEntry(id: string): Promise<DecryptedEntry> {
-    const raw = await invoke<any>('get_entry', { id });
+    const raw = await invoke('get_entry', { id });
     return {
       ...raw,
       breach_status: deserializeBreachStatus(raw.breach_status),
@@ -83,7 +86,14 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   async addEntry(entry: NewEntry): Promise<string> {
-    return invoke('add_entry', { entry });
+    const entryPayload = { ...entry };
+    if (entry.attachments && entry.attachments.length > 0) {
+      entryPayload.attachments = entry.attachments.map(a => ({
+        ...a,
+        data: a.data instanceof Uint8Array ? Array.from(a.data) : a.data,
+      }));
+    }
+    return invoke('add_entry', { entry: entryPayload });
   }
 
   async updateEntry(id: string, update: UpdateEntry): Promise<void> {
@@ -91,7 +101,28 @@ export class TauriBackend implements YntraVaultBackend {
     if (update.breach_status) {
       updatePayload.breach_status = serializeBreachStatus(update.breach_status);
     }
+    if (update.new_attachments && update.new_attachments.length > 0) {
+      updatePayload.new_attachments = update.new_attachments.map(a => ({
+        ...a,
+        data: a.data instanceof Uint8Array ? Array.from(a.data) : a.data,
+      }));
+    }
     return invoke('update_entry', { id, update: updatePayload });
+  }
+
+  async updateEntryBreachStatus(id: string, breachStatus: BreachStatus): Promise<void> {
+    return invoke('update_entry_breach_status', {
+      id,
+      breachStatus: serializeBreachStatus(breachStatus),
+    });
+  }
+
+  async saveVault(): Promise<void> {
+    return invoke('save_vault');
+  }
+
+  async reloadVault(): Promise<void> {
+    return invoke('reload_vault');
   }
 
   async deleteEntry(id: string): Promise<void> {
@@ -108,8 +139,15 @@ export class TauriBackend implements YntraVaultBackend {
 
   // ─── Attachments ────────────────────────────────────────────────
 
-  async getAttachmentData(entryId: string, attachmentId: string): Promise<number[]> {
-    return invoke('get_attachment_data', { entryId, attachmentId });
+  async getAttachmentData(entryId: string, attachmentId: string): Promise<number[] | Uint8Array> {
+    const res: any = await invoke('get_attachment_data', { entryId, attachmentId });
+    if (res instanceof ArrayBuffer) {
+      return new Uint8Array(res);
+    }
+    if (res instanceof Uint8Array) {
+      return res;
+    }
+    return res;
   }
 
   async addAttachment(entryId: string, name: string, mimeType: string, data: number[]): Promise<AttachmentInfo> {
@@ -171,7 +209,7 @@ export class TauriBackend implements YntraVaultBackend {
   // ─── Breach Detection ──────────────────────────────────────────
 
   async checkPasswordBreach(password: string): Promise<BreachResult> {
-    const res = await invoke<any>('check_password_breach', { password });
+    const res = await invoke('check_password_breach', { password });
     return {
       is_breached: res.is_breached,
       breach_count: res.breach_count,
@@ -254,6 +292,10 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('is_autostart_enabled');
   }
 
+  async getFavicon(domain: string): Promise<string | null> {
+    return invoke('get_favicon', { domain });
+  }
+
   async setMinimizeToTray(enabled: boolean): Promise<void> {
     return invoke('set_minimize_to_tray', { enabled });
   }
@@ -286,16 +328,20 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('webdav_sync', { url, username, password });
   }
 
-  async runP2pSyncListener(listenAddr: string, dbPath: string): Promise<void> {
+  async runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats> {
     return invoke('run_p2p_sync_listener', { listenAddr, dbPath });
   }
 
-  async runP2pSyncClient(serverAddr: string, dbPath: string): Promise<void> {
+  async runP2pSyncClient(serverAddr: string, dbPath: string): Promise<MergeStats> {
     return invoke('run_p2p_sync_client', { serverAddr, dbPath });
   }
 
   async splitMasterPassword(password: string): Promise<string[]> {
     return invoke('split_master_password', { password });
+  }
+
+  async reconstructMasterPassword(shareA: string, shareB: string): Promise<string> {
+    return invoke('reconstruct_master_password', { shareA, shareB });
   }
 
   async reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string> {
@@ -367,6 +413,10 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('is_hardware2fa_enabled', { path });
   }
 
+  async getHardware2FaChallenge(path: string): Promise<Hardware2FaChallengeInfo | null> {
+    return invoke('get_hardware2fa_challenge', { path });
+  }
+
   async openVaultWithHardware2Fa(
     path: string,
     password: string,
@@ -384,16 +434,29 @@ export class TauriBackend implements YntraVaultBackend {
   async performHardware2FaChallenge(
     protocol: Hardware2FaProtocol,
     challenge?: number[],
+    credentialId?: number[],
   ): Promise<number[]> {
-    return invoke('perform_hardware2fa_challenge', { protocol, challenge });
+    return invoke('perform_hardware2fa_challenge', { protocol, challenge, credentialId });
   }
 
   async enableHardware2Fa(
+    password: string,
+    keyFilePath: string | undefined,
     protocol: Hardware2FaProtocol,
     keyName: string,
+    challengeSalt: number[] | undefined,
+    credentialId: number[] | undefined,
     hardwareResponse: number[],
   ): Promise<void> {
-    return invoke('enable_hardware2fa', { protocol, keyName, hardwareResponse });
+    return invoke('enable_hardware2fa', {
+      password,
+      keyFilePath,
+      protocol,
+      keyName,
+      challengeSalt,
+      credentialId,
+      hardwareResponse,
+    });
   }
 
   async disableHardware2Fa(): Promise<void> {
@@ -481,6 +544,47 @@ export class TauriBackend implements YntraVaultBackend {
 
   async getAutofillCredentialsForPackage(packageName: string, webDomain?: string): Promise<import('./backend').AutofillDatasetPayload> {
     return invoke('get_autofill_credentials_for_package', { packageName, webDomain });
+  }
+
+  // ─── File Dialogs ────────────────────────────────────────────────
+  async openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    return open(options as any);
+  }
+
+  async saveFileDialog(options?: SaveDialogOptions): Promise<string | null> {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    return save(options as any);
+  }
+
+  // ─── Smart Login ────────────────────────────────────────────────
+
+  async smartLoginPrecheck(): Promise<import('./backend').SmartLoginPreCheckResult> {
+    return invoke('smart_login_precheck');
+  }
+
+  async smartLoginCloseBrowser(processName: string): Promise<void> {
+    return invoke('smart_login_close_browser', { processName });
+  }
+
+  async smartLoginStart(entryId: string, browserIndex: number): Promise<void> {
+    return invoke('smart_login_start', { entryId, browserIndex });
+  }
+
+  async smartLoginCancel(): Promise<void> {
+    return invoke('smart_login_cancel');
+  }
+
+  async onSmartLoginProgress(callback: (event: any) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    const unlisten = await listen('smart-login-progress', (e) => callback(e.payload));
+    return unlisten;
+  }
+
+  async onSmartLoginResult(callback: (result: any) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    const unlisten = await listen('smart-login-result', (e) => callback(e.payload));
+    return unlisten;
   }
 }
 

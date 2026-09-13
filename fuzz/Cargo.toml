@@ -1,0 +1,58 @@
+[package]
+name = "yntra-vault-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+yntra-vault-core = { path = "../crates/core" }
+uuid = { version = "1", features = ["v4"] }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_vdb_header"
+path = "fuzz_targets/fuzz_vdb_header.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_import_bitwarden_json"
+path = "fuzz_targets/fuzz_import_bitwarden_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_import_keepass_xml"
+path = "fuzz_targets/fuzz_import_keepass_xml.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_import_csv"
+path = "fuzz_targets/fuzz_import_csv.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_import_autodetect"
+path = "fuzz_targets/fuzz_import_autodetect.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_attachments"
+path = "fuzz_targets/fuzz_attachments.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_totp_uri"
+path = "fuzz_targets/fuzz_totp_uri.rs"
+test = false
+doc = false

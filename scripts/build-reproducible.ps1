@@ -32,7 +32,8 @@ $env:RUSTFLAGS = "--remap-path-prefix=$PSScriptRoot\..=/yntra-vault/ -C codegen-
 if ($Clean) {
     Write-Host "Performing clean build..." -ForegroundColor Yellow
     if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
-    if (Test-Path "src-core/target/release") { Remove-Item -Recurse -Force "src-core/target/release" }
+    if (Test-Path "target/release") { Remove-Item -Recurse -Force "target/release" }
+    if (Test-Path "crates/core/target/release") { Remove-Item -Recurse -Force "crates/core/target/release" }
     if (Test-Path "src-tauri/target/release") { Remove-Item -Recurse -Force "src-tauri/target/release" }
 }
 
@@ -43,7 +44,7 @@ bun run build
 
 # 5. Build Core Cryptography Engine
 Write-Host "`n[2/3] Building Rust Core Engine (release)..." -ForegroundColor Cyan
-cargo build --manifest-path src-core/Cargo.toml --release --frozen
+cargo build --manifest-path crates/core/Cargo.toml --release --frozen
 
 # 6. Build Desktop App Binary
 Write-Host "`n[3/3] Building Tauri Desktop Binary (release)..." -ForegroundColor Cyan
@@ -57,17 +58,20 @@ Write-Host "`nComputing SHA-256 checksums and generating reproducible manifest..
 
 $Artifacts = @()
 
-# Find output binaries in src-core and src-tauri release targets
-$CoreRelease = "src-core/target/release"
-$TauriRelease = "src-tauri/target/release"
-
+# Find output binaries in workspace target/release or fallback crate release targets
 $CandidateFiles = @(
-    "$CoreRelease/yntra_vault_core.dll",
-    "$CoreRelease/libyntra_vault_core.rlib",
-    "$CoreRelease/yntra_vault_core.lib",
-    "$CoreRelease/libyntra_vault_core.a",
-    "$TauriRelease/yntra-vault-app.exe",
-    "$TauriRelease/yntra-vault-app"
+    "target/release/yntra_vault_core.dll",
+    "target/release/libyntra_vault_core.rlib",
+    "target/release/yntra_vault_core.lib",
+    "target/release/libyntra_vault_core.a",
+    "target/release/yntra-vault-app.exe",
+    "target/release/yntra-vault-app",
+    "crates/core/target/release/yntra_vault_core.dll",
+    "crates/core/target/release/libyntra_vault_core.rlib",
+    "crates/core/target/release/yntra_vault_core.lib",
+    "crates/core/target/release/libyntra_vault_core.a",
+    "src-tauri/target/release/yntra-vault-app.exe",
+    "src-tauri/target/release/yntra-vault-app"
 )
 
 $FoundArtifacts = @{}

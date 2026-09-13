@@ -199,16 +199,33 @@ export function useHardware2Fa() {
     }
   }, [backend]);
 
-  const performChallenge = useCallback(async (protocol: Hardware2FaProtocol, challenge?: number[]) => {
-    if (!backend) return [];
-    return backend.performHardware2FaChallenge(protocol, challenge);
+  const getChallenge = useCallback(async (path: string) => {
+    if (!backend) return null;
+    try {
+      return await backend.getHardware2FaChallenge(path);
+    } catch {
+      return null;
+    }
   }, [backend]);
 
-  const enable = useCallback(async (protocol: Hardware2FaProtocol, keyName: string, hardwareResponse: number[]) => {
+  const performChallenge = useCallback(async (protocol: Hardware2FaProtocol, challenge?: number[], credentialId?: number[]) => {
+    if (!backend) return [];
+    return backend.performHardware2FaChallenge(protocol, challenge, credentialId);
+  }, [backend]);
+
+  const enable = useCallback(async (
+    password: string,
+    keyFilePath: string | undefined,
+    protocol: Hardware2FaProtocol,
+    keyName: string,
+    challengeSalt: number[] | undefined,
+    credentialId: number[] | undefined,
+    hardwareResponse: number[],
+  ) => {
     if (!backend) return;
     setLoading(true);
     try {
-      await backend.enableHardware2Fa(protocol, keyName, hardwareResponse);
+      await backend.enableHardware2Fa(password, keyFilePath, protocol, keyName, challengeSalt, credentialId, hardwareResponse);
     } finally {
       setLoading(false);
     }
@@ -224,7 +241,7 @@ export function useHardware2Fa() {
     }
   }, [backend]);
 
-  return { info, loading, checkAvailability, isEnabled, performChallenge, enable, disable };
+  return { info, loading, checkAvailability, isEnabled, getChallenge, performChallenge, enable, disable };
 }
 
 // ─── Entries Hook ───────────────────────────────────────────────────────

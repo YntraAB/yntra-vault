@@ -158,6 +158,7 @@ export const no = {
   'settings.tab_security': 'Sikkerhet',
   'settings.tab_backup': 'Sikkerhetskopi',
   'settings.tab_trash': 'Papirkurv',
+  'settings.trash': 'Papirkurv',
 
   'settings.active_vault': 'Aktivt hvelv',
   'settings.vault_name': 'Hvelvnavn',
@@ -213,8 +214,8 @@ export const no = {
   'settings.verify_master_placeholder': 'Bekreft hovedpassord',
   'settings.split_button': 'Del opp',
   'settings.recovery_shares_label': 'Dine gjenopprettingsdeler:',
-  'settings.share1_placeholder': 'Skriv inn del 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Skriv inn del 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Skriv inn del 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Skriv inn del 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Rekonstruert SHA-256 Hash',
   'settings.reconstruct_hash': 'Rekonstruer hoved-hash',
   'settings.cloud_sync': 'Sky-synkronisering (WebDAV)',

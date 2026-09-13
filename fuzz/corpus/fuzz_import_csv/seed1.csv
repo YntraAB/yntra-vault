@@ -1,0 +1,2 @@
+folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+Work,0,login,Company SSO,Internal VPN access,,0,https://sso.example.com,employee@example.com,super_secure_pass123,JBSWY3DPEHPK3PXP

@@ -158,6 +158,7 @@ export const nl = {
   'settings.tab_security': 'Beveiliging',
   'settings.tab_backup': 'Back-up',
   'settings.tab_trash': 'Prullenbak',
+  'settings.trash': 'Prullenbak',
 
   'settings.active_vault': 'Actieve kluis',
   'settings.vault_name': 'Kluisnaam',
@@ -213,8 +214,8 @@ export const nl = {
   'settings.verify_master_placeholder': 'Bevestig hoofdwachtwoord',
   'settings.split_button': 'Verdelen',
   'settings.recovery_shares_label': 'Uw hersteldelen:',
-  'settings.share1_placeholder': 'Voer Deel 1 in (SL-SHARE...)',
-  'settings.share2_placeholder': 'Voer Deel 2 in (SL-SHARE...)',
+  'settings.share1_placeholder': 'Voer Deel 1 in (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Voer Deel 2 in (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Gereconstrueerde SHA-256 Hash',
   'settings.reconstruct_hash': 'Reconstrueer hoofd-hash',
   'settings.cloud_sync': 'Cloudsynchronisatie (WebDAV)',

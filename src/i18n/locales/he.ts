@@ -158,6 +158,7 @@ export const he = {
   'settings.tab_security': 'אבטחה',
   'settings.tab_backup': 'גיבוי',
   'settings.tab_trash': 'סל מחזור',
+  'settings.trash': 'סל מחזור',
 
   'settings.active_vault': 'כספת פעילה',
   'settings.vault_name': 'שם הכספת',
@@ -213,8 +214,8 @@ export const he = {
   'settings.verify_master_placeholder': 'אימות סיסמת מאסטר',
   'settings.split_button': 'פיצול',
   'settings.recovery_shares_label': 'חלקי השחזור שלך:',
-  'settings.share1_placeholder': 'הזן חלק 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'הזן חלק 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'הזן חלק 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'הזן חלק 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'גיבוב SHA-256 משוחזר',
   'settings.reconstruct_hash': 'שחזר גיבוב מאסטר',
   'settings.cloud_sync': 'סנכרון ענן (WebDAV)',

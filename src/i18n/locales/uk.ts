@@ -158,6 +158,7 @@ export const uk = {
   'settings.tab_security': 'Безпека',
   'settings.tab_backup': 'Резервне копіювання',
   'settings.tab_trash': 'Кошик',
+  'settings.trash': 'Кошик',
 
   'settings.active_vault': 'Активне сховище',
   'settings.vault_name': 'Назва сховища',
@@ -213,8 +214,8 @@ export const uk = {
   'settings.verify_master_placeholder': 'Підтвердіть майстер-пароль',
   'settings.split_button': 'Розділити',
   'settings.recovery_shares_label': 'Ваші частини відновлення:',
-  'settings.share1_placeholder': 'Введіть частину 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Введіть частину 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Введіть частину 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Введіть частину 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Відновлений хеш SHA-256',
   'settings.reconstruct_hash': 'Відновити майстер-хеш',
   'settings.cloud_sync': 'Хмарна синхронізація (WebDAV)',

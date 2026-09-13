@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
-import { useAppState } from './AppStateContext';
-import { getTranslation } from '@/i18n/translations';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
+import { useSettings } from './SettingsContext';
+import { getTranslation, loadTranslation, isTranslationLoaded } from '@/i18n/translations';
 import { LANGUAGES, getLanguageByCode, type LanguageOption, DEFAULT_LANGUAGE } from '@/i18n/languages';
 
 interface LanguageContextType {
@@ -14,24 +14,41 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const { settings, updateSettings } = useAppState();
+  const { settings, updateSettings } = useSettings();
 
   const language = settings?.language || DEFAULT_LANGUAGE;
 
   const currentLanguage = useMemo(() => getLanguageByCode(language), [language]);
+
+  // Track the active loaded language to trigger re-renders once chunk resolves
+  const [activeLoadedLang, setActiveLoadedLang] = useState<string>(() =>
+    isTranslationLoaded(language) ? language : ''
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    loadTranslation(language).then(() => {
+      if (!cancelled) {
+        setActiveLoadedLang(language);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
 
   useEffect(() => {
     document.documentElement.lang = currentLanguage.code;
     document.documentElement.dir = currentLanguage.dir || 'ltr';
   }, [currentLanguage]);
 
-  const setLanguage = (newLang: string) => {
+  const setLanguage = useCallback((newLang: string) => {
     updateSettings({ language: newLang });
-  };
+  }, [updateSettings]);
 
-  const t = (key: string, params?: Record<string, string | number>) => {
+  const t = useCallback((key: string, params?: Record<string, string | number>) => {
     return getTranslation(language, key, params);
-  };
+  }, [language, activeLoadedLang]);
 
   const value = useMemo(
     () => ({
@@ -41,7 +58,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       t,
       languages: LANGUAGES,
     }),
-    [language, currentLanguage, settings]
+    [language, currentLanguage, setLanguage, t]
   );
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;

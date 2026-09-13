@@ -158,6 +158,7 @@ export const da = {
   'settings.tab_security': 'Sikkerhed',
   'settings.tab_backup': 'Sikkerhedskopi',
   'settings.tab_trash': 'Papirkurv',
+  'settings.trash': 'Papirkurv',
 
   'settings.active_vault': 'Aktiv boks',
   'settings.vault_name': 'Boksnavn',
@@ -213,8 +214,8 @@ export const da = {
   'settings.verify_master_placeholder': 'Bekræft hovedadgangskode',
   'settings.split_button': 'Opdel',
   'settings.recovery_shares_label': 'Dine genoprettelsesdele:',
-  'settings.share1_placeholder': 'Indtast del 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Indtast del 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Indtast del 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Indtast del 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Genopbygget SHA-256 Hash',
   'settings.reconstruct_hash': 'Genopbyg hovedhash',
   'settings.cloud_sync': 'Skysynkronisering (WebDAV)',

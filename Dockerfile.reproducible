@@ -45,12 +45,11 @@ COPY . .
 # 5. Execute Reproducible Build Sequence
 RUN bun install --frozen-lockfile && \
     bun run build && \
-    cargo build --manifest-path src-core/Cargo.toml --release --frozen && \
-    cargo build --manifest-path src-tauri/Cargo.toml --release --frozen
+    cargo build --release --frozen --workspace
 
 # 6. Generate Verification Attestation Manifest
 RUN mkdir -p /dist && \
-    sha256sum /yntra-vault/src-core/target/release/libyntra_vault_core.rlib > /dist/SHA256SUMS 2>/dev/null || true && \
-    sha256sum /yntra-vault/src-tauri/target/release/yntra-vault-app >> /dist/SHA256SUMS 2>/dev/null || true
+    (sha256sum /yntra-vault/target/release/libyntra_vault_core.rlib || sha256sum /yntra-vault/crates/core/target/release/libyntra_vault_core.rlib) > /dist/SHA256SUMS 2>/dev/null || true && \
+    (sha256sum /yntra-vault/target/release/yntra-vault-app || sha256sum /yntra-vault/src-tauri/target/release/yntra-vault-app) >> /dist/SHA256SUMS 2>/dev/null || true
 
 CMD ["cat", "/dist/SHA256SUMS"]

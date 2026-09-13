@@ -158,6 +158,7 @@ export const pt = {
   'settings.tab_security': 'Segurança',
   'settings.tab_backup': 'Cópia de Segurança',
   'settings.tab_trash': 'Lixeira',
+  'settings.trash': 'Lixeira',
 
   'settings.active_vault': 'Cofre Ativo',
   'settings.vault_name': 'Nome do Cofre',
@@ -213,8 +214,8 @@ export const pt = {
   'settings.verify_master_placeholder': 'Verificar Senha Mestre',
   'settings.split_button': 'Dividir',
   'settings.recovery_shares_label': 'Suas Partes de Recuperação:',
-  'settings.share1_placeholder': 'Insira a Parte 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Insira a Parte 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Insira a Parte 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Insira a Parte 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Hash SHA-256 Reconstruído',
   'settings.reconstruct_hash': 'Reconstruir Hash Mestre',
   'settings.cloud_sync': 'Sincronização em Nuvem (WebDAV)',

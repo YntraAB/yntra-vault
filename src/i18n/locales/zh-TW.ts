@@ -158,6 +158,7 @@ export const zhTW = {
   'settings.tab_security': '安全',
   'settings.tab_backup': '備份',
   'settings.tab_trash': '垃圾桶',
+  'settings.trash': '垃圾桶',
 
   'settings.active_vault': '當前密碼庫',
   'settings.vault_name': '密碼庫名稱',
@@ -213,8 +214,8 @@ export const zhTW = {
   'settings.verify_master_placeholder': '驗證主密碼',
   'settings.split_button': '分割',
   'settings.recovery_shares_label': '您的復原碎片：',
-  'settings.share1_placeholder': '輸入碎片 1 (SL-SHARE...)',
-  'settings.share2_placeholder': '輸入碎片 2 (SL-SHARE...)',
+  'settings.share1_placeholder': '輸入碎片 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': '輸入碎片 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': '重構的 SHA-256 雜湊',
   'settings.reconstruct_hash': '重構主雜湊',
   'settings.cloud_sync': '雲端同步 (WebDAV)',

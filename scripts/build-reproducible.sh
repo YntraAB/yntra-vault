@@ -37,7 +37,7 @@ bun run build
 
 # 4. Build Core Engine
 echo -e "\n[2/3] Building Rust Core Engine (release)..."
-cargo build --manifest-path src-core/Cargo.toml --release --frozen
+cargo build --manifest-path crates/core/Cargo.toml --release --frozen
 
 # 5. Build Desktop Binary
 echo -e "\n[3/3] Building Tauri Desktop Binary (release)..."
@@ -48,14 +48,22 @@ echo -e "\nComputing SHA-256 checksums..."
 MANIFEST_FILE="${ROOT_DIR}/${OUT_DIR}/reproducible-manifest.json"
 
 SHA_CORE=""
-if [ -f "src-core/target/release/libyntra_vault_core.rlib" ]; then
-    SHA_CORE="$(sha256sum src-core/target/release/libyntra_vault_core.rlib | awk '{print $1}')"
-elif [ -f "src-core/target/release/yntra_vault_core.dll" ]; then
-    SHA_CORE="$(sha256sum src-core/target/release/yntra_vault_core.dll | awk '{print $1}')"
+if [ -f "target/release/libyntra_vault_core.rlib" ]; then
+    SHA_CORE="$(sha256sum target/release/libyntra_vault_core.rlib | awk '{print $1}')"
+elif [ -f "target/release/yntra_vault_core.dll" ]; then
+    SHA_CORE="$(sha256sum target/release/yntra_vault_core.dll | awk '{print $1}')"
+elif [ -f "crates/core/target/release/libyntra_vault_core.rlib" ]; then
+    SHA_CORE="$(sha256sum crates/core/target/release/libyntra_vault_core.rlib | awk '{print $1}')"
+elif [ -f "crates/core/target/release/yntra_vault_core.dll" ]; then
+    SHA_CORE="$(sha256sum crates/core/target/release/yntra_vault_core.dll | awk '{print $1}')"
 fi
 
 SHA_TAURI=""
-if [ -f "src-tauri/target/release/yntra-vault-app" ]; then
+if [ -f "target/release/yntra-vault-app" ]; then
+    SHA_TAURI="$(sha256sum target/release/yntra-vault-app | awk '{print $1}')"
+elif [ -f "target/release/yntra-vault-app.exe" ]; then
+    SHA_TAURI="$(sha256sum target/release/yntra-vault-app.exe | awk '{print $1}')"
+elif [ -f "src-tauri/target/release/yntra-vault-app" ]; then
     SHA_TAURI="$(sha256sum src-tauri/target/release/yntra-vault-app | awk '{print $1}')"
 elif [ -f "src-tauri/target/release/yntra-vault-app.exe" ]; then
     SHA_TAURI="$(sha256sum src-tauri/target/release/yntra-vault-app.exe | awk '{print $1}')"

@@ -158,6 +158,7 @@ export const es = {
   'settings.tab_security': 'Seguridad',
   'settings.tab_backup': 'Respaldo',
   'settings.tab_trash': 'Papelera',
+  'settings.trash': 'Papelera',
 
   'settings.active_vault': 'Bóveda Activa',
   'settings.vault_name': 'Nombre de la Bóveda',
@@ -213,8 +214,8 @@ export const es = {
   'settings.verify_master_placeholder': 'Verificar Contraseña Maestra',
   'settings.split_button': 'Dividir',
   'settings.recovery_shares_label': 'Sus Partes de Recuperación:',
-  'settings.share1_placeholder': 'Ingrese Parte 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Ingrese Parte 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Ingrese Parte 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Ingrese Parte 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Hash SHA-256 Reconstruido',
   'settings.reconstruct_hash': 'Reconstruir Hash Maestro',
   'settings.cloud_sync': 'Sincronización en la Nube (WebDAV)',

@@ -158,6 +158,7 @@ export const ru = {
   'settings.tab_security': 'Безопасность',
   'settings.tab_backup': 'Резервное копирование',
   'settings.tab_trash': 'Корзина',
+  'settings.trash': 'Корзина',
 
   'settings.active_vault': 'Активное хранилище',
   'settings.vault_name': 'Название хранилища',
@@ -213,8 +214,8 @@ export const ru = {
   'settings.verify_master_placeholder': 'Подтвердите мастер-пароль',
   'settings.split_button': 'Разделить',
   'settings.recovery_shares_label': 'Ваши части восстановления:',
-  'settings.share1_placeholder': 'Введите часть 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Введите часть 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Введите часть 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Введите часть 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Восстановленный хэш SHA-256',
   'settings.reconstruct_hash': 'Восстановить мастер-хэш',
   'settings.cloud_sync': 'Облачная синхронизация (WebDAV)',

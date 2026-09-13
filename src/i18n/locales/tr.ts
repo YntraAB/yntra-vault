@@ -158,6 +158,7 @@ export const tr = {
   'settings.tab_security': 'Güvenlik',
   'settings.tab_backup': 'Yedekleme',
   'settings.tab_trash': 'Çöp Kutusu',
+  'settings.trash': 'Çöp Kutusu',
 
   'settings.active_vault': 'Etkin Kasa',
   'settings.vault_name': 'Kasa Adı',
@@ -213,8 +214,8 @@ export const tr = {
   'settings.verify_master_placeholder': 'Ana Parolayı Doğrula',
   'settings.split_button': 'Böl',
   'settings.recovery_shares_label': 'Kurtarma Parçalarınız:',
-  'settings.share1_placeholder': 'Parça 1\'i girin (SL-SHARE...)',
-  'settings.share2_placeholder': 'Parça 2\'yi girin (SL-SHARE...)',
+  'settings.share1_placeholder': 'Parça 1\'i girin (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Parça 2\'yi girin (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Yeniden Oluşturulan SHA-256 Özeti',
   'settings.reconstruct_hash': 'Ana Özeti Yeniden Oluştur',
   'settings.cloud_sync': 'Bulut Senkronizasyonu (WebDAV)',

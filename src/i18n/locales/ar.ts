@@ -158,6 +158,7 @@ export const ar = {
   'settings.tab_security': 'الأمان',
   'settings.tab_backup': 'النسخ الاحتياطي',
   'settings.tab_trash': 'سلة المهملات',
+  'settings.trash': 'سلة المهملات',
 
   'settings.active_vault': 'الخزنة النشطة',
   'settings.vault_name': 'اسم الخزنة',
@@ -213,8 +214,8 @@ export const ar = {
   'settings.verify_master_placeholder': 'تأكيد كلمة المرور الرئيسية',
   'settings.split_button': 'تقسيم',
   'settings.recovery_shares_label': 'أجزاء الاسترداد الخاصة بك:',
-  'settings.share1_placeholder': 'أدخل الجزء 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'أدخل الجزء 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'أدخل الجزء 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'أدخل الجزء 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'تجزئة SHA-256 المعاد بناؤها',
   'settings.reconstruct_hash': 'إعادة بناء التجزئة الرئيسية',
   'settings.cloud_sync': 'المزامنة السحابية (WebDAV)',

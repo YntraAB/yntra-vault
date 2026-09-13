@@ -158,6 +158,7 @@ export const fr = {
   'settings.tab_security': 'Sécurité',
   'settings.tab_backup': 'Sauvegarde',
   'settings.tab_trash': 'Corbeille',
+  'settings.trash': 'Corbeille',
 
   'settings.active_vault': 'Coffre actif',
   'settings.vault_name': 'Nom du coffre',
@@ -213,8 +214,8 @@ export const fr = {
   'settings.verify_master_placeholder': 'Vérifier le mot de passe maître',
   'settings.split_button': 'Partager',
   'settings.recovery_shares_label': 'Vos parts de récupération :',
-  'settings.share1_placeholder': 'Entrez la part 1 (SL-SHARE...)',
-  'settings.share2_placeholder': 'Entrez la part 2 (SL-SHARE...)',
+  'settings.share1_placeholder': 'Entrez la part 1 (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'Entrez la part 2 (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'Hachage SHA-256 reconstruit',
   'settings.reconstruct_hash': 'Reconstruire le hachage maître du mot de passe',
   'settings.cloud_sync': 'Synchronisation Cloud (WebDAV)',

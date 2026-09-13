@@ -24,6 +24,8 @@ export function formatTime(iso: string): string {
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
+export { formatBytes } from './formatters';
+
 export function isToday(iso: string): boolean {
   const d = new Date(iso);
   const now = new Date();

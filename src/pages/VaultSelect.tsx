@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Database, Plus, Download, Clock, AlertTriangle, Trash2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAppState } from '@/contexts/AppStateContext';
+import { useAuth, CreateVaultModal } from '@/features/auth';
 import { useTranslation } from '@/contexts/LanguageContext';
-import CreateVaultModal from '@/components/CreateVaultModal';
-import { isTauri, getBackend } from '@/lib/backend';
+import { isTauri, getBackend, openFileDialog } from '@/lib/backend';
 import type { Vault } from '@/types';
 import { ActionTooltip } from '@/components/ui/tooltip';
 
@@ -13,7 +12,7 @@ export default function VaultSelect() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
-  const { setCurrentVault, setIsLocked } = useAppState();
+  const { setCurrentVault, setIsLocked } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [recentVaults, setRecentVaults] = useState<Vault[]>([]);
   const [missingVaults, setMissingVaults] = useState<Set<string>>(new Set());
@@ -88,14 +87,13 @@ export default function VaultSelect() {
   const handleImport = async () => {
     if (!isTauri()) return;
     try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
+      const selected = await openFileDialog({
         title: 'Open Vault File',
         filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
         multiple: false,
       });
       if (selected) {
-        const path = typeof selected === 'string' ? selected : selected;
+        const path = typeof selected === 'string' ? selected : selected[0];
         const fileName = String(path).split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'Vault';
         // Use a temporary ID for import. Upon successful login, Login.tsx will update
         // this with the real vault ID and save it to Recent list.
@@ -143,7 +141,7 @@ export default function VaultSelect() {
             </div>
             <p className="text-[11px] leading-relaxed text-amber-500/80 dark:text-amber-400/80">
               {t('vault_select.web_warning_desc')}
-              <code className="mt-1.5 block rounded border border-amber-500/20 bg-black/30 px-2 py-1 font-mono text-[10px] text-amber-300">
+              <code className="mt-1.5 block rounded border border-amber-500/20 bg-black/30 px-2 py-1 font-mono text-[10px] text-amber-300 select-all">
                 bun tauri dev
               </code>
             </p>
@@ -192,7 +190,7 @@ export default function VaultSelect() {
                           </ActionTooltip>
                         )}
                       </div>
-                      <div className="truncate text-[12px] text-[var(--text-tertiary)]">{vault.path}</div>
+                      <div className="truncate text-[12px] text-[var(--text-tertiary)] select-text">{vault.path}</div>
                     </div>
                   </button>
 

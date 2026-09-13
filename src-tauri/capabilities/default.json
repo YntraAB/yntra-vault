@@ -1,22 +1,30 @@
 {
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Default security capability for the primary Yntra Vault application window",
+  "local": true,
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
     "clipboard-manager:default",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-clear",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "fs:default",
-    "fs:allow-read-text-file",
-    "fs:allow-write-text-file",
     "notification:default",
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-    "shell:default"
+    "shell:default",
+    "shell:allow-open",
+    "fs:default"
   ]
 }
+

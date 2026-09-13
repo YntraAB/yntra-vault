@@ -1,0 +1,363 @@
+//! Key Derivation Function pipeline
+//!
+//! Master Password → Argon2id (256MB RAM, 4 passes) → HKDF-SHA512 → 3 subkeys
+
+use argon2::{Argon2, Algorithm, Version, Params};
+use hkdf::Hkdf;
+use sha2::Sha512;
+use zeroize::{Zeroize, ZeroizeOnDrop};
+use rand::Rng;
+use serde::{Serialize, Deserialize};
+use subtle::ConstantTimeEq;
+use crate::error::VaultError;
+
+/// Argon2id parameters — deliberately aggressive for maximum security
+pub const ARGON2_MEMORY_KB: u32 = 262_144; // 256 MB
+pub const ARGON2_ITERATIONS: u32 = 4;
+pub const ARGON2_PARALLELISM: u32 = 4;
+pub const ARGON2_OUTPUT_LEN: usize = 64;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct KdfParams {
+    pub memory_kb: u32,
+    pub iterations: u32,
+    pub parallelism: u32,
+    pub output_len: usize,
+}
+
+impl Default for KdfParams {
+    fn default() -> Self {
+        KdfParams {
+            memory_kb: ARGON2_MEMORY_KB,
+            iterations: ARGON2_ITERATIONS,
+            parallelism: ARGON2_PARALLELISM,
+            output_len: ARGON2_OUTPUT_LEN,
+        }
+    }
+}
+
+impl KdfParams {
+    const MIN_MEMORY_KB: u32 = 65_536;   // 64 MB absolute minimum
+    const MIN_ITERATIONS: u32 = 2;
+    const MIN_PARALLELISM: u32 = 1;
+    const REQUIRED_OUTPUT_LEN: usize = 64;
+
+    pub fn validate(&self) -> Result<(), VaultError> {
+        if self.memory_kb < Self::MIN_MEMORY_KB {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF memory_kb {} below minimum {}", self.memory_kb, Self::MIN_MEMORY_KB
+            )));
+        }
+        if self.iterations < Self::MIN_ITERATIONS {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF iterations {} below minimum {}", self.iterations, Self::MIN_ITERATIONS
+            )));
+        }
+        if self.parallelism < Self::MIN_PARALLELISM {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF parallelism {} below minimum {}", self.parallelism, Self::MIN_PARALLELISM
+            )));
+        }
+        if self.output_len != Self::REQUIRED_OUTPUT_LEN {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF output_len {} must be {}", self.output_len, Self::REQUIRED_OUTPUT_LEN
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct MasterKey {
+    bytes: Vec<u8>,
+}
+
+impl MasterKey {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
+pub struct SubKeys {
+    pub vault_key: VaultKey,
+    pub entry_key: EntryKey,
+    pub hmac_key: HmacKey,
+    pub search_key: SearchKey,
+}
+
+impl SubKeys {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(160);
+        buf.extend_from_slice(&self.vault_key.bytes);
+        buf.extend_from_slice(&self.entry_key.bytes);
+        buf.extend_from_slice(&self.hmac_key.bytes);
+        buf.extend_from_slice(&self.search_key.bytes);
+        buf
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
+        if bytes.len() != 160 {
+            return Err(crate::error::VaultError::DecryptionError(
+                "Invalid subkeys buffer length for biometric unlock".into()
+            ));
+        }
+        let mut vault_key_bytes = [0u8; 32];
+        let mut entry_key_bytes = [0u8; 32];
+        let mut hmac_key_bytes = [0u8; 64];
+        let mut search_key_bytes = [0u8; 32];
+
+        vault_key_bytes.copy_from_slice(&bytes[0..32]);
+        entry_key_bytes.copy_from_slice(&bytes[32..64]);
+        hmac_key_bytes.copy_from_slice(&bytes[64..128]);
+        search_key_bytes.copy_from_slice(&bytes[128..160]);
+
+        Ok(SubKeys {
+            vault_key: VaultKey { bytes: vault_key_bytes },
+            entry_key: EntryKey { bytes: entry_key_bytes },
+            hmac_key: HmacKey { bytes: hmac_key_bytes },
+            search_key: SearchKey { bytes: search_key_bytes },
+        })
+    }
+}
+
+impl ConstantTimeEq for SubKeys {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.vault_key.ct_eq(&other.vault_key)
+            & self.entry_key.ct_eq(&other.entry_key)
+            & self.hmac_key.ct_eq(&other.hmac_key)
+            & self.search_key.ct_eq(&other.search_key)
+    }
+}
+
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
+pub struct VaultKey {
+    pub bytes: [u8; 32],
+}
+
+impl ConstantTimeEq for VaultKey {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.bytes[..].ct_eq(&other.bytes[..])
+    }
+}
+
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
+pub struct EntryKey {
+    pub bytes: [u8; 32],
+}
+
+impl ConstantTimeEq for EntryKey {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.bytes[..].ct_eq(&other.bytes[..])
+    }
+}
+
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
+pub struct HmacKey {
+    pub bytes: [u8; 64],
+}
+
+impl ConstantTimeEq for HmacKey {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.bytes[..].ct_eq(&other.bytes[..])
+    }
+}
+
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
+pub struct SearchKey {
+    pub bytes: [u8; 32],
+}
+
+impl ConstantTimeEq for SearchKey {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.bytes[..].ct_eq(&other.bytes[..])
+    }
+}
+
+/// Generate a cryptographically secure random salt (32 bytes).
+pub fn generate_salt() -> [u8; 32] {
+    let mut salt = [0u8; 32];
+    rand::rng().fill(&mut salt);
+    salt
+}
+
+/// Derive the master key from password + salt using Argon2id.
+pub fn derive_master_key(password: &[u8], salt: &[u8; 32]) -> crate::Result<MasterKey> {
+    let params = Params::new(
+        ARGON2_MEMORY_KB,
+        ARGON2_ITERATIONS,
+        ARGON2_PARALLELISM,
+        Some(ARGON2_OUTPUT_LEN),
+    ).map_err(|e| VaultError::KdfError(format!("Invalid Argon2 params: {}", e)))?;
+
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+    let mut output = vec![0u8; ARGON2_OUTPUT_LEN];
+    argon2
+        .hash_password_into(password, salt, &mut output)
+        .map_err(|e| VaultError::KdfError(format!("Argon2id failed: {}", e)))?;
+
+    Ok(MasterKey { bytes: output })
+}
+
+/// Derive the master key from password + optional key file bytes + salt using Argon2id.
+/// When a keyfile is provided, BLAKE3 domain-separated key derivation (context: `yntra-vault-keyfile-prehash-v1`)
+/// with length-prefixed encoding is used to derive a 32-byte pre-mix seed for Argon2id.
+pub fn derive_master_key_with_keyfile(
+    password: &[u8],
+    key_file_bytes: Option<&[u8]>,
+    salt: &[u8; 32],
+) -> crate::Result<MasterKey> {
+    match key_file_bytes {
+        Some(kf) if !kf.is_empty() => {
+            let mut hasher = blake3::Hasher::new_derive_key("yntra-vault-keyfile-prehash-v1");
+            hasher.update(&(password.len() as u64).to_le_bytes());
+            hasher.update(password);
+            hasher.update(&(kf.len() as u64).to_le_bytes());
+            hasher.update(kf);
+            let combined = zeroize::Zeroizing::new(*hasher.finalize().as_bytes());
+            derive_master_key(&*combined, salt)
+        }
+        _ => derive_master_key(password, salt),
+    }
+}
+
+/// Derive purpose-separated subkeys from the master key using HKDF-SHA512.
+pub fn derive_subkeys(master_key: &MasterKey) -> crate::Result<SubKeys> {
+    let hk = Hkdf::<Sha512>::new(None, master_key.as_bytes());
+
+    let mut vault_key_bytes = [0u8; 32];
+    hk.expand(b"yntra-vault-encryption-key-v1", &mut vault_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (vault): {}", e)))?;
+
+    let mut entry_key_bytes = [0u8; 32];
+    hk.expand(b"yntra-vault-entry-encryption-key-v1", &mut entry_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (entry): {}", e)))?;
+
+    let mut hmac_key_bytes = [0u8; 64];
+    hk.expand(b"yntra-vault-hmac-integrity-key-v1", &mut hmac_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (hmac): {}", e)))?;
+
+    let mut search_key_bytes = [0u8; 32];
+    hk.expand(b"yntra-vault-trigram-search-key-v1", &mut search_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (search): {}", e)))?;
+
+    Ok(SubKeys {
+        vault_key: VaultKey { bytes: vault_key_bytes },
+        entry_key: EntryKey { bytes: entry_key_bytes },
+        hmac_key: HmacKey { bytes: hmac_key_bytes },
+        search_key: SearchKey { bytes: search_key_bytes },
+    })
+}
+
+/// Derive an isolated, unique per-entry encryption key from the master entry key and entry UUID using HKDF-SHA512.
+pub fn derive_per_entry_key(master_entry_key: &EntryKey, entry_id: &uuid::Uuid) -> crate::Result<EntryKey> {
+    let hk = Hkdf::<Sha512>::new(None, &master_entry_key.bytes);
+    let mut info = Vec::with_capacity(32 + 16);
+    info.extend_from_slice(b"yntra-vault-per-entry-key-v1-");
+    info.extend_from_slice(entry_id.as_bytes());
+
+    let mut entry_key_bytes = [0u8; 32];
+    hk.expand(&info, &mut entry_key_bytes)
+        .map_err(|e| VaultError::KdfError(format!("HKDF expand (per-entry key): {}", e)))?;
+
+    Ok(EntryKey { bytes: entry_key_bytes })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_derivation_deterministic() {
+        let password = b"test-master-password";
+        let salt = [42u8; 32];
+        let key1 = derive_master_key(password, &salt).unwrap();
+        let key2 = derive_master_key(password, &salt).unwrap();
+        assert_eq!(key1.as_bytes(), key2.as_bytes());
+        assert_eq!(key1.as_bytes().len(), ARGON2_OUTPUT_LEN);
+    }
+
+    #[test]
+    fn test_different_passwords_different_keys() {
+        let salt = [42u8; 32];
+        let key1 = derive_master_key(b"password1", &salt).unwrap();
+        let key2 = derive_master_key(b"password2", &salt).unwrap();
+        assert_ne!(key1.as_bytes(), key2.as_bytes());
+    }
+
+    #[test]
+    fn test_different_salts_different_keys() {
+        let password = b"same-password";
+        let key1 = derive_master_key(password, &[1u8; 32]).unwrap();
+        let key2 = derive_master_key(password, &[2u8; 32]).unwrap();
+        assert_ne!(key1.as_bytes(), key2.as_bytes());
+    }
+
+    #[test]
+    fn test_subkey_derivation() {
+        let password = b"test-password";
+        let salt = [42u8; 32];
+        let master_key = derive_master_key(password, &salt).unwrap();
+        let subkeys = derive_subkeys(&master_key).unwrap();
+        assert_ne!(&subkeys.vault_key.bytes[..], &subkeys.entry_key.bytes[..]);
+        assert_ne!(&subkeys.vault_key.bytes[..], &subkeys.hmac_key.bytes[..32]);
+    }
+
+    #[test]
+    fn test_subkey_deterministic() {
+        let password = b"test-password";
+        let salt = [42u8; 32];
+        let mk1 = derive_master_key(password, &salt).unwrap();
+        let sk1 = derive_subkeys(&mk1).unwrap();
+        let mk2 = derive_master_key(password, &salt).unwrap();
+        let sk2 = derive_subkeys(&mk2).unwrap();
+        assert_eq!(sk1.vault_key.bytes, sk2.vault_key.bytes);
+        assert_eq!(sk1.entry_key.bytes, sk2.entry_key.bytes);
+        assert_eq!(sk1.hmac_key.bytes, sk2.hmac_key.bytes);
+    }
+
+    #[test]
+    fn test_keyfile_derivation() {
+        let password = b"test-password";
+        let key_file = b"random-secret-bytes-12345";
+        let salt = [42u8; 32];
+
+        let mk_pass_only = derive_master_key_with_keyfile(password, None, &salt).unwrap();
+        let mk_with_kf = derive_master_key_with_keyfile(password, Some(key_file), &salt).unwrap();
+
+        assert_ne!(mk_pass_only.as_bytes(), mk_with_kf.as_bytes());
+
+        let mk_with_kf_2 = derive_master_key_with_keyfile(password, Some(key_file), &salt).unwrap();
+        assert_eq!(mk_with_kf.as_bytes(), mk_with_kf_2.as_bytes());
+    }
+
+    #[test]
+    fn test_per_entry_key_isolation() {
+        let master_key = derive_master_key(b"test-password", &[42u8; 32]).unwrap();
+        let subkeys = derive_subkeys(&master_key).unwrap();
+
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+
+        let ek1 = derive_per_entry_key(&subkeys.entry_key, &id1).unwrap();
+        let ek2 = derive_per_entry_key(&subkeys.entry_key, &id2).unwrap();
+        let ek1_repeat = derive_per_entry_key(&subkeys.entry_key, &id1).unwrap();
+
+        assert_ne!(ek1.bytes, ek2.bytes);
+        assert_ne!(ek1.bytes, subkeys.entry_key.bytes);
+        assert_eq!(ek1.bytes, ek1_repeat.bytes);
+    }
+
+    #[test]
+    fn test_keyfile_domain_separation_framing() {
+        let salt = [42u8; 32];
+        let mk1 = derive_master_key_with_keyfile(b"abc", Some(b"def"), &salt).unwrap();
+        let mk2 = derive_master_key_with_keyfile(b"abcdef", None, &salt).unwrap();
+        let mk3 = derive_master_key_with_keyfile(b"abcd", Some(b"ef"), &salt).unwrap();
+
+        assert_ne!(mk1.as_bytes(), mk2.as_bytes());
+        assert_ne!(mk1.as_bytes(), mk3.as_bytes());
+    }
+}
+

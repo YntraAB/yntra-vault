@@ -1,0 +1,33 @@
+<KeePassFile>
+  <Root>
+    <Group>
+      <Name>General</Name>
+      <Entry>
+        <String>
+          <Key>Title</Key>
+          <Value>GitHub Account</Value>
+        </String>
+        <String>
+          <Key>UserName</Key>
+          <Value>developer</Value>
+        </String>
+        <String>
+          <Key>Password</Key>
+          <Value>CorrectHorseBatteryStaple!</Value>
+        </String>
+        <String>
+          <Key>URL</Key>
+          <Value>https://github.com</Value>
+        </String>
+        <String>
+          <Key>Notes</Key>
+          <Value>SSH key backup</Value>
+        </String>
+        <String>
+          <Key>TimeOtp-Secret-Base32</Key>
+          <Value>JBSWY3DPEHPK3PXP</Value>
+        </String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>

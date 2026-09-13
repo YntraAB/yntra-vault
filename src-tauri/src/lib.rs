@@ -1,6 +1,6 @@
-mod commands;
+pub mod commands;
 
-use commands::AppState;
+pub use commands::AppState;
 use std::sync::Mutex;
 #[cfg(not(mobile))]
 use tauri::menu::{Menu, MenuItem};
@@ -24,6 +24,7 @@ pub fn run() {
             minimize_to_tray: std::sync::atomic::AtomicBool::new(true),
             lock_on_focus_loss: std::sync::atomic::AtomicBool::new(false),
             lock_on_system_lock: std::sync::atomic::AtomicBool::new(true),
+            smart_login_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
     #[cfg(not(mobile))]
@@ -84,6 +85,7 @@ pub fn run() {
             commands::check_hardware2fa_available,
             commands::list_hardware_keys,
             commands::is_hardware2fa_enabled,
+            commands::get_hardware2fa_challenge,
             commands::open_vault_with_hardware2fa,
             commands::perform_hardware2fa_challenge,
             commands::enable_hardware2fa,
@@ -94,6 +96,9 @@ pub fn run() {
             commands::get_entry,
             commands::add_entry,
             commands::update_entry,
+            commands::update_entry_breach_status,
+            commands::save_vault,
+            commands::reload_vault,
             commands::delete_entry,
             commands::toggle_favorite,
             commands::toggle_pin,
@@ -134,6 +139,7 @@ pub fn run() {
             commands::enable_autostart,
             commands::disable_autostart,
             commands::is_autostart_enabled,
+            commands::get_favicon,
             commands::set_minimize_to_tray,
             commands::webdav_upload,
             commands::webdav_download,
@@ -142,6 +148,7 @@ pub fn run() {
             commands::run_p2p_sync_listener,
             commands::run_p2p_sync_client,
             commands::split_master_password,
+            commands::reconstruct_master_password,
             commands::reconstruct_master_password_hash,
             // Export & Import
             commands::export_vault,
@@ -169,6 +176,11 @@ pub fn run() {
             commands::set_window_capture_protection,
             commands::set_lock_on_focus_loss,
             commands::set_lock_on_system_lock,
+            // Smart Login (CDP browser automation)
+            commands::smart_login_precheck,
+            commands::smart_login_close_browser,
+            commands::smart_login_start,
+            commands::smart_login_cancel,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
@@ -256,16 +268,24 @@ pub fn run() {
                         }
                     }
 
-                    let mut vault = match state.vault.lock() {
-                        Ok(v) => v,
-                        Err(_) => continue,
+                    // Extract path while holding lock briefly, then check filesystem outside lock
+                    let vault_path_str = {
+                        let vault = match state.vault.lock() {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
+                        match *vault {
+                            Some(ref manager) => Some(manager.info().path),
+                            None => None,
+                        }
                     };
-                    if let Some(ref manager) = *vault {
-                        let path_str = manager.info().path;
+                    // Filesystem check outside mutex scope
+                    if let Some(path_str) = vault_path_str {
                         let path = std::path::Path::new(&path_str);
                         if !path.exists() {
-                            // Vault file was deleted or moved!
-                            *vault = None;
+                            if let Ok(mut vault) = state.vault.lock() {
+                                *vault = None;
+                            }
                             let _ = app_handle.emit("vault-connection-lost", ());
                         }
                     }

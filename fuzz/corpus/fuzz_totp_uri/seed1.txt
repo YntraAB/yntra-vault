@@ -1,0 +1,1 @@
+otpauth://totp/Acme%20Corp:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Acme%20Corp&algorithm=SHA1&digits=6&period=30

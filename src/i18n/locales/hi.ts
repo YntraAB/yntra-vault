@@ -158,6 +158,7 @@ export const hi = {
   'settings.tab_security': 'सुरक्षा',
   'settings.tab_backup': 'बैकअप',
   'settings.tab_trash': 'ट्रैश',
+  'settings.trash': 'ट्रैश',
 
   'settings.active_vault': 'सक्रिय वॉल्ट',
   'settings.vault_name': 'वॉल्ट का नाम',
@@ -213,8 +214,8 @@ export const hi = {
   'settings.verify_master_placeholder': 'मास्टर पासवर्ड सत्यापित करें',
   'settings.split_button': 'विभाजित करें',
   'settings.recovery_shares_label': 'आपके पुनर्प्राप्ति भाग:',
-  'settings.share1_placeholder': 'भाग 1 दर्ज करें (SL-SHARE...)',
-  'settings.share2_placeholder': 'भाग 2 दर्ज करें (SL-SHARE...)',
+  'settings.share1_placeholder': 'भाग 1 दर्ज करें (YNTRA-SHARE...)',
+  'settings.share2_placeholder': 'भाग 2 दर्ज करें (YNTRA-SHARE...)',
   'settings.reconstructed_hash_label': 'पुनर्निर्मित SHA-256 हैश',
   'settings.reconstruct_hash': 'मास्टर हैश पुनर्निर्मित करें',
   'settings.cloud_sync': 'क्लाउड सिंक (WebDAV)',

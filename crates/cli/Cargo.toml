@@ -1,0 +1,38 @@
+[package]
+name = "yntra-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Yntra Vault — SOTA Command Line Interface & Session Daemon"
+license = "MIT"
+
+[[bin]]
+name = "yntra"
+path = "src/main.rs"
+
+[dependencies]
+yntra-vault-core = { path = "../core" }
+yntra-crypto = { path = "../crypto" }
+
+# CLI & Terminal
+clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
+rpassword = "7"
+comfy-table = "7"
+colored = "2"
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Runtime & Async
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "net", "io-util"] }
+
+# Security & Primitives
+zeroize = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+rand = "0.9"
+data-encoding = "2.6"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
