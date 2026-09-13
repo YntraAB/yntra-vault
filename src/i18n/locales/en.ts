@@ -119,6 +119,8 @@ export const en = {
   // Entry Modal
   'entry.template': 'Template',
   'entry.title': 'Title',
+  'entry.username': 'Username',
+  'entry.password': 'Password',
   'entry.add_field': 'Add field',
   'entry.custom_field': 'Custom Field',
   'entry.notes_placeholder': 'Optional notes...',
@@ -878,4 +880,22 @@ export const en = {
   'tutorial.tip_settings_hint': 'Theme, security, more',
   'tutorial.tip_drag_tags': 'Reorder Tags by Dragging',
   'tutorial.tip_drag_tags_hint': 'Hold and drag any tag up or down in the sidebar to organize them your way.',
+
+  // Security audit & bulk edit
+  'security.all_secure_msg': 'All passwords are secure',
+  'security.no_issues': 'No security issues detected',
+  'entry_modal.username_placeholder': 'Username or email',
+  'entry.favorites': 'Favorites',
+  'entry.pinned': 'Pinned',
+  'entry.website_url': 'Website URL',
+  'bulk.update_url': 'Update website URL',
+  'entry.notes': 'Notes',
+  'common.keep': 'Keep',
+  'common.yes': 'Yes',
+  'common.no': 'No',
+  'login.enter_password': 'Enter your master password',
+  'login.password_placeholder': 'Enter master password',
+  'login.use_keyfile': 'Use Key File',
+  'login.keyfile_path_ph': 'Path to .key file',
+  'login.biometric_failed': 'Biometric verification failed',
 };

@@ -298,7 +298,7 @@ export default function Login() {
     }
 
     if (!password) {
-      setError(t('login.enter_password') || 'Please enter your master password');
+      setError(t('login.err_enter_password') || 'Please enter your master password');
       inputRef.current?.focus();
       return;
     }

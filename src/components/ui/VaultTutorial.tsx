@@ -31,13 +31,13 @@ function MockField({ icon, label, value, accent }: {
 }
 
 // Visual mock of a password strength bar
-function MockStrengthBar() {
+function MockStrengthBar({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 mt-1">
       <div className="flex-1 h-1 rounded-full bg-[var(--border)] overflow-hidden">
         <div className="h-full w-[85%] rounded-full bg-[var(--text-primary)] transition-all" />
       </div>
-      <span className="text-[9px] font-semibold text-[var(--text-primary)]">Strong</span>
+      <span className="text-[9px] font-semibold text-[var(--text-primary)]">{label}</span>
     </div>
   );
 }
@@ -174,7 +174,7 @@ export function VaultTutorial() {
           {/* Visual: Show sidebar tag area */}
           <div className="rounded-md border border-dashed border-[var(--border-focus)] bg-[var(--bg-elevated)] p-3 flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">Tags</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">{t('sidebar.tags')}</span>
               <div className="flex items-center gap-1.5">
                 <div className="flex h-5 w-5 items-center justify-center rounded-md bg-[var(--text-primary)] text-[var(--bg-base)]">
                   <Plus size={11} />
@@ -225,10 +225,10 @@ export function VaultTutorial() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <MockField icon={<Globe size={12} />} label="TITLE" value="Google" accent />
-            <MockField icon={<User size={12} />} label="USERNAME" value="your@email.com" />
-            <MockField icon={<Lock size={12} />} label="PASSWORD" value="••••••••••••••" accent />
-            <MockField icon={<Globe size={12} />} label="URL" value="https://google.com" />
+            <MockField icon={<Globe size={12} />} label={t('entry.title').toUpperCase()} value="Google" accent />
+            <MockField icon={<User size={12} />} label={t('entry.username').toUpperCase()} value="your@email.com" />
+            <MockField icon={<Lock size={12} />} label={t('entry.password').toUpperCase()} value="••••••••••••••" accent />
+            <MockField icon={<Globe size={12} />} label={t('entry.website_url').toUpperCase()} value="https://google.com" />
           </div>
         </div>
       ),
@@ -256,7 +256,7 @@ export function VaultTutorial() {
             <div className="rounded-md bg-[var(--bg-surface)] border border-[var(--border)] px-3 py-2 font-mono text-[13px] text-[var(--text-primary)] tracking-wide">
               kX9#mP2$vL7@nQ4
             </div>
-            <MockStrengthBar />
+            <MockStrengthBar label={t('strength.strong')} />
             <div className="flex gap-2 flex-wrap">
               {['A-Z', 'a-z', '0-9', '#$%'].map((label) => (
                 <span key={label} className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]">
