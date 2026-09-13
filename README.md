@@ -5,6 +5,7 @@ An offline-first, zero-knowledge desktop password manager engineered with Rust, 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-red.svg)](SECURITY.md)
 [![Format Spec](https://img.shields.io/badge/.vdb-Format_Spec-purple.svg)](docs/architecture/VDB_SPEC.md)
+[![Languages: 24](https://img.shields.io/badge/Languages-24%20Supported-brightgreen.svg)](#internationalization-24-languages)
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue.svg)](https://tauri.app/)
 
@@ -32,8 +33,9 @@ graph TD
 ```
 
 * **Single-Pass Authenticated Header**: Header metadata (magic, version, salt, KDF params) is bound as AAD into `XChaCha20-Poly1305`, authenticating header and payload before deserialization.
+* **Hardware Envelopes (TPM 2.0 & App-Bound DPAPI)**: Sensitive secrets and biometric session tokens are hardware-bound using Windows TPM 2.0 RSA encryption and BLAKE3 installation-bound DPAPI envelopes.
 * **Passkey Support**: Native ES256 (ECDSA P-256) keypair generation and signing per entry.
-* **Zeroize Memory Protection**: Critical keys and decrypted fields implement `zeroize::ZeroizeOnDrop`. Memory pages are protected against process dump inspection via platform flags (`prctl` / `SetProcessMitigationPolicy`).
+* **Zeroize Memory Protection**: Critical keys and decrypted fields implement `zeroize::ZeroizeOnDrop` alongside guard-paged locked buffers (`PAGE_NOACCESS` / `mlock` + `MADV_DONTDUMP`).
 
 ---
 
@@ -42,7 +44,8 @@ graph TD
 ```mermaid
 graph TD
     A["React 19 Frontend<br/><code>src/</code>"] -->|"IPC (Tauri Invoke)"| B["Tauri Shell<br/><code>src-tauri/</code>"]
-    B -->|"Direct Core Calls"| C["Core Engine<br/><code>yntra-vault-core (src-core/)</code>"]
+    B -->|"Direct Core Calls"| C["Core Engine<br/><code>crates/core/ & crates/crypto/</code>"]
+    B -->|"CLI Daemon & Tools"| CLI["CLI & Session Daemon<br/><code>crates/cli/</code>"]
     C -->|"Encrypted I/O"| D["Storage Payload<br/><code>.vdb File</code>"]
 ```
 
@@ -52,6 +55,7 @@ graph TD
 
 * **Item Types**: Login, Credit Card, Identity, Secure Note, SSH Key, API Key, Wi-Fi, Crypto Wallet.
 * **TOTP Authenticator**: RFC 6238 compliant 2FA generator (SHA-1, SHA-256, SHA-512) with visual countdown.
+* **Smart Login (CDP Engine)**: Automated browser login via Chrome DevTools Protocol with isolated browser sessions, automatic field detection, credential autofill, and elevated UAC token compatibility.
 * **Password Generator**: CSPRNG character-set generator + Diceware passphrase engine.
 * **Security Audit & Breach Check**: Local vault analyzer for weak/reused passwords + k-anonymity Have I Been Pwned lookup (transmitting only 5-character SHA-1 hash prefixes).
 * **Autotype Engine**: OS credential input with field auto-classification (Windows UIA).
@@ -59,23 +63,40 @@ graph TD
 
 ---
 
+## Internationalization (24 Languages)
+
+Yntra Vault is localized into 24 languages with 100% string coverage (777 translation keys per language, validated by automated test suites):
+
+| Region | Supported Languages |
+|:---|:---|
+| **Nordic** | Swedish (`sv`), Danish (`da`), Norwegian (`no`), Finnish (`fi`) |
+| **Western & Southern Europe** | English (`en`), German (`de`), Dutch (`nl`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`) |
+| **Central & Eastern Europe** | Polish (`pl`), Czech (`cs`), Russian (`ru`), Ukrainian (`uk`), Greek (`el`) |
+| **Middle East & South Asia** | Turkish (`tr`), Hebrew (`he`), Arabic (`ar`), Hindi (`hi`) |
+| **East Asia** | Japanese (`ja`), Korean (`ko`), Simplified Chinese (`zh-CN`), Traditional Chinese (`zh-TW`) |
+
+---
+
 ## Feature Matrix & OS Compatibility
 
-| Feature | Backend (`src-core`) | Frontend (`src`) | Supported OS | Status |
+| Feature | Backend (`crates/`) | Frontend (`src`) | Supported OS | Status |
 |:---|:---:|:---:|:---:|:---:|
-| Vault Create / Unlock / Lock | `manager.rs` | `CreateVaultModal.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Entry CRUD + Custom Fields | `manager.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
-| TOTP Authenticator (SHA1/256/512) | `totp/` | `TOTPDisplay.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Passkey Authenticator (ES256) | `crypto/passkey.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Password Generator & Diceware | `generator/` | `PasswordGenerator.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Security Audit & Breach Check | `breach/` | `SecurityDashboard.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Encrypted Search (Trigram) | `vault/search.rs` | `PasswordList.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Autotype Engine | `services/autotype/` | `AutotypeButton.tsx` | Windows (UIA) | ✅ Windows |
-| Master Password Re-keying | `manager.rs` | `ChangeMasterPasswordModal.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Password History & Rollback | `vault/history.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
-| Shamir Secret Sharing | `crypto/sharing.rs` | — | Cross-Platform | ⚙️ Core Only |
-| WebDAV Cloud & P2P Vault Sync | `services/sync/` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
+| Vault Create / Unlock / Lock | `core::vault` | `CreateVaultModal.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Entry CRUD + Custom Fields | `core::vault` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
+| TOTP Authenticator (SHA1/256/512) | `core::totp` | `TOTPDisplay.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Smart Login Engine (CDP) | `core::smartlogin` | `SmartLoginModal.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Passkey Authenticator (ES256) | `crypto::passkey` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Password Generator & Diceware | `core::generator` | `PasswordGenerator.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Security Audit & Breach Check | `core::breach` | `SecurityDashboard.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Encrypted Search (Trigram) | `core::vault::search` | `PasswordList.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Autotype Engine | `core::autotype` | `AutotypeButton.tsx` | Windows (UIA) | ✅ Windows |
+| Master Password Re-keying | `core::vault` | `ChangeMasterPasswordModal.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Password History & Rollback | `core::vault::history` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
+| Hardware Envelopes (TPM 2.0 / DPAPI) | `crypto::tpm` | `Login.tsx` | Windows, macOS | ✅ Complete |
+| Shamir Secret Sharing | `crypto::sharing` | — | Cross-Platform | ⚙️ Core Only |
+| WebDAV Cloud & P2P Vault Sync | `core::sync` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
 | Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
+| 24 Locales & RTL Support | — | `src/i18n/` | Cross-Platform | ✅ Complete |
 
 ---
 
@@ -97,7 +118,7 @@ Yntra Vault features an ultra-fast, SOTA command-line interface (`yntra` / `yntr
 
 ```bash
 # Build CLI binary
-cargo build --manifest-path src-core/Cargo.toml --release --bin yntra
+cargo build --release -p yntra-cli
 
 # Unlock vault session daemon (sub-5ms command latency)
 yntra unlock
@@ -158,18 +179,21 @@ bun run tauri build
 ### Running Test Suite
 
 ```bash
-# Core unit tests
-cargo test --lib --manifest-path src-core/Cargo.toml
+# Workspace unit and integration tests
+cargo test --workspace
 
-# Core micro-benchmark suite
+# Frontend localization and unit tests
+bun test
+
+# Micro-benchmark suite
 bun run bench
 ```
-
 
 ---
 
 ## Documentation & Format Specifications
 
+* **Changelog & Releases**: [CHANGELOG.md](CHANGELOG.md)
 * **Security Policy & Vulnerability Reporting**: [SECURITY.md](SECURITY.md)
 * **Cryptographic Proofs & Security Model**: [docs/security/cryptographic-proofs.md](docs/security/cryptographic-proofs.md)
 * **Storage Format Specification (.vdb)**: [VDB_SPEC.md](docs/architecture/VDB_SPEC.md)

@@ -15,23 +15,25 @@
 | `clsx` | ^2.1.0 | Conditional classnames |
 | `tailwind-merge` | ^3.3.0 | Tailwind class deduplication |
 
-### Backend (Rust)
+### Backend (Rust Workspace)
 
 | Crate | Purpose |
 |-------|---------|
-| `argon2` | KDF — Argon2id (memory-hard, GPU-resistant) |
-| `chacha20poly1305` | Vault-level AEAD (XChaCha20-Poly1305) |
-| `aes-gcm` | Entry-level AEAD (AES-256-GCM) |
+| `argon2` | KDF — Argon2id (memory-hard, GPU-resistant, 256 MB RAM) |
+| `chacha20poly1305` | Vault-level AEAD (XChaCha20-Poly1305) with header AAD binding |
+| `aes-gcm` | Entry-level AEAD (AES-256-GCM legacy fallback) |
 | `hkdf` + `sha2` | Subkey derivation (HKDF-SHA512) |
 | `hmac` | P2P handshake authentication & legacy v1/v2 file verification |
-| `p256` | Passkey generation (ECDSA P-256 / ES256) |
-| `zeroize` | Memory safety — automatic sensitive data clearing |
-| `rmp-serde` | Vault payload serialization (MessagePack, v2/v3 format) |
+| `p256` | Passkey generation and signing (ECDSA P-256 / ES256) |
+| `zeroize` | Memory safety — automatic sensitive buffer clearing |
+| `chromiumoxide` | Chrome DevTools Protocol (CDP) client for zero-extension Smart Login |
+| `rmp-serde` | Vault payload serialization (MessagePack format) |
 | `clap` + `clap_complete` | Command line argument parsing & shell completion generator |
 | `ratatui` + `crossterm` | Interactive Terminal UI (TUI) rendering & terminal event loop |
 | `rpassword` | Terminal interactive password prompt |
 | `comfy-table` | Terminal table output formatting |
 | `colored` | Terminal ANSI color highlighting |
+| `windows-sys` / `winreg` | Windows TPM 2.0, App-Bound DPAPI, and UAC elevation checks |
 
 ---
 
@@ -52,8 +54,21 @@
 | `PasswordList` | Search bar + scrollable entry list with sections |
 | `PasswordDetail` | Entry view: fields, TOTP, passkey, recovery codes, password history |
 | `EntryModal` | Create/edit entry form with field type selection |
+| `SmartLoginModal` | Zero-extension automated login flow: browser picker, CDP status, and progress streaming |
+| `VaultTutorial` | Interactive onboarding walkthrough guiding users through core features |
 | `SettingsPanel` | Slide-in overlay: General, Appearance, Security, WebDAV Cloud Sync, Backup tabs |
 | `SecurityDashboard` | Audit results: weak/reused/old/breached password breakdown |
+
+---
+
+## Internationalization (i18n)
+
+Yntra Vault features a zero-dependency, type-safe internationalization engine (`src/i18n/`):
+
+- **24 Supported Locales**: English (`en`), Swedish (`sv`), Danish (`da`), Norwegian (`no`), Finnish (`fi`), German (`de`), Dutch (`nl`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Polish (`pl`), Czech (`cs`), Russian (`ru`), Ukrainian (`uk`), Turkish (`tr`), Greek (`el`), Hebrew (`he`), Arabic (`ar`), Hindi (`hi`), Japanese (`ja`), Korean (`ko`), Simplified Chinese (`zh-CN`), Traditional Chinese (`zh-TW`).
+- **Complete Coverage Invariant**: Every locale provides exact 1:1 coverage with `en` (777 translation keys), enforced via `translations.test.ts`.
+- **Right-To-Left (RTL)**: Dynamic document directionality (`dir="rtl"`) automatically toggled for Arabic and Hebrew locales.
+- **Dynamic Font & Locale Switching**: Instant UI re-render without app reloading via `LanguageContext`.
 
 ---
 

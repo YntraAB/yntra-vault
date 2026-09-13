@@ -1,6 +1,6 @@
 # Yntra Vault — Integration SDK & Architecture Reference
 
-> Technical reference for the browser integration, vault file format, autotype engine, and release workflow.
+> Technical reference for browser integration, Smart Login, vault file format, autotype engine, and release workflow.
 
 ---
 
@@ -70,45 +70,45 @@ HKDF-SHA512 ──┬── Vault Key (XChaCha20-Poly1305 + Header AAD)
 
 ---
 
-## 2. Browser Integration & Architecture [Specification / Out of Scope]
+## 2. Smart Login Engine (CDP)
 
-> [!NOTE]
-> Yntra Vault operates strictly offline without background network services or browser extension processes. All application and web form auto-filling is performed directly via the OS-level Autotype Engine. The specification below outlines the conceptual architecture for browser extensions.
+Yntra Vault features an automated, **zero-extension** login engine powered by the Chrome DevTools Protocol (`chromiumoxide`). It communicates directly with local Chromium browser instances without requiring browser extensions or background daemon processes.
 
-### Conceptual Architecture
+### Architecture & Control Flow
 
 ```
-Browser Extension ◄──── stdin/stdout (4-byte length prefix) ────► Native Host
-                                                                       │
-                                                     Named Pipe / Unix Socket
-                                                                       │
-                                                               Tauri Desktop App
+Tauri Frontend (React)
+    │  invoke("smart_login_start", { entryId, browserIndex })
+    ▼
+Tauri Shell Command (`src-tauri/src/commands/smartlogin.rs`)
+    │  Decouples credentials into Zeroizing<String>
+    │  Spawns asynchronous Tokio task
+    ▼
+Smart Login Engine (`crates/core/src/smartlogin/`)
+    ├── Browser Discovery: scans Registry / paths for installed browsers
+    │   (Chrome, Edge, Brave, Vivaldi, Arc)
+    ├── Precheck & Process Management: detects active browser processes,
+    │   closes processes cleanly, and cleans orphaned `SingletonLock` files
+    ├── Process Launch: spawns browser with remote debugging port
+    │   (includes `--no-sandbox` / `--disable-gpu-sandbox` when running elevated under UAC)
+    ├── CDP WebSocket Handshake: connects to DevTools endpoint
+    ├── Heuristic Form Detection: identifies username, password, TOTP inputs
+    ├── Typing Simulation: sends keyboard input events with humanized jitter
+    └── Event Streaming: emits real-time progress events to frontend
 ```
 
-**Components**:
-- **Native Host**: Lightweight executable registered as a Chrome/Firefox Native Messaging host.
-- **IPC Server**: Runs inside the desktop app, listens on `\\.\pipe\yntra-vault-ipc` (Windows) or `/tmp/yntra-vault-ipc.sock` (Unix).
+### Safety & Isolation Invariants
 
-### Security Model
-
-1. **Parent Process Verification** (Windows):
-   - Resolves PPID via Toolhelp32 Snapshots
-   - Verifies parent executable matches an allowed browser (`chrome.exe`, `firefox.exe`, `msedge.exe`, `brave.exe`, `vivaldi.exe`, `arc.exe`)
-   - Rejects execution from unknown parents
-
-2. **Session Token Verification**:
-   - App generates a cryptographic token on vault unlock
-   - Token is wrapped via DPAPI (Windows) / Keychain (macOS)
-   - All IPC requests must include a valid `session_token`
-   - Token comparison uses constant-time equality (`subtle::ConstantTimeEq`)
-
-3. **Message Size Limit**: All payloads capped at 1 MB
+1. **Dedicated User Data Directory**: Launches browsers with an isolated profile path (`--user-data-dir`) so existing sessions and browser profiles are never corrupted.
+2. **Elevated UAC Token Handling**: When Yntra Vault is executed with Administrator privileges, Chromium refuses to start with default sandboxing. The engine detects elevation (`shell32::IsUserAnAdmin`) and automatically appends `--no-sandbox` and `--disable-gpu-sandbox` to ensure seamless execution.
+3. **Transient Memory Safety**: Sensitive credentials (username, password, TOTP) are wrapped in `Zeroizing<String>` during automation and wiped immediately after form completion.
+4. **Immediate Cancellation**: User cancellation (`smart_login_cancel`) triggers an atomic flag (`AtomicBool`) that aborts CDP operations and closes the browser session instantly.
 
 ---
 
 ## 3. Autotype Engine
 
-The autotype engine (`src-core/src/services/autotype/`) types credentials into focused application fields using OS-level input simulation.
+The autotype engine (`crates/core/src/services/autotype/`) types credentials into focused application fields using OS-level input simulation (Windows UI Automation).
 
 ### Field Classification
 
@@ -173,7 +173,7 @@ The search system uses **trigram HMAC hashing** to enable fuzzy search without e
 Vault recovery supports splitting a master password hash into 3 shares where any 2 are required to reconstruct (2-of-3 threshold).
 
 - **Field**: GF(256) with irreducible polynomial `x⁸ + x⁴ + x³ + x + 1` (0x11b)
-- **Share Format**: `YNTRA-SHARE1-{hex}`, `YNTRA-SHARE2-{hex}`, `YNTRA-SHARE3-{hex}` (legacy `SL-SHARE...` supported for backward compatibility)
+- **Share Format**: `YNTRA-SHARE1-{hex}`, `YNTRA-SHARE2-{hex}`, `YNTRA-SHARE3-{hex}`
 - **Scheme**: Password is hashed with SHA-256 to a 32-byte secret before splitting; reconstruction recovers the SHA-256 hash to verify identity.
 
 ---
@@ -209,6 +209,15 @@ All commands are invoked from the React frontend via `@tauri-apps/api/core::invo
 | `change_master_password` | `current`, `new_password`, `current_key_file?`, `new_key_file?` | `()` |
 | `get_vault_path` | — | `string` |
 | `generate_key_file` | `path` | `()` |
+
+### Smart Login (CDP)
+
+| Command | Arguments | Returns |
+|---------|-----------|---------|
+| `smart_login_precheck` | — | `PreCheckResult` |
+| `smart_login_close_browser` | `process_name` | `()` |
+| `smart_login_start` | `entry_id`, `browser_index` | `()` |
+| `smart_login_cancel` | — | `()` |
 
 ### Biometrics (Windows Hello / Touch ID)
 

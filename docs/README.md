@@ -28,6 +28,7 @@ docs/
 ## Core Documentation
 
 ### Security & Governance
+* [**Changelog & Version History**](../CHANGELOG.md): Comprehensive version log documenting features, security updates, fixes, and architectural revisions.
 * [**Security Policy & Vulnerability Disclosure**](../SECURITY.md): Vulnerability reporting instructions, response SLAs, scope, and GitHub Security Advisory protocols.
 * [**Cryptographic Proofs & Security Model**](security/cryptographic-proofs.md): Formal Argon2id KDF hardness proofs, HKDF domain separation, XChaCha20-Poly1305 header AAD binding, hardware guard page invariants, and k-anonymity proofs.
 
