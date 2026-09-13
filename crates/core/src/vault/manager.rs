@@ -107,7 +107,7 @@ impl VaultManager {
                 version: FORMAT_VERSION,
             },
             entries: Vec::new(),
-            tags: Self::default_tags(),
+            tags: Vec::new(),
             trash: Vec::new(),
             settings: VaultSettings::default(),
         };

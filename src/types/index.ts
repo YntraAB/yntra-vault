@@ -115,7 +115,7 @@ export interface AppSettings {
   autotypeFieldDelayMs: number;
   autotypeSettleDelayMs: number;
   autotypeLaunchBrowser: boolean;
-  tagSortOrder?: 'name' | 'count';
+  tagSortOrder?: 'name' | 'count' | 'custom';
   showTagCounts?: boolean;
   entrySortOrder?: 'title' | 'updated' | 'created';
   keybinds?: KeybindsConfig;

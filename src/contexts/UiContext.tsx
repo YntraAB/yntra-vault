@@ -28,6 +28,8 @@ export interface UiContextType {
   setSettingsOpen: (open: boolean) => void;
   isEntryModalOpen: boolean;
   setIsEntryModalOpen: (open: boolean) => void;
+  isCreateTagOpen: boolean;
+  setIsCreateTagOpen: (open: boolean) => void;
 }
 
 const UiContext = createContext<UiContextType | undefined>(undefined);
@@ -46,6 +48,7 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
   const [isEditing, setIsEditing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
+  const [isCreateTagOpen, setIsCreateTagOpen] = useState(false);
   const { isLocked } = useAuth();
 
   // Reset UI and search states on lock
@@ -55,6 +58,7 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
       setIsEditing(false);
       setSettingsOpen(false);
       setIsEntryModalOpen(false);
+      setIsCreateTagOpen(false);
     }
   }, [isLocked]);
 
@@ -69,8 +73,10 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
       setSettingsOpen,
       isEntryModalOpen,
       setIsEntryModalOpen,
+      isCreateTagOpen,
+      setIsCreateTagOpen,
     }),
-    [filterCategory, isEditing, settingsOpen, isEntryModalOpen]
+    [filterCategory, isEditing, settingsOpen, isEntryModalOpen, isCreateTagOpen]
   );
 
   return (

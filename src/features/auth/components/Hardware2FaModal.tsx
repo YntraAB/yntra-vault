@@ -145,7 +145,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
           {/* Header */}
           <div className="flex items-center justify-between border-b border-[var(--border)] pb-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 text-cyan-400">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--accent-bg)] text-[var(--text-primary)]">
                 <KeyRound size={20} />
               </div>
               <div>
@@ -179,7 +179,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                       onClick={() => setProtocol('YubiKeyChallengeResponse')}
                       className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-center transition-all ${
                         protocol === 'YubiKeyChallengeResponse'
-                          ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400 font-medium'
+                          ? 'border-[var(--accent)] bg-[var(--accent-bg)] text-[var(--text-primary)] font-medium'
                           : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:border-[var(--border-focus)]'
                       }`}
                     >
@@ -191,7 +191,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                       onClick={() => setProtocol('Fido2Ctap2HmacSecret')}
                       className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-center transition-all ${
                         protocol === 'Fido2Ctap2HmacSecret'
-                          ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400 font-medium'
+                          ? 'border-[var(--accent)] bg-[var(--accent-bg)] text-[var(--text-primary)] font-medium'
                           : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:border-[var(--border-focus)]'
                       }`}
                     >
@@ -277,7 +277,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                       type="button"
                       onClick={refreshKeys}
                       disabled={refreshing}
-                      className="inline-flex items-center gap-1 text-[11px] text-cyan-400 hover:underline cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline cursor-pointer disabled:opacity-50"
                     >
                       <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
                       <span>{refreshing ? 'Scanning...' : 'Scan Again'}</span>
@@ -288,7 +288,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                       {keys.map((k) => (
                         <div key={k.id} className="flex items-center justify-between text-[12px]">
                           <span className="font-medium text-[var(--text-primary)]">{k.name}</span>
-                          <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] text-emerald-400 border border-emerald-500/20">
+                          <span className="inline-flex items-center gap-1 rounded bg-[var(--accent-bg)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-primary)] border border-[var(--border)]">
                             {t('hw.connected')}
                           </span>
                         </div>
@@ -315,7 +315,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                 <motion.div
                   animate={{ scale: [1, 1.15, 1], opacity: [0.8, 1, 0.8] }}
                   transition={{ duration: 1.5, repeat: Infinity }}
-                  className="flex h-20 w-20 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 shadow-lg shadow-cyan-500/20"
+                  className="flex h-20 w-20 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--accent-bg)] text-[var(--text-primary)] shadow-lg shadow-black/20"
                 >
                   <KeyRound size={36} />
                 </motion.div>
@@ -325,7 +325,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                 <p className="mt-1 max-w-[280px] text-[12px] text-[var(--text-secondary)]">
                   {t('hw.touch_prompt_desc')}
                 </p>
-                <RefreshCw size={16} className="mt-4 animate-spin text-cyan-400" />
+                <RefreshCw size={16} className="mt-4 animate-spin text-[var(--text-secondary)]" />
               </div>
             )}
 
@@ -358,7 +358,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
                 type="button"
                 onClick={handleStartChallenge}
                 disabled={loading || keys.length === 0 || (mode === 'enroll' && !masterPassword.trim())}
-                className="flex h-9 items-center gap-2 rounded-md bg-cyan-500 px-4 text-[12px] font-semibold text-black hover:bg-cyan-400 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                className="flex h-9 items-center gap-2 rounded-md bg-[var(--accent)] px-4 text-[12px] font-semibold text-[var(--bg-base)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
               >
                 {mode === 'enroll' ? t('hw.start_enrollment') : t('hw.test_challenge')}
               </button>

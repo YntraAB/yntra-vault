@@ -205,7 +205,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 bg-[var(--bg-base)]">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-[3px] bg-blue-500/10 text-blue-500 border border-blue-500/20">
+            <div className="flex h-8 w-8 items-center justify-center rounded-[3px] bg-[var(--accent-bg)] text-[var(--text-primary)] border border-[var(--border)]">
               <FolderInput size={16} />
             </div>
             <div>
@@ -408,9 +408,9 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
               >
                 {/* Format Mismatch Auto-Recovery Alert */}
                 {previewResult.is_format_mismatch && (
-                  <div className="flex items-center justify-between rounded-[3px] border border-blue-500/30 bg-blue-500/10 p-2.5 text-[12px] text-blue-400">
+                  <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--accent-bg)] p-2.5 text-[12px] text-[var(--text-secondary)]">
                     <div className="flex items-center gap-2">
-                      <AlertTriangle size={15} className="shrink-0 text-blue-400" />
+                      <AlertTriangle size={15} className="shrink-0 text-[var(--text-secondary)]" />
                       <span>
                         Format Mismatch: You selected <strong>{selectedBrand.name}</strong>, but this file was auto-detected as <strong>{previewResult.format_detected}</strong>. We automatically parsed {previewResult.total_found} entries!
                       </span>
@@ -434,7 +434,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
                     <span className="font-semibold text-[var(--text-primary)]">
                       Detected: {previewResult.format_detected}
                     </span>
-                    <span className="rounded bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[10px] font-bold text-blue-500">
+                    <span className="rounded bg-[var(--accent-bg)] border border-[var(--border)] px-2 py-0.5 text-[10px] font-bold text-[var(--text-primary)]">
                       {previewResult.total_found} Items Found
                     </span>
                   </div>
@@ -512,7 +512,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
                         Object.values(selectedEntries).filter(Boolean).length === previewResult.entries.length;
                       toggleSelectAll(!allSelected);
                     }}
-                    className="text-[11px] font-medium text-blue-500 hover:underline cursor-pointer"
+                    className="text-[11px] font-medium text-[var(--text-primary)] hover:underline cursor-pointer"
                   >
                     {Object.values(selectedEntries).filter(Boolean).length === previewResult.entries.length
                       ? 'Deselect All'

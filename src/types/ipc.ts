@@ -574,6 +574,10 @@ export interface IpcCommands {
     args: { id: string; name: string; color: string; icon: string };
     return: void;
   };
+  reorder_tags: {
+    args: { tagIds: string[] };
+    return: void;
+  };
 
   // Autotype & System Integration
   autotype: {

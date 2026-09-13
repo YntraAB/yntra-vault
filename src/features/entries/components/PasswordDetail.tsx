@@ -1052,7 +1052,7 @@ export function PasswordDetail() {
               <div className="px-4 py-3 border-t border-[var(--border-subtle)] select-none">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <ShieldCheck size={14} className="text-green-500" />
+                    <ShieldCheck size={14} className="text-[var(--text-primary)]" />
                     <span className="text-[12px] font-medium text-[var(--text-primary)]">
                       Passkey (ES256)
                     </span>
@@ -1105,7 +1105,7 @@ export function PasswordDetail() {
                       >
                         <span className="shrink-0 select-none">{getAttachmentIcon(att.mime_type || att.mimeType, att.name)}</span>
                         <div className="flex flex-col min-w-0">
-                          <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)] group-hover/att:text-indigo-400 transition-colors select-text">
+                          <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors select-text">
                             {att.name}
                           </span>
                           <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono select-none">
@@ -1323,7 +1323,7 @@ const CountdownRing: React.FC<{
   const r = size / 2 - 1.5;
   const circumference = 2 * Math.PI * r;
   const strokeDashoffset = circumference * (1 - progress);
-  const color = urgent ? '#ef4444' : 'var(--accent, #3b82f6)';
+  const color = urgent ? '#ef4444' : 'var(--accent, #e8e8e8)';
 
   return (
     <svg width={size} height={size} className="shrink-0 -rotate-90">

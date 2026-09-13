@@ -108,7 +108,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
                       }}
                       className={cn(
                         'w-full flex items-center justify-between px-3 py-2 text-sm rounded-md cursor-pointer transition-colors text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
-                        isSelected && 'bg-[var(--accent-subtle,#3b82f61a)] font-medium text-[var(--accent)]'
+                        isSelected && 'bg-[var(--accent-bg)] font-medium text-[var(--accent)]'
                       )}
                     >
                       <div className="flex items-center gap-2.5 truncate">

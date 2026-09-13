@@ -5,12 +5,13 @@ import { ChevronLeft } from 'lucide-react';
 import { useAuth, useAutoLock } from '@/features/auth';
 import { useSettings, SettingsPanel } from '@/features/settings';
 import { useUi } from '@/contexts/UiContext';
-import { useEntries, PasswordList, PasswordDetail } from '@/features/entries';
+import { useEntries, PasswordList, PasswordDetail, CreateTagModal } from '@/features/entries';
 import { useToast } from '@/contexts/ToastContext';
 import { useMobile } from '@/hooks/use-mobile';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { Sidebar, MobileHeader, MobileBottomNav, MobileDrawer, MobileBottomSheet } from '@/components/layout';
 import { ToastContainer } from '@/components/ui';
+import { VaultTutorial } from '@/components/ui/VaultTutorial';
 import { PasswordGenerator } from '@/features/generator';
 import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
 
@@ -19,7 +20,7 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const { currentVault, isLocked, lockVault } = useAuth();
   const { settings } = useSettings();
-  const { settingsOpen, setSettingsOpen, isEntryModalOpen, setIsEntryModalOpen } = useUi();
+  const { settingsOpen, setSettingsOpen, isEntryModalOpen, setIsEntryModalOpen, isCreateTagOpen, setIsCreateTagOpen } = useUi();
   const { selectedEntry, selectEntryById } = useEntries();
   const { addToast } = useToast();
 
@@ -280,6 +281,11 @@ export default function AppLayout() {
 
         <SettingsPanel />
         <ToastContainer />
+        <VaultTutorial />
+        <CreateTagModal
+          open={isCreateTagOpen}
+          onClose={() => setIsCreateTagOpen(false)}
+        />
       </div>
     );
   }
@@ -294,6 +300,11 @@ export default function AppLayout() {
       </main>
       <SettingsPanel />
       <ToastContainer />
+      <VaultTutorial />
+      <CreateTagModal
+        open={isCreateTagOpen}
+        onClose={() => setIsCreateTagOpen(false)}
+      />
     </div>
   );
 }

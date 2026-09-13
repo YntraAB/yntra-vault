@@ -76,7 +76,8 @@ pub fn show_in_explorer(path: String) -> Result<(), String> {
     {
         use std::process::Command;
         Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .arg("/select,")
+            .arg(&path)
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())

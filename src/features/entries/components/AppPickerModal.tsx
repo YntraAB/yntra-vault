@@ -147,11 +147,11 @@ export function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalPro
   };
 
   const getCategoryBadge = (cat?: string, isSys?: boolean) => {
-    if (isSys) return <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500 border border-amber-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_system')}</span>;
-    if (cat === 'browsers_communication') return <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 border border-blue-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_browsers')}</span>;
-    if (cat === 'productivity_dev') return <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_dev')}</span>;
-    if (cat === 'gaming') return <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400 border border-purple-500/20 whitespace-nowrap shrink-0">{t('app_picker.badge_gaming')}</span>;
-    return <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-tertiary)] border border-[var(--border-subtle)] whitespace-nowrap shrink-0">{t('app_picker.badge_app')}</span>;
+    if (isSys) return <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] border border-[var(--border)] whitespace-nowrap shrink-0">{t('app_picker.badge_system')}</span>;
+    if (cat === 'browsers_communication') return <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] border border-[var(--border)] whitespace-nowrap shrink-0">{t('app_picker.badge_browsers')}</span>;
+    if (cat === 'productivity_dev') return <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] border border-[var(--border)] whitespace-nowrap shrink-0">{t('app_picker.badge_dev')}</span>;
+    if (cat === 'gaming') return <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] border border-[var(--border)] whitespace-nowrap shrink-0">{t('app_picker.badge_gaming')}</span>;
+    return <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-tertiary)] border border-[var(--border-subtle)] whitespace-nowrap shrink-0">{t('app_picker.badge_app')}</span>;
   };
 
   return (

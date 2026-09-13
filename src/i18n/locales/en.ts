@@ -472,6 +472,7 @@ export const en = {
   'menu.delete_tag': 'Delete Tag',
   'menu.select_all': 'Select All Items',
   'menu.deselect_all': 'Deselect Tag Filter',
+  'menu.sort_custom': 'Custom Order (Drag & Drop)',
   'menu.sort_name': 'Sort Alphabetically (A–Z)',
   'menu.sort_count': 'Sort by Entry Count',
   'menu.sort_title': 'Sort by Title (A–Z)',
@@ -813,4 +814,68 @@ export const en = {
   'common.resize_sidebar': 'Resize sidebar',
   'common.resize_password_list': 'Resize password list',
   'entry_modal.drop_files': 'Click or drop files to attach',
+
+  // Tutorial (new vault walkthrough)
+  'tutorial.skip': 'Skip tour',
+  'tutorial.next': 'Next',
+  'tutorial.back': 'Back',
+  'tutorial.finish': 'Done',
+  'tutorial.step_counter': 'Step {current} of {total}',
+  'tutorial.resume_guide': 'Open guide',
+
+  // Prompt phase
+  'tutorial.prompt_title': 'Your Vault is Ready',
+  'tutorial.prompt_desc': 'Would you like a quick guided tour? We\'ll walk you through creating tags, adding passwords, and generating secure keys step by step.',
+  'tutorial.prompt_yes': 'Yes, show me how',
+  'tutorial.prompt_no': 'No thanks, I\'ll explore myself',
+
+  // Waiting hints (shown while user performs the action)
+  'tutorial.waiting_tag': 'Create a tag in the sidebar, then the guide will continue automatically.',
+  'tutorial.waiting_entry': 'Fill in the form and save your entry. The guide will continue after.',
+
+  // Guide Step 1: Layout orientation
+  'tutorial.guide_step1_title': 'How Your Vault is Organized',
+  'tutorial.guide_step1_desc': 'Your vault has three main areas. Here\'s what each one does:',
+  'tutorial.guide_sidebar': 'Sidebar',
+  'tutorial.guide_sidebar_desc': 'navigate between All Items, Favorites, Tags, and Trash',
+  'tutorial.guide_list': 'Password List',
+  'tutorial.guide_list_desc': 'browse and search all your saved entries',
+  'tutorial.guide_detail': 'Detail Panel',
+  'tutorial.guide_detail_desc': 'view and edit the selected entry\'s details',
+
+  // Guide Step 2: Create a Tag
+  'tutorial.guide_tag_title': 'Organize with Tags',
+  'tutorial.guide_tag_desc': 'Tags help you group passwords by category. Let\'s create your first tag — like "Work", "Personal", or "Finance".',
+  'tutorial.guide_tag_empty': 'No tags yet — click + to create one',
+  'tutorial.guide_tag_how': 'How to create a tag:',
+  'tutorial.guide_tag_step1': 'Find the "Tags" section in the left sidebar',
+  'tutorial.guide_tag_step2': 'Click the small + button next to "Tags"',
+  'tutorial.guide_tag_step3': 'Pick a name, color, and icon — then save',
+  'tutorial.guide_try_it': 'Try it now',
+
+  // Guide Step 3: Add entry
+  'tutorial.guide_step2_title': 'Adding Your First Password',
+  'tutorial.guide_step2_desc': 'Now let\'s save a password. Click the + button in the top-right of the password list. A form opens where you fill in:',
+  'tutorial.guide_click_plus': 'Click the + button',
+  'tutorial.guide_click_plus_hint': 'Located at the top of the password list',
+
+  // Guide Step 4: Password Generator
+  'tutorial.guide_step3_title': 'Generating Strong Passwords',
+  'tutorial.guide_step3_desc': 'Inside the entry form, click the dice icon next to the password field. The generator creates strong, random passwords instantly.',
+  'tutorial.guide_generator': 'Built-in Generator',
+  'tutorial.guide_length': '8–128 characters',
+  'tutorial.guide_step3_hint': 'Tip: You can also use the standalone generator from the sidebar to create passwords without saving them.',
+
+  // Guide Step 5: Tips
+  'tutorial.guide_step4_title': 'Useful Features',
+  'tutorial.guide_step4_desc': 'Here are a few more things you can do:',
+  'tutorial.tip_search': 'Quick Search',
+  'tutorial.tip_tags': 'Tags',
+  'tutorial.tip_tags_hint': 'Organize entries',
+  'tutorial.tip_import': 'Import',
+  'tutorial.tip_import_hint': 'From other managers',
+  'tutorial.tip_settings': 'Settings',
+  'tutorial.tip_settings_hint': 'Theme, security, more',
+  'tutorial.tip_drag_tags': 'Reorder Tags by Dragging',
+  'tutorial.tip_drag_tags_hint': 'Hold and drag any tag up or down in the sidebar to organize them your way.',
 };

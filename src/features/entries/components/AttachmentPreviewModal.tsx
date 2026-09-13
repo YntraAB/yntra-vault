@@ -211,10 +211,10 @@ export function AttachmentPreviewModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-base)] shrink-0 select-none">
           <div className="flex items-center gap-3 min-w-0">
-            {category === 'image' && <ImageIcon size={18} className="text-blue-400 shrink-0" />}
-            {category === 'text' && <FileText size={18} className="text-emerald-400 shrink-0" />}
-            {category === 'zip' && <FileArchive size={18} className="text-amber-400 shrink-0" />}
-            {category === 'other' && <Paperclip size={18} className="text-indigo-400 shrink-0" />}
+            {category === 'image' && <ImageIcon size={18} className="text-[var(--text-secondary)] shrink-0" />}
+            {category === 'text' && <FileText size={18} className="text-[var(--text-secondary)] shrink-0" />}
+            {category === 'zip' && <FileArchive size={18} className="text-[var(--text-secondary)] shrink-0" />}
+            {category === 'other' && <Paperclip size={18} className="text-[var(--text-secondary)] shrink-0" />}
 
             <div className="flex flex-col min-w-0">
               <span className="truncate text-[14px] font-semibold text-[var(--text-primary)]">
@@ -341,7 +341,7 @@ export function AttachmentPreviewModal({
           {/* Text Preview */}
           {data && category === 'text' && (
             <div className="h-full flex flex-col rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] overflow-hidden font-mono text-[12.5px]">
-              <div className="overflow-auto p-4 space-y-1 text-[var(--text-primary)] selection:bg-indigo-500/30">
+              <div className="overflow-auto p-4 space-y-1 text-[var(--text-primary)] selection:bg-[var(--accent-bg)]">
                 <pre className="whitespace-pre-wrap break-words leading-relaxed font-mono">
                   {textContent}
                 </pre>
@@ -401,7 +401,7 @@ export function AttachmentPreviewModal({
           {/* Other / Generic Binary File */}
           {data && category === 'other' && (
             <div className="flex flex-col items-center justify-center h-full text-center gap-3 p-6 select-none">
-              <div className="rounded-full bg-indigo-500/10 p-4 text-indigo-400 border border-indigo-500/20">
+              <div className="rounded-full bg-[var(--accent-bg)] p-4 text-[var(--text-secondary)] border border-[var(--border)]">
                 <Paperclip size={32} />
               </div>
               <div className="flex flex-col gap-1 max-w-sm">

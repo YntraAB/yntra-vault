@@ -85,6 +85,21 @@ impl VaultManager {
         Ok(())
     }
 
+    /// Reorder tags according to the provided list of IDs.
+    pub fn reorder_tags(&mut self, tag_ids: &[Uuid]) -> crate::Result<()> {
+        let mut new_tags = Vec::with_capacity(self.data.tags.len());
+        for id in tag_ids {
+            if let Some(pos) = self.data.tags.iter().position(|t| t.id == *id) {
+                new_tags.push(self.data.tags.remove(pos));
+            }
+        }
+        // Append any remaining tags that were not in tag_ids
+        new_tags.extend(self.data.tags.drain(..));
+        self.data.tags = new_tags;
+        self.save()?;
+        Ok(())
+    }
+
     /// Default starter tags created on new vaults.
     #[allow(dead_code)]
     pub(crate) fn default_tags() -> Vec<Tag> {
@@ -199,5 +214,25 @@ mod tests {
         let title_results = manager.search_entries("Internal").unwrap();
         assert_eq!(title_results.len(), 1);
         assert_eq!(title_results[0].id, entry_id);
+    }
+
+    #[test]
+    fn test_reorder_tags() {
+        let test_vault = TestVault::new();
+        let mut manager = VaultManager::create("reorder-tags-vault", "password123", &test_vault.path).unwrap();
+
+        let id1 = manager.add_tag("Tag1", "#ff0000", "tag").unwrap();
+        let id2 = manager.add_tag("Tag2", "#00ff00", "tag").unwrap();
+        let id3 = manager.add_tag("Tag3", "#0000ff", "tag").unwrap();
+
+        assert_eq!(manager.tags()[0].name, "Tag1");
+        assert_eq!(manager.tags()[1].name, "Tag2");
+        assert_eq!(manager.tags()[2].name, "Tag3");
+
+        manager.reorder_tags(&[id3, id1, id2]).unwrap();
+
+        assert_eq!(manager.tags()[0].id, id3);
+        assert_eq!(manager.tags()[1].id, id1);
+        assert_eq!(manager.tags()[2].id, id2);
     }
 }

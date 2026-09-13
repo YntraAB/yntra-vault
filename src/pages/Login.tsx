@@ -453,7 +453,7 @@ export default function Login() {
             {currentVault?.name || 'Vault'}
           </h1>
           {hardware2FaRequired && (
-            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-medium text-cyan-400">
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)]">
               <KeyRound size={12} />
               <span>{t('login.hardware_key_enrolled') || 'Hardware Key Enrolled'}</span>
             </div>
@@ -477,7 +477,7 @@ export default function Login() {
               transition={{ duration: 0.3 }}
               className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-5 text-center shadow-sm"
             >
-              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--accent-bg)] text-[var(--text-primary)]">
                 <ShieldCheck size={24} />
               </div>
               <h2 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
@@ -512,7 +512,7 @@ export default function Login() {
                   placeholder={t('login.password_placeholder') || 'Enter master password'}
                   disabled={loading || isLockedOut}
                   autoFocus
-                  className="h-10 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] pl-3 pr-10 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none transition-colors focus:border-cyan-500 disabled:opacity-50"
+                  className="h-10 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] pl-3 pr-10 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none transition-colors focus:border-[var(--border-focus)] disabled:opacity-50"
                 />
                 <button
                   type="button"
@@ -532,7 +532,7 @@ export default function Login() {
                     type="checkbox"
                     checked={useKeyFile}
                     onChange={(e) => setUseKeyFile(e.target.checked)}
-                    className="rounded border-[var(--border)] text-cyan-500 focus:ring-0"
+                    className="rounded border-[var(--border)] text-[var(--text-primary)] focus:ring-0"
                   />
                   <span>{t('login.use_keyfile') || 'Use Key File'}</span>
                 </label>
@@ -544,7 +544,7 @@ export default function Login() {
                     value={keyFilePath}
                     onChange={(e) => setKeyFilePath(e.target.value)}
                     placeholder={t('login.keyfile_path_ph') || 'Path to .key file'}
-                    className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none focus:border-cyan-500"
+                    className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none focus:border-[var(--border-focus)]"
                   />
                   <button
                     type="button"
@@ -561,7 +561,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading || !password || isLockedOut}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] bg-cyan-500 text-[13px] font-semibold text-black transition-colors hover:bg-cyan-400 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] bg-[var(--accent)] text-[13px] font-semibold text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>
@@ -776,7 +776,7 @@ export default function Login() {
             >
               {hardware2FaRequired && (
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-cyan-400">
+                  <span className="text-[11px] font-medium text-[var(--text-primary)]">
                     {t('login.master_password_fallback') || 'Master Password Fallback Active'}
                   </span>
                   <button
@@ -785,7 +785,7 @@ export default function Login() {
                       setError('');
                       setActiveView('hardware_2fa');
                     }}
-                    className="text-[11px] text-[var(--text-secondary)] hover:text-cyan-400 transition-colors cursor-pointer"
+                    className="text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                   >
                     {t('login.use_hardware_key') || 'Use Hardware Key'}
                   </button>

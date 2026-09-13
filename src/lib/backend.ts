@@ -403,6 +403,7 @@ export interface YntraVaultBackend {
   addTag(name: string, color: string, icon: string): Promise<string>;
   deleteTag(id: string): Promise<void>;
   updateTag(id: string, name: string, color: string, icon: string): Promise<void>;
+  reorderTags(tagIds: string[]): Promise<void>;
 
   // Vault File Helper
   checkVaultFileExists(path: string): Promise<boolean>;

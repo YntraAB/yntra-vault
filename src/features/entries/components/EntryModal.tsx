@@ -953,7 +953,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 {stagedAttachments.map((att, idx) => (
                                   <div
                                     key={`staged-${idx}`}
-                                    className="flex items-center justify-between rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[12px]"
+                                    className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
                                   >
                                     <div
                                       onClick={() => setPreviewStagedAtt({
@@ -969,9 +969,9 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                       className="flex items-center gap-2 min-w-0 cursor-pointer group/att"
                                     >
                                       {getAttachmentIcon(att.mimeType, att.name)}
-                                      <span className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-indigo-400 transition-colors text-[12px]">{att.name}</span>
+                                      <span className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors text-[12px]">{att.name}</span>
                                       <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
-                                      <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400 uppercase tracking-wider shrink-0">New</span>
+                                      <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--text-primary)] uppercase tracking-wider shrink-0">New</span>
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                       <ActionTooltip content={t('entry.preview_file')}>

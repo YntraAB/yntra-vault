@@ -42,7 +42,7 @@ graph TD
 ```mermaid
 graph TD
     A["React 19 Frontend<br/><code>src/</code>"] -->|"IPC (Tauri Invoke)"| B["Tauri Shell<br/><code>src-tauri/</code>"]
-    B -->|"Direct Core Calls"| C["Core Engine<br/><code>yntra-vault-core (crates/core/)</code>"]
+    B -->|"Direct Core Calls"| C["Core Engine<br/><code>yntra-vault-core (src-core/)</code>"]
     C -->|"Encrypted I/O"| D["Storage Payload<br/><code>.vdb File</code>"]
 ```
 
@@ -61,7 +61,7 @@ graph TD
 
 ## Feature Matrix & OS Compatibility
 
-| Feature | Backend (`crates/core`) | Frontend (`src`) | Supported OS | Status |
+| Feature | Backend (`src-core`) | Frontend (`src`) | Supported OS | Status |
 |:---|:---:|:---:|:---:|:---:|
 | Vault Create / Unlock / Lock | `manager.rs` | `CreateVaultModal.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Entry CRUD + Custom Fields | `manager.rs` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
@@ -97,7 +97,7 @@ Yntra Vault features an ultra-fast, SOTA command-line interface (`yntra` / `yntr
 
 ```bash
 # Build CLI binary
-cargo build --manifest-path crates/cli/Cargo.toml --release --bin yntra
+cargo build --manifest-path src-core/Cargo.toml --release --bin yntra
 
 # Unlock vault session daemon (sub-5ms command latency)
 yntra unlock
@@ -159,7 +159,7 @@ bun run tauri build
 
 ```bash
 # Core unit tests
-cargo test --manifest-path crates/core/Cargo.toml
+cargo test --lib --manifest-path src-core/Cargo.toml
 
 # Core micro-benchmark suite
 bun run bench

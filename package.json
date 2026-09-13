@@ -1,7 +1,7 @@
 {
-  "name": "yntra-vault",
+  "name": "my-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,6 +20,7 @@
     "@tauri-apps/plugin-fs": "^2.5.2",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-shell": "^2.3.6",
+    "bun": "^1.4.2",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
     "framer-motion": "^12.41.0",

@@ -120,7 +120,7 @@ const CountdownRing: React.FC<{
   const r = size / 2 - 2;
   const circumference = 2 * Math.PI * r;
   const strokeDashoffset = circumference * (1 - progress);
-  const color = urgent ? '#ef4444' : 'var(--accent, #3b82f6)';
+  const color = urgent ? '#ef4444' : 'var(--accent, #e8e8e8)';
 
   return (
     <svg width={size} height={size} className="shrink-0 -rotate-90">

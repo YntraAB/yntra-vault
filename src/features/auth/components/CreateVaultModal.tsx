@@ -214,6 +214,9 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
       const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
       localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
+      // Trigger the new-vault tutorial on first open
+      localStorage.setItem('yntra-vault-show-tutorial', 'true');
+
       onCreated(newVault);
       
       // Security: clear password from state
@@ -421,7 +424,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
 
               {/* Security Note */}
               <div className="flex items-start gap-2 rounded-md bg-[var(--bg-elevated)] px-3 py-2.5">
-                <ShieldCheck size={14} className="mt-0.5 shrink-0 text-green-500" />
+                <ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--text-primary)]" />
                 <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
                   {t('create_vault.security_note')}
                 </p>

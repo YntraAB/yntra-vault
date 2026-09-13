@@ -210,6 +210,18 @@ pub async fn update_tag(
 }
 
 #[tauri::command]
+pub async fn reorder_tags(
+    tag_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    let uuids: Result<Vec<Uuid>, _> = tag_ids.iter().map(|id| Uuid::parse_str(id)).collect();
+    let uuids = uuids.map_err(|e| e.to_string())?;
+    manager.reorder_tags(&uuids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_vault_path(state: State<'_, AppState>) -> Result<String, String> {
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_ref().ok_or("Vault is locked")?;

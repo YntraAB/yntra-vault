@@ -259,6 +259,10 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('update_tag', { id, name, color, icon });
   }
 
+  async reorderTags(tagIds: string[]): Promise<void> {
+    return invoke('reorder_tags', { tagIds });
+  }
+
   async checkVaultFileExists(path: string): Promise<boolean> {
     return invoke('check_vault_file_exists', { path });
   }

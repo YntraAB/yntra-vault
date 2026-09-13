@@ -223,3 +223,9 @@
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
 }
+
+/* Dragging tag state: enforce grabbing cursor across entire viewport during active drag */
+body[data-dragging-tag="true"],
+body[data-dragging-tag="true"] * {
+  cursor: grabbing !important;
+}

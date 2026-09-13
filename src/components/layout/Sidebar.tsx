@@ -1,9 +1,9 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Globe, Star, Plus, Settings, Lock } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Reorder } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/features/auth';
-import { useEntries, CreateTagModal, EditTagModal, DeleteTagModal, TagContextMenu, TagsAreaContextMenu } from '@/features/entries';
+import { useEntries, EditTagModal, DeleteTagModal, TagContextMenu, TagsAreaContextMenu } from '@/features/entries';
 import { useSettings } from '@/features/settings';
 import { useUi } from '@/contexts/UiContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -16,21 +16,11 @@ export interface SidebarProps {
   onResizeStart: (e: React.MouseEvent) => void;
 }
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { duration: 0.1 } },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { duration: 0.1 } },
-};
-
 export function Sidebar({ onResizeStart }: SidebarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { tags, entries, removeTag, isLoadingEntries } = useEntries();
-  const { filterCategory, setFilterCategory, settingsOpen, setSettingsOpen, setIsEntryModalOpen } = useUi();
+  const { tags, entries, removeTag, isLoadingEntries, reorderTags } = useEntries();
+  const { filterCategory, setFilterCategory, settingsOpen, setSettingsOpen, setIsEntryModalOpen, setIsCreateTagOpen } = useUi();
   const { lockVault } = useAuth();
   const { settings, updateSettings } = useSettings();
   const { addToast } = useToast();
@@ -40,15 +30,54 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
 
   const sortedTags = useMemo(() => {
     const list = [...tags];
-    const order = settings.tagSortOrder ?? 'name';
+    const order = settings.tagSortOrder ?? 'custom';
     if (order === 'count') {
       return list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     }
-    return list.sort((a, b) => a.name.localeCompare(b.name));
+    if (order === 'name') {
+      return list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return list;
   }, [tags, settings.tagSortOrder]);
 
+  const [orderedTags, setOrderedTags] = useState<Tag[]>(sortedTags);
+  const orderedTagsRef = useRef<Tag[]>(sortedTags);
+  const [isDraggingTag, setIsDraggingTag] = useState(false);
+
+  useEffect(() => {
+    if (isDraggingTag) {
+      document.body.setAttribute('data-dragging-tag', 'true');
+      const handleMouseUp = () => {
+        setIsDraggingTag(false);
+      };
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.body.removeAttribute('data-dragging-tag');
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    } else {
+      document.body.removeAttribute('data-dragging-tag');
+    }
+  }, [isDraggingTag]);
+
+  useEffect(() => {
+    setOrderedTags(sortedTags);
+    orderedTagsRef.current = sortedTags;
+  }, [sortedTags]);
+
+  const handleReorder = useCallback((newOrder: Tag[]) => {
+    orderedTagsRef.current = newOrder;
+    setOrderedTags(newOrder);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    if (settings.tagSortOrder !== 'custom') {
+      updateSettings({ tagSortOrder: 'custom' });
+    }
+    reorderTags(orderedTagsRef.current);
+  }, [settings.tagSortOrder, updateSettings, reorderTags]);
+
   // Modal state
-  const [showCreateTag, setShowCreateTag] = useState(false);
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [showEditTag, setShowEditTag] = useState(false);
 
@@ -158,7 +187,7 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
           </span>
           <ActionTooltip content={t('sidebar.new_tag')} side="right">
             <button
-              onClick={() => setShowCreateTag(true)}
+              onClick={() => setIsCreateTagOpen(true)}
               className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] cursor-pointer"
             >
               <Plus size={14} />
@@ -166,24 +195,40 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
           </ActionTooltip>
         </div>
 
-        <motion.div
-          className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0"
-          variants={containerVariants}
-          initial="hidden"
-          animate="show"
-        >
-          {isLoadingEntries ? (
-            <div className="flex flex-col gap-[6px] px-2.5 py-1.5">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="flex h-7 items-center gap-2">
-                  <Skeleton className="h-2.5 w-2.5 rounded-full shrink-0" />
-                  <Skeleton className="h-3.5 w-16" />
-                </div>
-              ))}
-            </div>
-          ) : (
-            sortedTags.map((tag: Tag) => (
-              <motion.div key={tag.id} variants={itemVariants}>
+        {isLoadingEntries ? (
+          <div className="flex flex-col gap-[6px] px-2.5 py-1.5">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="flex h-7 items-center gap-2">
+                <Skeleton className="h-2.5 w-2.5 rounded-full shrink-0" />
+                <Skeleton className="h-3.5 w-16" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Reorder.Group
+            axis="y"
+            values={orderedTags}
+            onReorder={handleReorder}
+            className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0"
+          >
+            {orderedTags.map((tag: Tag) => (
+              <Reorder.Item
+                key={tag.id}
+                value={tag}
+                onDragStart={() => setIsDraggingTag(true)}
+                onDragEnd={() => {
+                  setIsDraggingTag(false);
+                  handleDragEnd();
+                }}
+                whileDrag={{
+                  scale: 1.02,
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+                  zIndex: 50,
+                  cursor: 'grabbing',
+                }}
+                transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                className="relative select-none"
+              >
                 <TagItem
                   tag={tag}
                   active={filterCategory === tag.name}
@@ -196,10 +241,10 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
                     setShowEditTag(true);
                   }}
                 />
-              </motion.div>
-            ))
-          )}
-        </motion.div>
+              </Reorder.Item>
+            ))}
+          </Reorder.Group>
+        )}
       </div>
 
       {/* Footer: Settings + Lock */}
@@ -238,12 +283,6 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
         aria-label={t('common.resize_sidebar')}
       />
 
-      {/* Create Tag Modal */}
-      <CreateTagModal
-        open={showCreateTag}
-        onClose={() => setShowCreateTag(false)}
-      />
-
       {/* Edit Tag Modal */}
       <EditTagModal
         open={showEditTag}
@@ -271,9 +310,9 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
         x={areaContextMenu.x}
         y={areaContextMenu.y}
         onClose={() => setAreaContextMenu((prev) => ({ ...prev, open: false }))}
-        onNewTag={() => setShowCreateTag(true)}
+        onNewTag={() => setIsCreateTagOpen(true)}
         onDeselectAll={() => setFilterCategory('all')}
-        sortOrder={settings.tagSortOrder ?? 'name'}
+        sortOrder={settings.tagSortOrder ?? 'custom'}
         onSetSortOrder={(tagSortOrder) => updateSettings({ tagSortOrder })}
         showTagCounts={settings.showTagCounts !== false}
         onToggleShowTagCounts={() => updateSettings({ showTagCounts: !settings.showTagCounts })}
@@ -351,11 +390,19 @@ function TagItem({
   else if (density === 'comfortable') heightClass = 'h-10 text-[14px]';
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
       onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
-      className={`flex ${heightClass} w-full items-center gap-2 rounded-[3px] px-2.5 font-medium transition-all cursor-pointer ${
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className={`group flex ${heightClass} w-full items-center gap-2 rounded-[3px] px-2.5 font-medium transition-colors cursor-pointer select-none ${
         active
           ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
           : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
@@ -369,7 +416,7 @@ function TagItem({
       {showCount && (
         <span className="text-[11px] tabular-nums text-[var(--text-tertiary)]">{tag.count}</span>
       )}
-    </button>
+    </div>
   );
 }
 

@@ -369,7 +369,7 @@ export default function Onboarding() {
                 </div>
 
                 <div className="flex flex-col items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-4 text-center gap-2 mt-1">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--text-primary)] border border-[var(--border)]">
                     <FolderInput size={18} />
                   </div>
                   <p className="text-[12px] font-medium text-[var(--text-primary)]">
@@ -400,7 +400,7 @@ export default function Onboarding() {
                 transition={{ duration: 0.15 }}
                 className="flex flex-col items-center justify-center text-center gap-2 py-4"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10 text-green-500 border border-green-500/20">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--text-primary)] border border-[var(--border)]">
                   <Check size={20} />
                 </div>
                 <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">

@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, FilterX, ArrowDownAZ, Hash, Check, Trash2, Eye } from 'lucide-react';
+import { Plus, FilterX, ArrowDownAZ, Hash, Check, Trash2, Eye, GripVertical } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 
 export interface TagsAreaContextMenuProps {
@@ -14,8 +14,8 @@ export interface TagsAreaContextMenuProps {
   onClose: () => void;
   onNewTag: () => void;
   onDeselectAll: () => void;
-  sortOrder?: 'name' | 'count';
-  onSetSortOrder: (order: 'name' | 'count') => void;
+  sortOrder?: 'name' | 'count' | 'custom';
+  onSetSortOrder: (order: 'name' | 'count' | 'custom') => void;
   showTagCounts?: boolean;
   onToggleShowTagCounts: () => void;
   onDeleteUnusedTags?: () => void;
@@ -29,7 +29,7 @@ export function TagsAreaContextMenu({
   onClose,
   onNewTag,
   onDeselectAll,
-  sortOrder = 'name',
+  sortOrder = 'custom',
   onSetSortOrder,
   showTagCounts = true,
   onToggleShowTagCounts,
@@ -130,10 +130,22 @@ export function TagsAreaContextMenu({
           {/* Sort options */}
           <button
             onClick={() => {
+              onSetSortOrder('custom');
+              onClose();
+            }}
+            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+          >
+            <GripVertical size={13} />
+            <span className="flex-1">{t('menu.sort_custom')}</span>
+            {sortOrder === 'custom' && <Check size={13} className="text-[var(--accent-primary)]" />}
+          </button>
+
+          <button
+            onClick={() => {
               onSetSortOrder('name');
               onClose();
             }}
-            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
           >
             <ArrowDownAZ size={13} />
             <span className="flex-1">{t('menu.sort_name')}</span>

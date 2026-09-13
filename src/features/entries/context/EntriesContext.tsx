@@ -113,6 +113,7 @@ export interface EntriesContextType {
   addTag: (tag: Tag) => Promise<void>;
   updateTag: (id: string, updates: Partial<Tag>) => Promise<void>;
   removeTag: (id: string) => Promise<void>;
+  reorderTags: (newTags: Tag[]) => Promise<void>;
   refreshEntries: () => Promise<void>;
   refreshTags: () => Promise<void>;
 }
@@ -964,6 +965,24 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     [backend, rawTags, entries, addToast, triggerAutoSync]
   );
 
+  const reorderTags = useCallback(
+    async (newTags: Tag[]) => {
+      const prevTags = rawTags;
+      setRawTags(newTags);
+
+      if (backend) {
+        try {
+          await backend.reorderTags(newTags.map((t) => t.id));
+          triggerAutoSync();
+        } catch (e) {
+          setRawTags(prevTags);
+          addToast({ message: `Failed to save tag order: ${e}`, type: 'error' });
+        }
+      }
+    },
+    [backend, rawTags, addToast, triggerAutoSync]
+  );
+
   // Silent background vault-wide breach check on vault unlock
   const entriesRef = useRef(entries);
   useEffect(() => {
@@ -1098,6 +1117,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       addTag,
       updateTag,
       removeTag,
+      reorderTags,
       refreshEntries,
       refreshTags,
     }),
@@ -1126,6 +1146,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       addTag,
       updateTag,
       removeTag,
+      reorderTags,
       refreshEntries,
       refreshTags,
     ]

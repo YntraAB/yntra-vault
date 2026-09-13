@@ -586,7 +586,7 @@ function ListItem({
         {((entry.attachmentCount || 0) > 0 || (entry.attachments && entry.attachments.length > 0)) && (
           <ActionTooltip content={t('entry.has_attachments')}>
             <span>
-              <Paperclip size={11} className="text-indigo-400" />
+              <Paperclip size={11} className="text-[var(--text-tertiary)]" />
             </span>
           </ActionTooltip>
         )}

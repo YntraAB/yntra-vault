@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Globe, Star, Plus, Settings, Lock, X, Database, Shield } from 'lucide-react';
+import { Globe, Star, Plus, Settings, Lock, Database, Shield, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/features/auth';
-import { useEntries, CreateTagModal } from '@/features/entries';
+import { useEntries } from '@/features/entries';
 import { useUi } from '@/contexts/UiContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 
@@ -18,9 +17,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
   const { t } = useTranslation();
   const { currentVault, lockVault, setCurrentVault } = useAuth();
   const { tags, entries } = useEntries();
-  const { filterCategory, setFilterCategory } = useUi();
-
-  const [showCreateTag, setShowCreateTag] = useState(false);
+  const { filterCategory, setFilterCategory, setIsCreateTagOpen } = useUi();
 
   const allCount = entries.length;
   const favCount = entries.filter((e) => e.favorite).length;
@@ -114,7 +111,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
                 {t('sidebar.tags')}
               </span>
               <button
-                onClick={() => setShowCreateTag(true)}
+                onClick={() => setIsCreateTagOpen(true)}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-tertiary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
               >
                 <Plus size={16} />
@@ -187,11 +184,6 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
             </button>
           </div>
         </motion.aside>
-
-        <CreateTagModal
-          open={showCreateTag}
-          onClose={() => setShowCreateTag(false)}
-        />
       </div>
     </AnimatePresence>
   );

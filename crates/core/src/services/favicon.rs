@@ -1,22 +1,27 @@
 //! Favicon resolution and caching service.
-//!
-//! Operates in strict zero-knowledge offline mode to prevent leaking vault entry
-//! domains and user IP addresses to third-party servers.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 static FAVICON_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn get_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     FAVICON_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn get_http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 /// Fetches a favicon for the specified domain.
-///
-/// In compliance with Yntra Vault's offline-first architecture, external HTTP
-/// requests to third-party services are disabled to protect vault domain privacy.
-/// Returns `Ok(None)` to cleanly trigger high-contrast, initial-based avatars.
+/// Returns `Ok(Some(data_uri))` on success, or `Ok(None)` if not found / invalid / error.
 pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
     let clean_domain = domain
         .trim()
@@ -35,15 +40,40 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
         return Ok(None);
     }
 
-    // Check in-memory local cache first
+    // Check in-memory cache first
     if let Ok(guard) = get_cache().lock() {
         if let Some(cached) = guard.get(&clean_domain) {
             return Ok(cached.clone());
         }
     }
 
-    // Strict offline-first policy: no outbound network requests to third parties.
-    // The UI gracefully renders a colored initials avatar for the entry.
-    Ok(None)
-}
+    let client = get_http_client();
+    let url = format!("https://www.google.com/s2/favicons?domain={clean_domain}&sz=64");
 
+    let result: Option<String> = match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            let content_type = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("image/png")
+                .to_string();
+
+            match resp.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => {
+                    let b64 = data_encoding::BASE64.encode(&bytes);
+                    Some(format!("data:{content_type};base64,{b64}"))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+
+    // Store in cache
+    if let Ok(mut guard) = get_cache().lock() {
+        guard.insert(clean_domain, result.clone());
+    }
+
+    Ok(result)
+}

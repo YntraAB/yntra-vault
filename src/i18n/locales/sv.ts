@@ -435,6 +435,7 @@ export const sv = {
   'menu.delete_tag': 'Ta bort tagg',
   'menu.select_all': 'Markera alla objekt',
   'menu.deselect_all': 'Ta bort taggfilter',
+  'menu.sort_custom': 'Anpassad ordning (Dra & släpp)',
   'menu.sort_name': 'Sortera alfabetiskt (A–Z)',
   'menu.sort_count': 'Sortera efter antal poster',
   'menu.sort_title': 'Sortera efter titel (A–Z)',
@@ -676,4 +677,68 @@ export const sv = {
   'bulk_edit.overwrite': 'Skriv över',
   'bulk_edit.update_count_entries': 'Uppdatera {count} poster',
   'bulk.update_notes': 'Uppdatera anteckningar',
+
+  // Tutorial (nytt valv guide)
+  'tutorial.skip': 'Hoppa över guide',
+  'tutorial.next': 'Nästa',
+  'tutorial.back': 'Tillbaka',
+  'tutorial.finish': 'Klar',
+  'tutorial.step_counter': 'Steg {current} av {total}',
+  'tutorial.resume_guide': 'Öppna guide',
+
+  // Prompt phase
+  'tutorial.prompt_title': 'Ditt valv är redo',
+  'tutorial.prompt_desc': 'Vill du ha en snabb guidad tur? Vi går igenom hur du skapar taggar, sparar lösenord och genererar säkra nycklar steg för steg.',
+  'tutorial.prompt_yes': 'Ja, visa mig hur',
+  'tutorial.prompt_no': 'Nej tack, jag utforskar själv',
+
+  // Waiting hints
+  'tutorial.waiting_tag': 'Skapa en tagg i sidofältet så fortsätter guiden automatiskt.',
+  'tutorial.waiting_entry': 'Fyll i formuläret och spara din post så fortsätter guiden.',
+
+  // Guide Step 1: Layout orientation
+  'tutorial.guide_step1_title': 'Hur ditt valv är uppbyggt',
+  'tutorial.guide_step1_desc': 'Ditt valv har tre huvudområden. Här är vad varje område gör:',
+  'tutorial.guide_sidebar': 'Sidofält',
+  'tutorial.guide_sidebar_desc': 'navigera mellan Alla objekt, Favoriter, Taggar och Papperskorg',
+  'tutorial.guide_list': 'Lösenordslista',
+  'tutorial.guide_list_desc': 'bläddra och sök bland alla dina sparade poster',
+  'tutorial.guide_detail': 'Detaljpanel',
+  'tutorial.guide_detail_desc': 'visa och redigera vald post',
+
+  // Guide Step 2: Create a Tag
+  'tutorial.guide_tag_title': 'Organisera med taggar',
+  'tutorial.guide_tag_desc': 'Taggar hjälper dig gruppera lösenord efter kategori. Låt oss skapa din första tagg — som "Jobb", "Privat" eller "Ekonomi".',
+  'tutorial.guide_tag_empty': 'Inga taggar än — klicka på + för att skapa en',
+  'tutorial.guide_tag_how': 'Hur man skapar en tagg:',
+  'tutorial.guide_tag_step1': 'Hitta sektionen "Taggar" i vänstra sidofältet',
+  'tutorial.guide_tag_step2': 'Klicka på den lilla +-knappen bredvid "Taggar"',
+  'tutorial.guide_tag_step3': 'Välj namn, färg och ikon — spara sedan',
+  'tutorial.guide_try_it': 'Prova nu',
+
+  // Guide Step 3: Add entry
+  'tutorial.guide_step2_title': 'Lägg till ditt första lösenord',
+  'tutorial.guide_step2_desc': 'Låt oss nu spara ett lösenord. Klicka på +-knappen uppe till höger i lösenordslistan. Ett formulär öppnas där du fyller i:',
+  'tutorial.guide_click_plus': 'Klicka på +-knappen',
+  'tutorial.guide_click_plus_hint': 'Placerad högst upp i lösenordslistan',
+
+  // Guide Step 4: Password Generator
+  'tutorial.guide_step3_title': 'Generera starka lösenord',
+  'tutorial.guide_step3_desc': 'I formuläret kan du klicka på tärningsikonen bredvid lösenordsfältet. Generatorn skapar starka, slumpmässiga lösenord direkt.',
+  'tutorial.guide_generator': 'Inbyggd generator',
+  'tutorial.guide_length': '8–128 tecken',
+  'tutorial.guide_step3_hint': 'Tips: Du kan också använda generatorn från sidofältet för att skapa lösenord utan att spara dem.',
+
+  // Guide Step 5: Tips
+  'tutorial.guide_step4_title': 'Fler användbara funktioner',
+  'tutorial.guide_step4_desc': 'Här är några till saker du kan göra:',
+  'tutorial.tip_search': 'Snabbsökning',
+  'tutorial.tip_tags': 'Taggar',
+  'tutorial.tip_tags_hint': 'Organisera poster',
+  'tutorial.tip_import': 'Importera',
+  'tutorial.tip_import_hint': 'Från andra hanterare',
+  'tutorial.tip_settings': 'Inställningar',
+  'tutorial.tip_settings_hint': 'Tema, säkerhet, mer',
+  'tutorial.tip_drag_tags': 'Ändra ordning genom att dra',
+  'tutorial.tip_drag_tags_hint': 'Håll in och dra valfri tagg upp eller ner i sidofältet för att sortera dem som du vill.',
 };

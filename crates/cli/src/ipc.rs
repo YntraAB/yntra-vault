@@ -187,7 +187,6 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
     println!("  Use 'yntra lock' to terminate session.\n");
 
     let manager_clone = manager.clone();
-    let manager_for_timeout = manager.clone();
     let last_act_clone = last_activity.clone();
     let valid_token = Arc::new(session_token);
 
@@ -198,9 +197,6 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
             let elapsed = last_act_clone.lock().unwrap().elapsed();
             if elapsed > Duration::from_secs(900) { // 15 minutes
                 println!("\n{} Inactivity timeout reached (15m). Locking vault session...", "⌛".yellow().bold());
-                if let Ok(mut mgr) = manager_for_timeout.lock() {
-                    mgr.lock();
-                }
                 let _ = crate::keychain::clear_session_token();
                 std::process::exit(0);
             }
@@ -248,9 +244,6 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
 
                                 if should_exit {
                                     println!("{} Received lock command. Session terminated.", "🔒".yellow().bold());
-                                    if let Ok(mut mgr) = manager_clone.lock() {
-                                        mgr.lock();
-                                    }
                                     let _ = crate::keychain::clear_session_token();
                                     std::process::exit(0);
                                 }
@@ -275,12 +268,6 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
         let _ = std::fs::remove_file(&pipe_name);
         let listener = UnixListener::bind(&pipe_name)
             .map_err(|e| VaultError::SyncError(format!("Failed to bind unix socket: {}", e)))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&pipe_name, std::fs::Permissions::from_mode(0o600));
-        }
 
         loop {
             if let Ok((mut socket, _)) = listener.accept().await {
@@ -311,9 +298,6 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
 
                                 if should_exit {
                                     println!("{} Received lock command. Session terminated.", "🔒".yellow().bold());
-                                    if let Ok(mut mgr) = manager_clone.lock() {
-                                        mgr.lock();
-                                    }
                                     let _ = std::fs::remove_file(&pipe_name);
                                     let _ = crate::keychain::clear_session_token();
                                     std::process::exit(0);

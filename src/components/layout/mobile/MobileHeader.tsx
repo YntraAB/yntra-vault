@@ -52,7 +52,7 @@ export function MobileHeader({
         {/* Header Title */}
         <div className="flex flex-1 items-center justify-center px-2 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
-            <ShieldCheck size={16} className="text-cyan-400 shrink-0" />
+            <ShieldCheck size={16} className="text-[var(--text-primary)] shrink-0" />
             <span className="truncate text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
               {title}
             </span>

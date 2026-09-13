@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autotypeFieldDelayMs: 300,
   autotypeSettleDelayMs: 3000,
   autotypeLaunchBrowser: true,
-  tagSortOrder: 'name',
+  tagSortOrder: 'custom',
   showTagCounts: true,
   entrySortOrder: 'updated',
   keybinds: DEFAULT_KEYBINDS,

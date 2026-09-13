@@ -15,15 +15,15 @@ export function getAttachmentIcon(mimeType: string | undefined = '', fileName: s
   const name = fileName || '';
   const ext = name.split('.').pop()?.toLowerCase() || '';
   if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
-    return <Image size={14} className="text-blue-400 shrink-0" />;
+    return <Image size={14} className="text-[var(--text-secondary)] shrink-0" />;
   }
   if (mime.startsWith('text/') || ['txt', 'md', 'json', 'csv', 'log', 'xml'].includes(ext)) {
-    return <FileText size={14} className="text-emerald-400 shrink-0" />;
+    return <FileText size={14} className="text-[var(--text-secondary)] shrink-0" />;
   }
   if (mime.includes('zip') || mime.includes('tar') || ['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) {
-    return <FileArchive size={14} className="text-amber-400 shrink-0" />;
+    return <FileArchive size={14} className="text-[var(--text-secondary)] shrink-0" />;
   }
-  return <Paperclip size={14} className="text-indigo-400 shrink-0" />;
+  return <Paperclip size={14} className="text-[var(--text-secondary)] shrink-0" />;
 }
 
 export { formatDate, formatTime } from './utils';

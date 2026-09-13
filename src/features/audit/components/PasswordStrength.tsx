@@ -14,7 +14,7 @@ const LEVEL_CONFIG: Record<StrengthLevel, { color: string; labelKey: string; wid
   Weak: { color: 'var(--strength-weak, #f59e0b)', labelKey: 'strength.weak', width: '30%' },
   Fair: { color: 'var(--strength-fair, #eab308)', labelKey: 'strength.fair', width: '50%' },
   Strong: { color: 'var(--strength-strong, #22c55e)', labelKey: 'strength.strong', width: '75%' },
-  Excellent: { color: 'var(--strength-excellent, #06b6d4)', labelKey: 'strength.excellent', width: '100%' },
+  Excellent: { color: 'var(--strength-excellent, #e8e8e8)', labelKey: 'strength.excellent', width: '100%' },
 };
 
 export const PasswordStrength: React.FC<PasswordStrengthProps> = ({

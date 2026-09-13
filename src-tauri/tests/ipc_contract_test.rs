@@ -182,6 +182,7 @@ fn test_ipc_schema_contract_covers_all_commands() {
         "add_tag",
         "delete_tag",
         "update_tag",
+        "reorder_tags",
         "check_vault_file_exists",
         "show_in_explorer",
         // Advanced features
