@@ -171,6 +171,14 @@
     display: none !important;
   }
 
+  /* Prevent user-select: none inheritance from breaking caret positioning and keystroke entry in Chromium/WebView2 */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
   /* Prevent text highlighting on background content when any modal overlay is open */
   body:has(.fixed.inset-0) main,
   body:has(.fixed.inset-0) aside,

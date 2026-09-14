@@ -284,10 +284,16 @@ pub fn run() {
                     if let Some(path_str) = vault_path_str {
                         let path = std::path::Path::new(&path_str);
                         if !path.exists() {
-                            if let Ok(mut vault) = state.vault.lock() {
-                                *vault = None;
+                            let tmp_path = path.with_extension("vdb.tmp");
+                            if !tmp_path.exists() {
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                if !path.exists() && !tmp_path.exists() {
+                                    if let Ok(mut vault) = state.vault.lock() {
+                                        *vault = None;
+                                    }
+                                    let _ = app_handle.emit("vault-connection-lost", ());
+                                }
                             }
-                            let _ = app_handle.emit("vault-connection-lost", ());
                         }
                     }
                 }

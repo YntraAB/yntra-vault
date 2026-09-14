@@ -87,7 +87,7 @@ export const SecureSecretInput = forwardRef<SecureSecretInputRef, SecureSecretIn
         disabled={disabled}
         onChange={handleInput}
         onKeyDown={onKeyDown}
-        className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] disabled:opacity-50 disabled:cursor-not-allowed ${
+        className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] disabled:opacity-50 disabled:cursor-not-allowed select-text ${
           mismatch ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
         } ${className}`}
       />

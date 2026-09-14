@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.5] - 2026-09-14
+
+### Fixed
+- **Desktop SPA Route Resolution & Blank Screen Elimination**:
+  - Migrated from `BrowserRouter` to `HashRouter` for desktop SPA protocol compatibility, preventing 404 blank screens when reloading pages in production release builds.
+  - Implemented global `ErrorBoundary` UI component to capture unexpected render/layout exceptions, displaying recovery options and technical stack traces rather than leaving a blank screen.
+  - Registered window runtime error and unhandled rejection listeners to ensure full diagnostic visibility in webview logs.
+- **Framer Motion Reorder & State Stability**:
+  - Refactored sidebar tag ordering in `Sidebar.tsx` to track stable primitive string IDs rather than volatile tag object instances, eliminating reference desynchronization and layout projection crashes during password saving and tag mutation.
+  - Replaced `Reorder.Group` with standard list rendering when sorted by name or count, avoiding unnecessary animation frame projection overhead.
+- **Tag ID Parity on Creation**:
+  - Updated `addTag` optimistic update to record the real backend UUID returned from the database, preventing temporary client UUID divergence.
+- **Atomic Save & Filesystem Watcher Race Guard**:
+  - Added in-flight `.vdb.tmp` atomic save detection and a 200ms debounce in the background filesystem watcher thread to prevent false-positive connection lost events during vault file flushes.
+- **Keyboard Text Input Caret Fix**:
+  - Fixed an issue where outer container `select-none` styles prevented caret positioning and keyboard input in password fields while still permitting clipboard pasting.
+- **Developer Tools & Native Inspection**:
+  - Enabled Tauri `devtools` feature flag in release builds and added `Shift + Right Click` bypass to allow inspecting elements directly in production binaries.
+
+---
+
 ## [0.1.4] - 2026-09-13
 
 ### Fixed

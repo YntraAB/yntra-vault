@@ -886,7 +886,8 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
       if (backend) {
         try {
-          await backend.addTag(tag.name, tag.color, tag.icon);
+          const realId = await backend.addTag(tag.name, tag.color, tag.icon);
+          setRawTags((prev) => prev.map((t) => (t.id === tag.id ? { ...t, id: realId } : t)));
           triggerAutoSync();
         } catch (e) {
           setRawTags(prevTags);

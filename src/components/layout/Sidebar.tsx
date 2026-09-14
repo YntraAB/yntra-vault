@@ -28,6 +28,9 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
   const allCount = entries.length;
   const favCount = entries.filter((e) => e.favorite).length;
 
+  const tagMap = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
+  const isCustomSort = (settings.tagSortOrder ?? 'custom') === 'custom';
+
   const sortedTags = useMemo(() => {
     const list = [...tags];
     const order = settings.tagSortOrder ?? 'custom';
@@ -40,8 +43,8 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
     return list;
   }, [tags, settings.tagSortOrder]);
 
-  const [orderedTags, setOrderedTags] = useState<Tag[]>(sortedTags);
-  const orderedTagsRef = useRef<Tag[]>(sortedTags);
+  const [orderedTagIds, setOrderedTagIds] = useState<string[]>(() => sortedTags.map((t) => t.id));
+  const orderedTagIdsRef = useRef<string[]>(orderedTagIds);
   const [isDraggingTag, setIsDraggingTag] = useState(false);
 
   useEffect(() => {
@@ -60,22 +63,40 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
     }
   }, [isDraggingTag]);
 
+  // Synchronize string IDs when tags are added, removed, or reordered
   useEffect(() => {
-    setOrderedTags(sortedTags);
-    orderedTagsRef.current = sortedTags;
+    const currentTagIds = new Set(sortedTags.map((t) => t.id));
+    setOrderedTagIds((prev) => {
+      const existing = prev.filter((id) => currentTagIds.has(id));
+      const existingSet = new Set(existing);
+      const newlyAdded = sortedTags.filter((t) => !existingSet.has(t.id)).map((t) => t.id);
+      const next = [...existing, ...newlyAdded];
+      orderedTagIdsRef.current = next;
+      return next;
+    });
   }, [sortedTags]);
 
-  const handleReorder = useCallback((newOrder: Tag[]) => {
-    orderedTagsRef.current = newOrder;
-    setOrderedTags(newOrder);
+  const displayTags = useMemo(() => {
+    if (!isCustomSort) return sortedTags;
+    return orderedTagIds
+      .map((id) => tagMap.get(id))
+      .filter((t): t is Tag => Boolean(t));
+  }, [isCustomSort, sortedTags, orderedTagIds, tagMap]);
+
+  const handleReorder = useCallback((newIds: string[]) => {
+    orderedTagIdsRef.current = newIds;
+    setOrderedTagIds(newIds);
   }, []);
 
   const handleDragEnd = useCallback(() => {
     if (settings.tagSortOrder !== 'custom') {
       updateSettings({ tagSortOrder: 'custom' });
     }
-    reorderTags(orderedTagsRef.current);
-  }, [settings.tagSortOrder, updateSettings, reorderTags]);
+    const newOrderTags = orderedTagIdsRef.current
+      .map((id) => tagMap.get(id))
+      .filter((t): t is Tag => Boolean(t));
+    reorderTags(newOrderTags);
+  }, [settings.tagSortOrder, updateSettings, reorderTags, tagMap]);
 
   // Modal state
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
@@ -204,17 +225,17 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
               </div>
             ))}
           </div>
-        ) : (
+        ) : isCustomSort ? (
           <Reorder.Group
             axis="y"
-            values={orderedTags}
+            values={orderedTagIds}
             onReorder={handleReorder}
             className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0"
           >
-            {orderedTags.map((tag: Tag) => (
+            {displayTags.map((tag: Tag) => (
               <Reorder.Item
                 key={tag.id}
-                value={tag}
+                value={tag.id}
                 onDragStart={() => setIsDraggingTag(true)}
                 onDragEnd={() => {
                   setIsDraggingTag(false);
@@ -244,6 +265,25 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
               </Reorder.Item>
             ))}
           </Reorder.Group>
+        ) : (
+          <div className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0">
+            {displayTags.map((tag: Tag) => (
+              <div key={tag.id} className="relative select-none">
+                <TagItem
+                  tag={tag}
+                  active={filterCategory === tag.name}
+                  density={settings.density}
+                  showCount={settings.showTagCounts !== false}
+                  onClick={() => setFilterCategory(tag.name)}
+                  onContextMenu={(e) => handleTagContextMenu(e, tag)}
+                  onDoubleClick={() => {
+                    setEditingTag(tag);
+                    setShowEditTag(true);
+                  }}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
