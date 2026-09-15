@@ -123,21 +123,36 @@ export async function openExternalUrl(target: string): Promise<void> {
   if (!target || !target.trim()) return;
   const cleanTarget = target.trim();
 
-  const isCustomUriOrPath = /^[a-z][a-z0-9+.-]*:\/\//i.test(cleanTarget) ||
-    /^[a-zA-Z]:[\\\/]/.test(cleanTarget) ||
-    cleanTarget.startsWith('/') ||
-    cleanTarget.startsWith('\\\\');
+  // Reject local file/drive paths, UNC network shares, and root paths
+  if (
+    /^[a-zA-Z]:[\\/]/.test(cleanTarget) ||
+    cleanTarget.startsWith('\\\\') ||
+    cleanTarget.startsWith('/')
+  ) {
+    return;
+  }
 
-  const formatted = isCustomUriOrPath
-    ? cleanTarget
-    : (/^https?:\/\//i.test(cleanTarget) ? cleanTarget : `https://${cleanTarget}`);
+  let formatted = cleanTarget;
+  if (!/^https?:\/\//i.test(cleanTarget)) {
+    // Reject any custom protocol schemes (e.g. file:, javascript:, ms-msdt:)
+    if (/^[a-z0-9+.-]+:/i.test(cleanTarget)) {
+      return;
+    }
+    formatted = `https://${cleanTarget}`;
+  }
 
   try {
+    const parsed = new URL(formatted);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return;
+    }
     const { open } = await import('@tauri-apps/plugin-shell');
     await open(formatted);
   } catch {
-    if (!isCustomUriOrPath || /^https?:\/\//i.test(formatted)) {
+    try {
       window.open(formatted, '_blank', 'noopener,noreferrer');
+    } catch {
+      // Ignore failure
     }
   }
 }

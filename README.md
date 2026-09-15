@@ -65,7 +65,7 @@ graph TD
 
 ## Internationalization (24 Languages)
 
-Yntra Vault is localized into 24 languages with 100% string coverage (777 translation keys per language, validated by automated test suites):
+Yntra Vault is localized into 24 languages with 100% string coverage (824 translation keys per language, validated by automated test suites):
 
 | Region | Supported Languages |
 |:---|:---|
@@ -93,7 +93,7 @@ Yntra Vault is localized into 24 languages with 100% string coverage (777 transl
 | Master Password Re-keying | `core::vault` | `ChangeMasterPasswordModal.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Password History & Rollback | `core::vault::history` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Hardware Envelopes (TPM 2.0 / DPAPI) | `crypto::tpm` | `Login.tsx` | Windows, macOS | ✅ Complete |
-| Shamir Secret Sharing | `crypto::sharing` | — | Cross-Platform | ⚙️ Core Only |
+| Shamir Secret Sharing & Emergency Kit | `core::vault::emergency` | `SecurityTab.tsx` | Cross-Platform | ✅ Complete |
 | WebDAV Cloud & P2P Vault Sync | `core::sync` | `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
 | Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
 | 24 Locales & RTL Support | — | `src/i18n/` | Cross-Platform | ✅ Complete |

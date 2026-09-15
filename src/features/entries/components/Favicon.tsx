@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getDomain, getInitials } from '@/lib/utils';
 import { useBackend } from '@/lib/useBackend';
+import { useSettings } from '@/features/settings';
 
 export interface FaviconProps {
   url?: string;
@@ -21,15 +22,17 @@ export function Favicon({
   textClass = 'text-[11px]',
 }: FaviconProps) {
   const { backend } = useBackend();
+  const { settings } = useSettings();
+  const isEnabled = settings.externalFaviconsEnabled !== false;
   const domain = getDomain(url);
 
   const [imgUrl, setImgUrl] = useState<string | null>(() => {
-    if (!domain) return null;
+    if (!domain || !isEnabled) return null;
     return faviconCache.get(domain) ?? null;
   });
 
   useEffect(() => {
-    if (!domain) {
+    if (!domain || !isEnabled) {
       setImgUrl(null);
       return;
     }
@@ -61,7 +64,7 @@ export function Favicon({
     return () => {
       isMounted = false;
     };
-  }, [domain, backend]);
+  }, [domain, backend, isEnabled]);
 
   if (imgUrl) {
     return (

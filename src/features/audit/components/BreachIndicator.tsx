@@ -4,10 +4,15 @@ import { useSettings } from '@/features/settings';
 import { useTranslation } from '@/contexts/LanguageContext';
 import type { BreachStatus } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
+import { useSecurityAudit } from '../hooks/useSecurityAudit';
 
 export interface BreachIndicatorProps {
   status?: BreachStatus;
   password?: string;
+  entryId?: string;
+  isReused?: boolean;
+  reusedServices?: string;
+  isWeak?: boolean;
   compact?: boolean;
   onStatusChange?: (status: BreachStatus) => void;
   hideIfSafe?: boolean;
@@ -16,6 +21,10 @@ export interface BreachIndicatorProps {
 export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
   status: initialStatus,
   password,
+  entryId,
+  isReused: propIsReused,
+  reusedServices: propReusedServices,
+  isWeak: propIsWeak,
   compact = false,
   onStatusChange,
   hideIfSafe = false,
@@ -23,10 +32,30 @@ export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
   const { backend } = useBackend();
   const { settings } = useSettings();
   const { t } = useTranslation();
+  const { audit, runAudit } = useSecurityAudit();
   const [status, setStatus] = useState<BreachStatus>(
     initialStatus || { type: 'Unknown' }
   );
   const lastCheckedPasswordRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!audit && entryId) {
+      runAudit(true, true);
+    }
+  }, [audit, entryId, runAudit]);
+
+  const entryReusedIssue = entryId
+    ? audit?.issues.find((i) => i.entry_id === entryId && i.issue_type === 'ReusedPassword')
+    : undefined;
+  const entryWeakIssue = entryId
+    ? audit?.issues.find((i) => i.entry_id === entryId && i.issue_type === 'WeakPassword')
+    : undefined;
+
+  const effectiveReused = propIsReused ?? !!entryReusedIssue;
+  const effectiveWeak = propIsWeak ?? !!entryWeakIssue;
+  const effectiveReusedServices =
+    propReusedServices ||
+    (entryReusedIssue ? entryReusedIssue.description.split(': ')[1] : undefined);
 
   useEffect(() => {
     if (initialStatus) {
@@ -80,9 +109,15 @@ export const BreachIndicator: React.FC<BreachIndicatorProps> = ({
     return () => clearTimeout(timer);
   }, [password, checkBreach, settings.autoBreachCheck]);
 
-  const config = getStatusConfig(status, t);
+  const config = getStatusConfig(status, t, {
+    isReused: effectiveReused,
+    reusedServices: effectiveReusedServices,
+    isWeak: effectiveWeak,
+  });
 
-  if (hideIfSafe && (status.type === 'Safe' || status.type === 'Unknown')) {
+  const trulySafe = (status.type === 'Safe' || status.type === 'Unknown') && !effectiveReused && !effectiveWeak;
+
+  if (hideIfSafe && trulySafe) {
     return null;
   }
 
@@ -114,7 +149,30 @@ export interface StatusConfig {
   textColor: string;
 }
 
-export function getStatusConfig(status: BreachStatus, t: (key: string, params?: Record<string, string | number>) => string): StatusConfig {
+export function getStatusConfig(
+  status: BreachStatus,
+  t: (key: string, params?: Record<string, string | number>) => string,
+  extra?: { isReused?: boolean; reusedServices?: string; isWeak?: boolean }
+): StatusConfig {
+  if (extra?.isReused && status.type !== 'Breached' && status.type !== 'Checking') {
+    return {
+      shortLabel: t('breach.reused_status'),
+      label: status.type === 'Safe' ? t('breach.no_breaches_reused') : t('breach.reused_status'),
+      detail: extra.reusedServices ? t('security.desc_reused_with', { services: extra.reusedServices }) : undefined,
+      tooltip: t('breach.reused_tooltip'),
+      textColor: 'text-purple-400 font-medium',
+    };
+  }
+
+  if (extra?.isWeak && status.type !== 'Breached' && status.type !== 'Checking') {
+    return {
+      shortLabel: t('security.stat_weak'),
+      label: status.type === 'Safe' ? t('breach.no_breaches_weak') : t('security.stat_weak'),
+      tooltip: t('security.desc_weak'),
+      textColor: 'text-amber-400 font-medium',
+    };
+  }
+
   switch (status.type) {
     case 'Unknown':
       return {
@@ -160,6 +218,7 @@ export function getStatusConfig(status: BreachStatus, t: (key: string, params?: 
       };
   }
 }
+
 
 export function formatCount(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;

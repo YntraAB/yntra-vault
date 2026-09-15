@@ -139,6 +139,17 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         />
       </SettingRow>
 
+      <SettingRow
+        label={t('settings.favicons_label')}
+        description={t('settings.favicons_desc')}
+        tooltip={t('settings.tooltip_favicons')}
+      >
+        <Toggle
+          checked={settings.externalFaviconsEnabled !== false}
+          onChange={(v) => updateSettings({ externalFaviconsEnabled: v })}
+        />
+      </SettingRow>
+
       {/* System & Application Behavior */}
       <SettingRow
         label={t('settings.autostart_label')}

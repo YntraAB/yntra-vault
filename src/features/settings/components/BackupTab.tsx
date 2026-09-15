@@ -7,6 +7,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
 import { saveFileDialog } from '@/lib/backend';
+import { getTransientWebdavPassword, setTransientWebdavPassword } from '@/lib/sessionSecrets';
 import { SettingSection, Toggle } from './SettingSection';
 
 export interface BackupTabProps {
@@ -21,20 +22,12 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   const { t } = useTranslation();
   const { backend } = useBackend();
 
-  // WebDAV password kept in session storage so it persists during the app session
-  const [webdavPass, setWebdavPass] = useState(() => {
-    try {
-      return sessionStorage.getItem('yntra-webdav-session-pass') || '';
-    } catch {
-      return '';
-    }
-  });
+  // WebDAV password held strictly in transient memory (no sessionStorage persistence)
+  const [webdavPass, setWebdavPass] = useState(() => getTransientWebdavPassword() || '');
 
   const handleWebdavPassChange = (val: string) => {
     setWebdavPass(val);
-    try {
-      sessionStorage.setItem('yntra-webdav-session-pass', val);
-    } catch {}
+    setTransientWebdavPassword(val || null);
   };
 
   const [isTestingWebdav, setIsTestingWebdav] = useState(false);

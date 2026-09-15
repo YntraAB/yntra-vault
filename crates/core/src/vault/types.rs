@@ -252,6 +252,26 @@ pub struct VaultData {
 pub struct VaultSettings {
     #[serde(default)]
     pub webdav: WebdavConfig,
+    #[serde(default)]
+    pub emergency_kit_audit: Option<EmergencyKitAudit>,
+}
+
+/// Audit trail and status of cryptographic emergency recovery kit generation.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct EmergencyKitAudit {
+    pub active_fingerprint: String,
+    pub last_generated_at: DateTime<Utc>,
+    pub generation_count: u32,
+    #[serde(default)]
+    pub history: Vec<EmergencyKitAuditEntry>,
+}
+
+/// A single audit record of an emergency kit action.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct EmergencyKitAuditEntry {
+    pub timestamp: DateTime<Utc>,
+    pub fingerprint: String,
+    pub action: String, // "generated", "reset", "invalidated"
 }
 
 /// Configuration for WebDAV cloud synchronization.

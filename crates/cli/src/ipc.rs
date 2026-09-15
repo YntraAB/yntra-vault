@@ -74,6 +74,21 @@ pub fn get_ipc_pipe_name() -> String {
     }
     #[cfg(not(windows))]
     {
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+            if !runtime_dir.is_empty() {
+                return format!("{}/yntra-session.sock", runtime_dir.trim_end_matches('/'));
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let user_dir = format!("{}/.local/share/yntra/run", home.trim_end_matches('/'));
+            let _ = std::fs::create_dir_all(&user_dir);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&user_dir, std::fs::Permissions::from_mode(0o700));
+            }
+            return format!("{}/yntra-session.sock", user_dir);
+        }
         format!("/tmp/yntra-session-{}.sock", username)
     }
 }
@@ -226,7 +241,10 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
                         let mut req_buf = vec![0u8; req_len];
                         if tokio::time::timeout(timeout_dur, server.read_exact(&mut req_buf)).await.ok().and_then(|r| r.ok()).is_some() {
                             if let Ok(envelope) = serde_json::from_slice::<IpcEnvelope>(&req_buf) {
-                                let is_authorized = envelope.session_token == *valid_token || valid_token.is_empty();
+                                use subtle::ConstantTimeEq;
+                                let is_authorized = !valid_token.is_empty()
+                                    && !envelope.session_token.is_empty()
+                                    && bool::from(envelope.session_token.as_bytes().ct_eq(valid_token.as_bytes()));
                                 let should_exit = matches!(envelope.request, IpcRequest::Lock) && is_authorized;
                                 
                                 let response = if is_authorized {
@@ -269,6 +287,12 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
         let listener = UnixListener::bind(&pipe_name)
             .map_err(|e| VaultError::SyncError(format!("Failed to bind unix socket: {}", e)))?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&pipe_name, std::fs::Permissions::from_mode(0o600));
+        }
+
         loop {
             if let Ok((mut socket, _)) = listener.accept().await {
                 *last_activity.lock().unwrap() = Instant::now();
@@ -280,7 +304,10 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
                         let mut req_buf = vec![0u8; req_len];
                         if tokio::time::timeout(timeout_dur, socket.read_exact(&mut req_buf)).await.ok().and_then(|r| r.ok()).is_some() {
                             if let Ok(envelope) = serde_json::from_slice::<IpcEnvelope>(&req_buf) {
-                                let is_authorized = envelope.session_token == *valid_token || valid_token.is_empty();
+                                use subtle::ConstantTimeEq;
+                                let is_authorized = !valid_token.is_empty()
+                                    && !envelope.session_token.is_empty()
+                                    && bool::from(envelope.session_token.as_bytes().ct_eq(valid_token.as_bytes()));
                                 let should_exit = matches!(envelope.request, IpcRequest::Lock) && is_authorized;
                                 
                                 let response = if is_authorized {

@@ -7,6 +7,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { ImportModal } from '@/features/sync';
 import { useBackend } from '@/lib/useBackend';
+import { useEntries } from '@/features/entries';
 import { isTauri, type BiometricInfo } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
 
@@ -30,7 +31,8 @@ const TABS: { id: Tab; labelKey: string; icon: React.ReactNode }[] = [
 
 export function SettingsPanel() {
   const { currentVault } = useAuth();
-  const { settingsOpen, setSettingsOpen } = useUi();
+  const { settingsOpen, setSettingsOpen, setIsEditing, setFilterCategory, openEditModal } = useUi();
+  const { entries, selectEntryById } = useEntries();
   const { addToast } = useToast();
   const { t } = useTranslation();
   const { backend } = useBackend();
@@ -45,6 +47,7 @@ export function SettingsPanel() {
   // Biometric state
   const [bioActive, setBioActive] = useState(false);
   const [bioInfo, setBioInfo] = useState<BiometricInfo | null>(null);
+  const [isTogglingBio, setIsTogglingBio] = useState(false);
 
   // Hardware 2FA state & modal
   const [hwActive, setHwActive] = useState(false);
@@ -98,8 +101,6 @@ export function SettingsPanel() {
       checkLaunch();
     }
   }, [settingsOpen, backend]);
-
-  const [isTogglingBio, setIsTogglingBio] = useState(false);
 
   const handleToggleBiometric = async () => {
     if (!backend || isTogglingBio) return;
@@ -232,6 +233,16 @@ export function SettingsPanel() {
                   }}
                   onDisableHw={handleDisableHw}
                   onOpenChangePassword={() => setShowChangePassword(true)}
+                  onNavigateToEntry={(entryId) => {
+                    const entry = entries.find((e) => e.id === entryId);
+                    if (entry) {
+                      selectEntryById(entryId);
+                      setFilterCategory('all');
+                      setIsEditing(false);
+                      setSettingsOpen(false);
+                      openEditModal(entry);
+                    }
+                  }}
                 />
               )}
 

@@ -15,7 +15,6 @@ import { useSettings } from '@/features/settings';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
-import { EntryModal } from './EntryModal';
 import { BulkEditModal } from './BulkEditModal';
 import { EntryContextMenu } from './EntryContextMenu';
 import { PasswordListAreaContextMenu } from './PasswordListAreaContextMenu';
@@ -36,12 +35,12 @@ interface Section {
   items: PasswordEntry[];
 }
 
-export function PasswordList({ onResizeStart }: PasswordListProps = {}) {
+export function PasswordList({ onResizeStart }: PasswordListProps) {
   const { t } = useTranslation();
   const { backend } = useBackend();
   const filteredEntries = useFilteredEntries();
   const { searchTerm, setSearchTerm } = useSearch();
-  const { filterCategory, setIsEditing, settingsOpen, isEntryModalOpen, setIsEntryModalOpen } = useUi();
+  const { filterCategory, setIsEditing, settingsOpen, isEntryModalOpen, openNewEntryModal, openEditModal } = useUi();
   const {
     selectedEntry,
     tags,
@@ -79,7 +78,6 @@ export function PasswordList({ onResizeStart }: PasswordListProps = {}) {
   }, []);
 
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<PasswordEntry | null>(null);
-  const [editEntryForModal, setEditEntryForModal] = useState<PasswordEntry | null>(null);
 
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
@@ -168,15 +166,13 @@ export function PasswordList({ onResizeStart }: PasswordListProps = {}) {
   }, [selectedEntryIds, toggleEntrySelection]);
 
   const handleAddEntryClick = useCallback(() => {
-    setEditEntryForModal(null);
-    setIsEntryModalOpen(true);
-  }, [setIsEntryModalOpen]);
+    openNewEntryModal();
+  }, [openNewEntryModal]);
 
   const handleRename = useCallback((entry: PasswordEntry) => {
     selectEntryById(entry.id);
-    setEditEntryForModal(entry);
-    setIsEntryModalOpen(true);
-  }, [selectEntryById, setIsEntryModalOpen]);
+    openEditModal(entry);
+  }, [selectEntryById, openEditModal]);
 
   const handleDelete = useCallback((entry: PasswordEntry) => {
     setDeleteConfirmEntry(entry);
@@ -274,11 +270,23 @@ export function PasswordList({ onResizeStart }: PasswordListProps = {}) {
         <div className="flex h-8 items-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 transition-colors focus-within:border-[var(--border-focus)]">
           <Search size={14} className="shrink-0 text-[var(--text-tertiary)]" />
           <input
+            id="search-input"
             ref={searchInputRef}
             type="text"
             placeholder={t('app.search_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (searchTerm) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSearchTerm('');
+                } else {
+                  searchInputRef.current?.blur();
+                }
+              }
+            }}
             className="flex-1 bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
           {searchTerm && (
@@ -385,15 +393,6 @@ export function PasswordList({ onResizeStart }: PasswordListProps = {}) {
         onMouseDown={onResizeStart}
         role="slider"
         aria-label={t('common.resize_password_list')}
-      />
-
-      <EntryModal
-        open={isEntryModalOpen}
-        editEntry={editEntryForModal}
-        onClose={() => {
-          setIsEntryModalOpen(false);
-          setEditEntryForModal(null);
-        }}
       />
 
       <BulkEditModal

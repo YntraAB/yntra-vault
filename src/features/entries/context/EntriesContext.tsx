@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth';
 import { useSettings } from '@/features/settings';
 import { useToast } from '@/contexts/ToastContext';
 import { useUi, useSearch } from '@/contexts/UiContext';
+import { getTransientWebdavPassword } from '@/lib/sessionSecrets';
 
 // ─── Conversion helpers (Rust types ↔ frontend types) ───────────────────
 
@@ -31,12 +32,28 @@ export function entryPreviewToPasswordEntry(preview: EntryPreview, password = '�
   };
 }
 
+export function isRecoveryField(name: string): boolean {
+  if (!name) return false;
+  const norm = name.trim().toLowerCase();
+  return (
+    norm === '2fa recovery codes' ||
+    norm === '2fa recovery code' ||
+    norm === '2fa backup codes' ||
+    norm === 'recovery codes' ||
+    norm === 'recovery code' ||
+    norm === 'backup codes' ||
+    norm.startsWith('2fa recovery cod')
+  );
+}
+
 export function decryptedEntryToPasswordEntry(entry: DecryptedEntry): PasswordEntry {
   let recoveryCodes = '';
   const customFields = (entry.custom_fields || [])
     .filter((f) => {
-      if (f.name === '2FA Recovery Codes') {
-        recoveryCodes = f.value;
+      if (isRecoveryField(f.name)) {
+        if (f.value && f.value.trim()) {
+          recoveryCodes = recoveryCodes ? `${recoveryCodes}\n${f.value.trim()}` : f.value.trim();
+        }
         return false;
       }
       return true;
@@ -350,10 +367,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
     autoSyncTimerRef.current = setTimeout(async () => {
       try {
-        let pass = null;
-        try {
-          pass = sessionStorage.getItem('yntra-webdav-session-pass');
-        } catch {}
+        const pass = getTransientWebdavPassword();
         await backend.webdavSync(settings.webdavUrl!, settings.webdavUser!, pass);
       } catch (err) {
         console.warn('Auto-sync on save failed:', err);
@@ -366,8 +380,16 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const updateEntry = useCallback(
     async (entry: PasswordEntry) => {
       const now = new Date().toISOString();
+      const cleanedCustomFields = entry.customFields.filter(f => !isRecoveryField(f.name));
+      let recoveryCodes = entry.recoveryCodes;
+      if (!recoveryCodes) {
+        const found = entry.customFields.filter(f => isRecoveryField(f.name));
+        if (found.length) recoveryCodes = found.map(f => f.value).join('\n');
+      }
       const updatedEntry: PasswordEntry = {
         ...entry,
+        recoveryCodes,
+        customFields: cleanedCustomFields,
         updatedAt: now,
       };
 
@@ -385,7 +407,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           const customFieldsToSend = [
-            ...entry.customFields.map((f) => ({
+            ...cleanedCustomFields.map((f) => ({
               id: f.id,
               name: f.name,
               field_type: (f.type.charAt(0).toUpperCase() + f.type.slice(1)) as any,
@@ -393,12 +415,12 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
               sensitive: f.type === 'password',
             })),
           ];
-          if (entry.recoveryCodes) {
+          if (recoveryCodes && recoveryCodes.trim()) {
             customFieldsToSend.push({
               id: crypto.randomUUID(),
               name: '2FA Recovery Codes',
               field_type: 'Password' as any,
-              value: entry.recoveryCodes,
+              value: recoveryCodes.trim(),
               sensitive: true,
             });
           }
@@ -481,19 +503,25 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const addEntry = useCallback(
     async (entry: PasswordEntry) => {
       const now = new Date().toISOString();
-      const customFieldsToSend = entry.customFields.map((f) => ({
+      const cleanedCustomFields = entry.customFields.filter(f => !isRecoveryField(f.name));
+      let recoveryCodes = entry.recoveryCodes;
+      if (!recoveryCodes) {
+        const found = entry.customFields.filter(f => isRecoveryField(f.name));
+        if (found.length) recoveryCodes = found.map(f => f.value).join('\n');
+      }
+      const customFieldsToSend = cleanedCustomFields.map((f) => ({
         id: f.id,
         name: f.name,
         field_type: (f.type.charAt(0).toUpperCase() + f.type.slice(1)) as any,
         value: f.value,
         sensitive: f.type === 'password',
       }));
-      if (entry.recoveryCodes) {
+      if (recoveryCodes && recoveryCodes.trim()) {
         customFieldsToSend.push({
           id: crypto.randomUUID(),
           name: '2FA Recovery Codes',
           field_type: 'Password' as any,
-          value: entry.recoveryCodes,
+          value: recoveryCodes.trim(),
           sensitive: true,
         });
       }

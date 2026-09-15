@@ -111,6 +111,9 @@ pub fn run() {
             commands::restore_from_trash,
             commands::permanent_delete,
             commands::empty_trash,
+            commands::purge_expired_trash,
+            commands::get_storage_metrics,
+            commands::compact_vault,
             // Password History
             commands::get_password_history,
             // TOTP
@@ -141,6 +144,8 @@ pub fn run() {
             commands::disable_autostart,
             commands::is_autostart_enabled,
             commands::get_favicon,
+            commands::set_external_favicons_enabled,
+            commands::is_external_favicons_enabled,
             commands::set_minimize_to_tray,
             commands::webdav_upload,
             commands::webdav_download,
@@ -151,6 +156,9 @@ pub fn run() {
             commands::split_master_password,
             commands::reconstruct_master_password,
             commands::reconstruct_master_password_hash,
+            commands::generate_emergency_kit,
+            commands::get_emergency_kit_audit,
+            commands::reset_emergency_kit_audit,
             // Export & Import
             commands::export_vault,
             commands::export_vault_csv,
@@ -200,10 +208,15 @@ pub fn run() {
 
                     if let Ok(show_i) = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>) {
                         if let Ok(menu) = Menu::with_items(app, &[&show_i, &quit_i]) {
-                            let _ = TrayIconBuilder::new()
-                                .icon(app.default_window_icon().unwrap().clone())
+                            let mut tray_builder = TrayIconBuilder::new()
                                 .menu(&menu)
-                                .show_menu_on_left_click(false)
+                                .show_menu_on_left_click(false);
+
+                            if let Some(icon) = app.default_window_icon() {
+                                tray_builder = tray_builder.icon(icon.clone());
+                            }
+
+                            let _ = tray_builder
                                 .on_menu_event(|app, event| {
                                     match event.id.as_ref() {
                                         "quit" => {

@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import type { FilterCategory } from '@/types';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import type { FilterCategory, PasswordEntry } from '@/types';
 import { useAuth } from '@/features/auth';
 
 // ─── Search Context (High-Frequency) ────────────────────────────────────
@@ -28,6 +28,11 @@ export interface UiContextType {
   setSettingsOpen: (open: boolean) => void;
   isEntryModalOpen: boolean;
   setIsEntryModalOpen: (open: boolean) => void;
+  editingEntry: PasswordEntry | null;
+  setEditingEntry: (entry: PasswordEntry | null) => void;
+  openNewEntryModal: () => void;
+  openEditModal: (entry: PasswordEntry) => void;
+  closeEntryModal: () => void;
   isCreateTagOpen: boolean;
   setIsCreateTagOpen: (open: boolean) => void;
 }
@@ -48,8 +53,26 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
   const [isEditing, setIsEditing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<PasswordEntry | null>(null);
   const [isCreateTagOpen, setIsCreateTagOpen] = useState(false);
   const { isLocked } = useAuth();
+
+  const openNewEntryModal = useCallback(() => {
+    setIsEditing(false);
+    setEditingEntry(null);
+    setIsEntryModalOpen(true);
+  }, []);
+
+  const openEditModal = useCallback((entry: PasswordEntry) => {
+    setIsEditing(false);
+    setEditingEntry(entry);
+    setIsEntryModalOpen(true);
+  }, []);
+
+  const closeEntryModal = useCallback(() => {
+    setIsEntryModalOpen(false);
+    setEditingEntry(null);
+  }, []);
 
   // Reset UI and search states on lock
   useEffect(() => {
@@ -58,6 +81,7 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
       setIsEditing(false);
       setSettingsOpen(false);
       setIsEntryModalOpen(false);
+      setEditingEntry(null);
       setIsCreateTagOpen(false);
     }
   }, [isLocked]);
@@ -73,10 +97,25 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
       setSettingsOpen,
       isEntryModalOpen,
       setIsEntryModalOpen,
+      editingEntry,
+      setEditingEntry,
+      openNewEntryModal,
+      openEditModal,
+      closeEntryModal,
       isCreateTagOpen,
       setIsCreateTagOpen,
     }),
-    [filterCategory, isEditing, settingsOpen, isEntryModalOpen, isCreateTagOpen]
+    [
+      filterCategory,
+      isEditing,
+      settingsOpen,
+      isEntryModalOpen,
+      editingEntry,
+      openNewEntryModal,
+      openEditModal,
+      closeEntryModal,
+      isCreateTagOpen,
+    ]
   );
 
   return (

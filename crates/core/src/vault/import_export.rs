@@ -213,7 +213,23 @@ impl VaultManager {
         let mut csv = String::from("Title,Username,Email,Password,URL,Notes,TOTP,Tags\n");
         for entry in self.list_entries()? {
             if let Ok(dec) = self.get_entry(entry.id) {
-                let esc = |s: &str| format!("\"{}\"", s.replace('"', "\"\"").replace('\n', " ").replace('\r', ""));
+                let esc = |s: &str| {
+                    let trimmed = s.trim_start();
+                    let safe = if s.starts_with('\t')
+                        || s.starts_with('\r')
+                        || trimmed.starts_with('=')
+                        || trimmed.starts_with('+')
+                        || trimmed.starts_with('-')
+                        || trimmed.starts_with('@')
+                        || trimmed.starts_with('\t')
+                        || trimmed.starts_with('\r')
+                    {
+                        format!("'{}", s)
+                    } else {
+                        s.to_string()
+                    };
+                    format!("\"{}\"", safe.replace('"', "\"\"").replace('\n', " ").replace('\r', ""))
+                };
                 let totp = dec.totp_secret.as_deref().unwrap_or("");
                 let tags = dec.tags.join(";");
 

@@ -10,6 +10,7 @@ pub mod tags;
 pub mod audit;
 pub mod rekey;
 pub mod auth;
+pub mod emergency;
 pub mod importer;
 pub mod import_export;
 
@@ -22,7 +23,8 @@ pub use crate::services::autostart;
 pub use types::*;
 pub use manager::VaultManager;
 pub use entry::{NewEntry, UpdateEntry, DecryptedEntry};
-pub use trash::TrashedEntryPreview;
+pub use trash::{TrashedEntryPreview, VaultStorageMetrics};
+pub use emergency::{EmergencyKit, EmergencyShare};
 pub use search::{generate_index_tokens, generate_trigrams, hash_trigram};
 pub use autotype::{autotype_text, autotype_text_with_delay, run_smart_autotype, run_smart_autotype_with_delays};
 pub use sync::{webdav_upload, webdav_download, webdav_download_bytes, decrypt_remote_vault_bytes, decrypt_remote_vault_bytes_checked, webdav_test_connection, webdav_get_etag, merge_vault_data, MergeStats, run_p2p_sync_listener, run_p2p_sync_client};

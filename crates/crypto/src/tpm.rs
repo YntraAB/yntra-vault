@@ -369,13 +369,26 @@ pub mod macos_hdw {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn linux_get_or_create_wrap_key() -> crate::Result<[u8; 32]> {
     use rand::Rng;
-    use std::os::unix::fs::PermissionsExt;
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-    let mut key_dir = std::path::PathBuf::from(
-        std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
-    );
-    key_dir.push(".config/yntra-vault");
-    std::fs::create_dir_all(&key_dir).ok();
+    let base_dir = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|_| {
+            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
+        })
+        .map_err(|_| {
+            crate::error::VaultError::HardwareError(
+                "Neither XDG_CONFIG_HOME nor HOME environment variable is set".into(),
+            )
+        })?;
+
+    let key_dir = base_dir.join("yntra-vault");
+    std::fs::create_dir_all(&key_dir)
+        .map_err(|e| crate::error::VaultError::HardwareError(format!("Failed to create wrap key directory: {e}")))?;
+
+    let dir_perms = std::fs::Permissions::from_mode(0o700);
+    let _ = std::fs::set_permissions(&key_dir, dir_perms);
 
     let key_path = key_dir.join("wrap-key.bin");
     if key_path.exists() {
@@ -388,13 +401,22 @@ fn linux_get_or_create_wrap_key() -> crate::Result<[u8; 32]> {
         }
     }
 
-    // Generate new key and restrict permissions
+    // Generate new key and create file atomically with restricted permissions (0600)
     let mut key = [0u8; 32];
     rand::rng().fill(&mut key);
-    std::fs::write(&key_path, &key)
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&key_path)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Open wrap key with 0600: {}", e)))?;
+
+    file.write_all(&key)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Write wrap key: {}", e)))?;
-    let perms = std::fs::Permissions::from_mode(0o600);
-    let _ = std::fs::set_permissions(&key_path, perms);
+    file.flush()
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Flush wrap key: {}", e)))?;
 
     Ok(key)
 }
@@ -510,10 +532,40 @@ pub fn hardware_unwrap_key(ciphertext: &[u8]) -> crate::Result<Vec<u8>> {
     }
 }
 
+fn get_session_token_path() -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let mut path = std::env::temp_dir();
+        path.push("yntra-vault-session.token");
+        path
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+            if !runtime_dir.is_empty() {
+                let mut path = std::path::PathBuf::from(runtime_dir);
+                path.push("yntra-vault-session.token");
+                return path;
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let mut path = std::path::PathBuf::from(home);
+            path.push(".local/share/yntra");
+            let _ = std::fs::create_dir_all(&path);
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700));
+            path.push("yntra-vault-session.token");
+            return path;
+        }
+        let mut path = std::env::temp_dir();
+        path.push("yntra-vault-session.token");
+        path
+    }
+}
+
 /// Write DPAPI/Keychain encrypted session token to a local handoff file.
 pub fn write_session_token(token: &str) -> crate::Result<()> {
-    let mut path = std::env::temp_dir();
-    path.push("yntra-vault-session.token");
+    let path = get_session_token_path();
 
     let encrypted = hardware_wrap_key(token.as_bytes())?;
     std::fs::write(&path, encrypted).map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to write session token: {}", e)))?;
@@ -531,8 +583,7 @@ pub fn write_session_token(token: &str) -> crate::Result<()> {
 
 /// Read and decrypt DPAPI/Keychain protected session token from local handoff file.
 pub fn read_session_token() -> crate::Result<String> {
-    let mut path = std::env::temp_dir();
-    path.push("yntra-vault-session.token");
+    let path = get_session_token_path();
 
     let data = std::fs::read(&path).map_err(|e| crate::error::VaultError::DecryptionError(format!("Failed to read session token: {}", e)))?;
     let decrypted = hardware_unwrap_key(&data)?;

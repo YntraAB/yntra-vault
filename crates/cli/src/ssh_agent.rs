@@ -132,6 +132,21 @@ pub fn get_ssh_agent_pipe_name() -> String {
     }
     #[cfg(not(windows))]
     {
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+            if !runtime_dir.is_empty() {
+                return format!("{}/yntra-ssh-agent.sock", runtime_dir.trim_end_matches('/'));
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let user_dir = format!("{}/.local/share/yntra/run", home.trim_end_matches('/'));
+            let _ = std::fs::create_dir_all(&user_dir);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&user_dir, std::fs::Permissions::from_mode(0o700));
+            }
+            return format!("{}/yntra-ssh-agent.sock", user_dir);
+        }
         format!("/tmp/yntra-ssh-agent-{}.sock", username)
     }
 }

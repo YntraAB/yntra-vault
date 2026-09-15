@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.6] - 2026-09-15
+
+### Added
+- **Cryptographic Emergency Kit**:
+  - Implemented 2-of-3 Shamir Secret Sharing recovery sheet generator with direct `.md` export.
+  - Added encrypted audit logging for Emergency Kit generations, resets, and rekey invalidations.
+- **Steam Guard TOTP Algorithm**:
+  - Added dynamic HMAC-SHA1 alphanumeric 5-character token generation for Steam Guard accounts.
+  - Added automatic detection for `steam://` URIs and `issuer=Steam`.
+- **Storage Compaction & Trash Lifecycle**:
+  - Added background storage compaction engine (`compact_vault`) and automatic 30-day trash purging (`purge_expired_trash`).
+  - Added real-time storage metrics breaking down byte usage across active vs trashed items and attachments.
+- **First-Run Onboarding Setup**:
+  - Added setup wizard with Standard vs Closed System (air-gapped) privacy modes.
+- **Security Dashboard Improvements**:
+  - Clustered reciprocal reused password detections with direct per-entry remediation navigation.
+  - Unified TOTP code view and 2FA recovery backup codes into a cohesive card.
+- **Full Internationalization Parity (24 Languages)**:
+  - Achieved complete key parity across all 24 supported locales (839 keys per language).
+
+### Security
+- **Smart Login ccTLD Base Domain Isolation**:
+  - Enforced effective TLD+1 (`eTLD+1`) boundary matching with multi-part ccTLD parsing (`.co.uk`, `.com.au`), preventing credential leakage across public suffixes.
+  - Restricted automated credential navigation to exact domain, same base domain, or explicit SSO pairings in `AUTH_DOMAINS`.
+- **Smart Login CDP String Injection Prevention**:
+  - Serialized all DOM-derived text targets using `serde_json::to_string` before JavaScript evaluation in Chrome DevTools Protocol.
+- **Emergency Kit Keyed HMAC Fingerprinting**:
+  - Replaced raw unkeyed hashes with keyed HMAC-SHA512 verification checksums derived from active session subkeys.
+- **CSV Formula Injection Sanitization (CWE-1236)**:
+  - Prepended escape single quotes to cell values starting with formula triggers (`=`, `+`, `-`, `@`, `\t`, `\r`) during CSV export.
+- **Settings & Transit Memory Scrubbing on Vault Lock**:
+  - Actively cleared WebDAV credentials, remote endpoints, and emergency audit logs from memory on lock.
+  - Wrapped transient AEAD subkey vectors in `zeroize::Zeroizing` before transferring into `LockedBuffer`.
+- **Hardware 2FA Argon2id Key Stretching**:
+  - Enforced 256MB RAM Argon2id key derivation for Hardware 2FA envelope Key Encryption Keys.
+- **Keyfile Factor Isolation**:
+  - Removed plaintext keyfile path persistence from client browser storage.
+- **Least Privilege Desktop Capabilities**:
+  - Revoked clipboard-read permission and stripped development tools from production release capabilities.
+- **Timing Attack Resistance**:
+  - Enforced constant-time equality comparisons (`subtle::ConstantTimeEq`) across TOTP verification and local CLI daemon authentication.
+
+### Fixed
+- **Release-Mode Startup Crash Prevention**:
+  - Replaced unhandled system tray window icon unwrap with safe pattern matching, preventing process aborts under `panic = "abort"`.
+- **Tauri v2 Production CSP Dual-Scheme Parity**:
+  - Added `https://ipc.localhost` to Content Security Policy `connect-src`, eliminating silent IPC invoke failures in Windows WebView2 release packages.
+- **React Hook Lifecycle Ordering & Minified Errors**:
+  - Relocated state hooks to top-level unconditional component scope, eliminating fatal `Minified React error #300`/`#310` crashes in production bundles.
+- **Cross-Crate Hardware 2FA Test Gating**:
+  - Removed `cfg!(debug_assertions)` wrappers from hardware 2FA and biometric test harnesses to ensure integration tests execute reliably under `cargo test --release`.
+- **2FA Recovery Codes Mapping**:
+  - Sanitized persistence pipeline so recovery backup codes are stored exclusively in dedicated fields and do not leak into custom fields.
+- **KeePass XML Importer**:
+  - Added support for protected in-memory values and XML entity decoding.
+
+---
+
 ## [0.1.5] - 2026-09-14
 
 ### Fixed

@@ -9,6 +9,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::Zeroizing;
+use subtle::ConstantTimeEq;
 
 use crate::crypto::{
     derive_master_key_with_keyfile, derive_subkeys,
@@ -23,7 +24,7 @@ use crate::vault::types::*;
 
 // Re-exports for backwards compatibility across crates
 pub use crate::vault::entry::{DecryptedEntry, NewEntry, UpdateEntry};
-pub use crate::vault::trash::TrashedEntryPreview;
+pub use crate::vault::trash::{TrashedEntryPreview, VaultStorageMetrics};
 
 /// Active vault state — holds decrypted data + derived keys.
 pub struct VaultManager {
@@ -371,6 +372,7 @@ impl VaultManager {
         self.data.entries.clear();
         self.data.tags.clear();
         self.data.trash.clear();
+        self.data.settings = Default::default();
         self.search_index.clear();
     }
 
@@ -387,6 +389,30 @@ impl VaultManager {
     /// Retrieve the root salt for this vault.
     pub fn salt(&self) -> [u8; 32] {
         self.salt
+    }
+
+    /// Cryptographically verifies candidate master password against active vault session keys.
+    /// Derives candidate subkeys using Argon2id and HKDF, and compares in constant time.
+    pub fn verify_master_password(&self, candidate: &str) -> crate::Result<bool> {
+        self.verify_master_password_with_keyfile(candidate, None)
+    }
+
+    /// Cryptographically verifies candidate master password with optional keyfile
+    /// against active vault session keys using constant-time comparison.
+    pub fn verify_master_password_with_keyfile(
+        &self,
+        candidate: &str,
+        key_file_bytes: Option<&[u8]>,
+    ) -> crate::Result<bool> {
+        let active_keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        let candidate_mk = derive_master_key_with_keyfile(
+            candidate.as_bytes(),
+            key_file_bytes,
+            &self.salt,
+        )?;
+        let candidate_keys = derive_subkeys(&candidate_mk)?;
+        let is_valid = bool::from(active_keys.vault_key.ct_eq(&candidate_keys.vault_key));
+        Ok(is_valid)
     }
 
     /// Get vault info for the selection screen.

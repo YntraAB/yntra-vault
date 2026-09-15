@@ -1,7 +1,7 @@
-//! Zero-Disclosure search index using HMAC-SHA256 trigrams.
-
+use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::collections::HashSet;
 use uuid::Uuid;
 use crate::vault::manager::VaultManager;
 use crate::vault::types::EntryPreview;
@@ -128,11 +128,12 @@ impl VaultManager {
         }
     }
 
-    /// Remove an entry's ID from the HMAC-SHA256 trigram index.
+    /// Remove an entry's ID from the HMAC-SHA256 trigram index, automatically pruning empty buckets.
     pub(crate) fn remove_entry_from_index(&mut self, id: Uuid) {
-        for list in self.search_index.values_mut() {
+        self.search_index.retain(|_, list| {
             list.retain(|x| *x != id);
-        }
+            !list.is_empty()
+        });
     }
 
     /// Zero-Disclosure Search: search entries by query string using HMAC trigrams.
@@ -142,10 +143,9 @@ impl VaultManager {
             return Err(crate::error::VaultError::VaultLocked);
         }
 
-        let all = self.list_entries()?;
         let query = query.trim();
         if query.is_empty() {
-            return Ok(all);
+            return self.list_entries();
         }
 
         let keys = self.keys.as_ref().ok_or(crate::error::VaultError::VaultLocked)?;
@@ -168,13 +168,42 @@ impl VaultManager {
             ((query_trigrams.len() as f64) * 0.8).floor() as usize
         };
 
-        let mut results: Vec<EntryPreview> = all
-            .into_iter()
-            .filter(|e| {
-                if let Some(&count) = match_counts.get(&e.id) {
-                    count >= threshold
-                } else {
-                    false
+        // Pre-filter matched entry IDs before allocating any preview structs
+        let matched_ids: HashSet<Uuid> = match_counts
+            .iter()
+            .filter(|(_, count)| **count >= threshold)
+            .map(|(id, _)| *id)
+            .collect();
+
+        if matched_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Allocate and construct EntryPreview only for the matched subset
+        let mut results: Vec<EntryPreview> = self
+            .data
+            .entries
+            .iter()
+            .filter(|e| matched_ids.contains(&e.id))
+            .map(|e| {
+                let age = (Utc::now() - e.password_changed_at).num_days();
+                EntryPreview {
+                    id: e.id,
+                    title: e.title.clone(),
+                    username: e.username.clone(),
+                    url: e.url.clone(),
+                    email: e.email.clone(),
+                    tags: e.tags.clone(),
+                    favorite: e.favorite,
+                    pinned: e.pinned,
+                    has_totp: e.encrypted_totp_secret.is_some(),
+                    entry_type: e.entry_type.clone(),
+                    updated_at: e.updated_at,
+                    breach_status: e.breach_status.clone(),
+                    strength_score: e.strength_score.clone(),
+                    password_age_days: age,
+                    has_passkey: e.encrypted_passkey.is_some(),
+                    attachment_count: e.attachments.len(),
                 }
             })
             .collect();
@@ -385,5 +414,11 @@ mod tests {
         // Test searching for nonexistent
         let results = manager.search_entries("nonexistent").unwrap();
         assert!(results.is_empty());
+
+        // Test index removal & bucket pruning
+        manager.remove_entry_from_index(id1);
+        let results_after = manager.search_entries("Google").unwrap();
+        assert!(results_after.is_empty());
+        assert!(!manager.search_index.values().any(|v| v.is_empty()));
     }
 }

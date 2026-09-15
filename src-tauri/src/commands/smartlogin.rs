@@ -1,4 +1,4 @@
-﻿//! Smart Login Commands — Chrome DevTools Protocol (CDP) automated browser login.
+//! Smart Login Commands — Chrome DevTools Protocol (CDP) automated browser login.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -20,7 +20,11 @@ pub async fn smart_login_precheck() -> Result<PreCheckResult, String> {
 
 #[tauri::command]
 pub async fn smart_login_close_browser(process_name: String) -> Result<(), String> {
-    smartlogin::browser::close_browser(&process_name)
+    let clean_name = process_name.trim();
+    if clean_name.is_empty() || clean_name.len() > 64 {
+        return Err("Invalid process name length".into());
+    }
+    smartlogin::browser::close_browser(clean_name)
 }
 
 #[tauri::command]

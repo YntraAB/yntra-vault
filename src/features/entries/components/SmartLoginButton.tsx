@@ -31,8 +31,6 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
   const [, setBrowserIndex] = useState(0);
   const [dontAskAgain, setDontAskAgain] = useState(false);
 
-  if (!isTauri() || !hasUrl) return null;
-
   const runPrecheck = useCallback(async () => {
     const backend = await getBackend();
     const precheck = await backend.smartLoginPrecheck();
@@ -48,31 +46,6 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
     setBrowserIndex(idx);
 
     return { browser, idx };
-  }, []);
-
-  const handleOpen = useCallback(async () => {
-    setEvents([]);
-    setResult(null);
-    setError(null);
-    setIsModalOpen(true);
-    setDontAskAgain(false);
-
-    try {
-      const { browser } = await runPrecheck();
-
-      // If browser needs closing and user hasn't opted to skip warning
-      const skipWarning = localStorage.getItem(STORAGE_KEY) === 'true';
-      if (browser.is_running && !skipWarning) {
-        setPhase('confirm');
-        return;
-      }
-
-      // Either not running or user chose to skip warning
-      await executeLogin();
-    } catch (err) {
-      setError(String(err));
-      setPhase('done');
-    }
   }, []);
 
   const executeLogin = useCallback(async () => {
@@ -105,6 +78,31 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
       setPhase('done');
     }
   }, [entryId]);
+
+  const handleOpen = useCallback(async () => {
+    setEvents([]);
+    setResult(null);
+    setError(null);
+    setIsModalOpen(true);
+    setDontAskAgain(false);
+
+    try {
+      const { browser } = await runPrecheck();
+
+      // If browser needs closing and user hasn't opted to skip warning
+      const skipWarning = localStorage.getItem(STORAGE_KEY) === 'true';
+      if (browser.is_running && !skipWarning) {
+        setPhase('confirm');
+        return;
+      }
+
+      // Either not running or user chose to skip warning
+      await executeLogin();
+    } catch (err) {
+      setError(String(err));
+      setPhase('done');
+    }
+  }, [executeLogin, runPrecheck]);
 
   const handleConfirmClose = useCallback(async () => {
     if (dontAskAgain) {
@@ -146,6 +144,8 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
       unlistenResult?.();
     };
   }, [isModalOpen]);
+
+  if (!isTauri() || !hasUrl) return null;
 
   return (
     <>

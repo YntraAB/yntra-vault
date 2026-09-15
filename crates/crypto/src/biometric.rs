@@ -74,7 +74,7 @@ mod win_hello {
     }
 
     pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>) -> crate::Result<()> {
-        if cfg!(test) || (cfg!(debug_assertions) && std::env::var("YNTRA_TEST_MODE").is_ok()) {
+        if cfg!(test) || std::env::var("YNTRA_TEST_MODE").is_ok() {
             return Ok(());
         }
         let prompt_str = prompt.to_string();
@@ -146,7 +146,19 @@ pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>
     {
         let _ = prompt;
         let _ = hwnd_override;
-        Ok(())
+        if cfg!(test) || std::env::var("YNTRA_TEST_MODE").is_ok() {
+            return Ok(());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Ok(())
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            Err(VaultError::BiometricNotAvailable(
+                "Biometric hardware verification is not supported on this platform".into(),
+            ))
+        }
     }
 }
 
@@ -178,8 +190,8 @@ pub fn check_biometric_availability() -> BiometricInfo {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         BiometricInfo {
-            available: true,
-            biometric_type: "Linux PAM / Secret Service".to_string(),
+            available: false,
+            biometric_type: "Biometrics unsupported on Linux".to_string(),
         }
     }
 }
@@ -236,10 +248,7 @@ pub fn unlock_from_embedded_header_with_hwnd(
     hwnd_override: Option<isize>,
 ) -> crate::Result<SubKeys> {
     // 1. Mandatory OS Hardware Biometric Verification
-    #[cfg(target_os = "windows")]
-    {
-        win_hello::request_user_consent_with_hwnd("Unlock Yntra Vault", hwnd_override)?;
-    }
+    request_user_consent_with_hwnd("Unlock Yntra Vault", hwnd_override)?;
 
     // 2. Unwrap BIO_KEK via Hardware TPM 2.0 / Keychain / DPAPI
     let bio_kek_raw = crate::tpm::hardware_unwrap_key(&bio_header.wrapped_kek)?;
@@ -261,12 +270,14 @@ pub fn unlock_from_embedded_header_with_hwnd(
         aad,
     };
 
-    let decrypted_bytes = cipher
-        .decrypt(nonce, decrypt_item)
-        .map_err(|_| VaultError::BiometricAuthFailed("Biometric key authentication failed or payload tampered with".into()))?;
+    let decrypted_bytes = Zeroizing::new(
+        cipher
+            .decrypt(nonce, decrypt_item)
+            .map_err(|_| VaultError::BiometricAuthFailed("Biometric key authentication failed or payload tampered with".into()))?
+    );
 
     // 3. Page-lock and reconstruct SubKeys inside ProtectedSecret buffer
-    let locked_subkeys = LockedBuffer::new(&decrypted_bytes);
+    let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice());
     let subkeys = SubKeys::from_bytes(locked_subkeys.as_slice())?;
 
     Ok(subkeys)

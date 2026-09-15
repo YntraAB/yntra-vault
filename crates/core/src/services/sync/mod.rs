@@ -155,27 +155,32 @@ pub fn normalize_etag(etag: &str) -> String {
 
 /// Helper: Validate WebDAV URL for basic structural correctness and TLS transport security.
 /// Rejects plain `http://` URLs unless connecting to localhost / 127.0.0.1 / [::1].
-pub fn validate_webdav_url(url: &str) -> crate::Result<()> {
-    let trimmed = url.trim();
+pub fn validate_webdav_url(raw_url: &str) -> crate::Result<()> {
+    let trimmed = raw_url.trim();
     if trimmed.is_empty() {
         return Err(crate::error::VaultError::InvalidFormat("WebDAV URL cannot be empty".into()));
     }
 
-    if trimmed.starts_with("http://") {
-        let after_scheme = &trimmed[7..];
-        let host = after_scheme.split('/').next().unwrap_or("").split(':').next().unwrap_or("");
-        if host != "localhost" && host != "127.0.0.1" && host != "[::1]" && host != "::1" {
-            return Err(crate::error::VaultError::InvalidFormat(
-                "WebDAV URL must use HTTPS for secure transport outside localhost".into()
-            ));
-        }
-    } else if !trimmed.starts_with("https://") {
-        return Err(crate::error::VaultError::InvalidFormat(
-            "WebDAV URL must start with https:// (or http:// for localhost testing)".into()
-        ));
-    }
+    let parsed = url::Url::parse(trimmed).map_err(|e| {
+        crate::error::VaultError::InvalidFormat(format!("Invalid WebDAV URL format: {}", e))
+    })?;
 
-    Ok(())
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let host = parsed.host_str().unwrap_or("");
+            if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+                Ok(())
+            } else {
+                Err(crate::error::VaultError::InvalidFormat(
+                    "WebDAV URL must use HTTPS for secure transport outside localhost".into(),
+                ))
+            }
+        }
+        _ => Err(crate::error::VaultError::InvalidFormat(
+            "WebDAV URL must start with https:// (or http:// for localhost testing)".into(),
+        )),
+    }
 }
 
 /// Query the current ETag of a remote WebDAV resource using HEAD or PROPFIND (RFC 4918).
@@ -666,7 +671,7 @@ pub fn run_p2p_sync_listener(
         ));
     }
 
-    // Step 1b: Mutual challenge-response HMAC authentication
+    // Step 1b: Mutual challenge-response HMAC authentication (Client-First Verification)
     let mut server_challenge = [0u8; 32];
     rand::rng().fill(&mut server_challenge);
 
@@ -679,13 +684,6 @@ pub fn run_p2p_sync_listener(
     stream.read_exact(&mut client_challenge)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
-    // Compute signatures
-    let sig_to_send = compute_hmac(&client_challenge, &subkeys.hmac_key);
-
-    // Send server signature
-    stream.write_all(&sig_to_send)
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
-
     // Read client signature
     let mut client_sig = [0u8; 64];
     if let Err(e) = stream.read_exact(&mut client_sig) {
@@ -695,11 +693,16 @@ pub fn run_p2p_sync_listener(
         return Err(crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)));
     }
 
-    // Verify client signature
+    // Verify client signature BEFORE generating or sending any server signature
     if client_sig == P2P_AUTH_FAILED_SIG || verify_hmac(&server_challenge, &client_sig, &subkeys.hmac_key).is_err() {
         let _ = stream.write_all(b"UNAUTHOR");
         return Err(crate::error::VaultError::DecryptionError("Peer verification failed: Master password mismatch".into()));
     }
+
+    // Compute and send server signature only after client has successfully authenticated
+    let sig_to_send = compute_hmac(&client_challenge, &subkeys.hmac_key);
+    stream.write_all(&sig_to_send)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
     // Acknowledge mutual authentication success
     stream.write_all(b"AUTH__OK")
@@ -800,7 +803,7 @@ pub fn run_p2p_sync_client(
         ));
     }
 
-    // Step 1b: Mutual challenge-response HMAC authentication
+    // Step 1b: Mutual challenge-response HMAC authentication (Client-First Verification)
     let mut server_challenge = [0u8; 32];
     stream.read_exact(&mut server_challenge)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
@@ -818,21 +821,29 @@ pub fn run_p2p_sync_client(
     stream.write_all(&client_challenge)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
+    // Send client signature over server_challenge
+    let client_sig = compute_hmac(&server_challenge, &subkeys.hmac_key);
+    stream.write_all(&client_sig)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
+
     // Read server signature
     let mut server_sig = [0u8; 64];
-    stream.read_exact(&mut server_sig)
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
+    if let Err(e) = stream.read_exact(&mut server_sig) {
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            return Err(crate::error::VaultError::DecryptionError("Server rejected client authentication: Master password mismatch".into()));
+        }
+        return Err(crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)));
+    }
+
+    if &server_sig[..8] == b"UNAUTHOR" {
+        return Err(crate::error::VaultError::DecryptionError("Server rejected client authentication: Master password mismatch".into()));
+    }
 
     // Verify server signature
     if verify_hmac(&client_challenge, &server_sig, &subkeys.hmac_key).is_err() {
         let _ = stream.write_all(&P2P_AUTH_FAILED_SIG);
         return Err(crate::error::VaultError::DecryptionError("Server verification failed: Master password mismatch".into()));
     }
-
-    // Send client signature
-    let client_sig = compute_hmac(&server_challenge, &subkeys.hmac_key);
-    stream.write_all(&client_sig)
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
     // Await server authentication acknowledgment before transmitting database
     let mut auth_ack = [0u8; 8];
@@ -1338,7 +1349,12 @@ mod tests {
         assert!(validate_webdav_url("https://dav.example.com/vault.vdb").is_ok());
         assert!(validate_webdav_url("http://localhost:8080/vault.vdb").is_ok());
         assert!(validate_webdav_url("http://127.0.0.1:8080/vault.vdb").is_ok());
+        assert!(validate_webdav_url("http://[::1]:8080/vault.vdb").is_ok());
 
+        // Adversarial userinfo and spoofing bypass attempts must be rejected
+        assert!(validate_webdav_url("http://localhost:80@attacker.com/vault.vdb").is_err());
+        assert!(validate_webdav_url("http://attacker.com#localhost").is_err());
+        assert!(validate_webdav_url("http://attacker.com/localhost").is_err());
         assert!(validate_webdav_url("http://unencrypted.com/vault.vdb").is_err());
         assert!(validate_webdav_url("ftp://server.com/vault.vdb").is_err());
         assert!(validate_webdav_url("").is_err());

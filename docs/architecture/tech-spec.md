@@ -66,7 +66,7 @@
 Yntra Vault features a zero-dependency, type-safe internationalization engine (`src/i18n/`):
 
 - **24 Supported Locales**: English (`en`), Swedish (`sv`), Danish (`da`), Norwegian (`no`), Finnish (`fi`), German (`de`), Dutch (`nl`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Polish (`pl`), Czech (`cs`), Russian (`ru`), Ukrainian (`uk`), Turkish (`tr`), Greek (`el`), Hebrew (`he`), Arabic (`ar`), Hindi (`hi`), Japanese (`ja`), Korean (`ko`), Simplified Chinese (`zh-CN`), Traditional Chinese (`zh-TW`).
-- **Complete Coverage Invariant**: Every locale provides exact 1:1 coverage with `en` (777 translation keys), enforced via `translations.test.ts`.
+- **Complete Coverage Invariant**: Every locale provides exact 1:1 coverage with `en` (824 translation keys), enforced via `translations.test.ts`.
 - **Right-To-Left (RTL)**: Dynamic document directionality (`dir="rtl"`) automatically toggled for Arabic and Hebrew locales.
 - **Dynamic Font & Locale Switching**: Instant UI re-render without app reloading via `LanguageContext`.
 
@@ -77,8 +77,13 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 ### WebDAV Cloud Sync
 - **Optimistic Concurrency**: Uses HTTP `If-Match` headers with normalized ETags (RFC 7232).
 - **Conflict Resolution**: On HTTP 412 (Precondition Failed), executes up to 3 optimistic retry attempts: fetches remote ETag, downloads remote payload, performs item-level 3-way merge with tombstone preservation, saves locally, and retries conditional PUT.
-- **Transport Security**: Enforces HTTPS scheme for non-localhost endpoints (`http://` allowed only for `localhost`/`127.0.0.1`).
-- **Memory Protection**: Zeroes intermediate decrypted remote vault buffers using `Zeroize` after 3-way merge deserialization.
+- **Transport Security**: Enforces HTTPS scheme for non-localhost endpoints via strict `url::Url` host validation (`http://` allowed strictly for loopback hosts: `localhost`, `127.0.0.1`, `[::1]`).
+- **Memory Protection**: Decrypted payload buffers zeroed using `Zeroize`. Remote credentials held strictly in volatile in-memory registry (`sessionSecrets.ts`), wiped upon vault lock.
+
+### Peer-to-Peer (P2P) Direct Sync
+- **Mutual Authentication**: Handshake uses client-first challenge-response verification via `P2pAuthKey` (derived from master password via HKDF-SHA512).
+- **Oracle Prevention**: The listening device requires the connecting client to prove identity via HMAC signature over `server_challenge` before transmitting any server signature or vault payload.
+- **Payload AEAD**: Transferred vault archives are encrypted end-to-end with XChaCha20-Poly1305.
 
 ### Shared Components
 
@@ -179,3 +184,12 @@ System preference detection via `matchMedia('prefers-color-scheme: dark')`. All 
 - **Entry list**: lightweight `EntryPreview` (no decryption until selected)
 - **Trash cleanup**: automatic 30-day expiry on vault save
 - **Vault payload**: MessagePack (~20% larger than bincode, 5x smaller than JSON)
+
+---
+
+## Frontend Lifecycle Invariants
+
+- **Rules of Hooks**: Zero early returns prior to hook declarations. All hooks execute unconditionally at top-level on every render.
+- **Lexical Scoping**: Functions and callbacks are declared prior to reference in effects or other hooks to prevent Temporal Dead Zone (TDZ) runtime errors.
+- **Conditional Mounting**: Components that require platform runtime availability (e.g. Tauri-only features like `SmartLoginButton`) are conditionally mounted from the parent rather than altering hook counts internally.
+

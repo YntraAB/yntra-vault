@@ -373,6 +373,17 @@ pub async fn get_favicon(domain: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+pub async fn set_external_favicons_enabled(enabled: bool) -> Result<(), String> {
+    yntra_vault_core::services::favicon::set_external_favicons_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn is_external_favicons_enabled() -> Result<bool, String> {
+    Ok(yntra_vault_core::services::favicon::is_external_favicons_enabled())
+}
+
+#[tauri::command]
 pub async fn export_vault(
     dest_path: String,
     state: State<'_, AppState>,

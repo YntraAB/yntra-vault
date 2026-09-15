@@ -7,12 +7,15 @@
 import { invokeIpc as invoke } from '@/types/ipc';
 import type {
   YntraVaultBackend,
+  EmergencyKit,
+  EmergencyKitAudit,
   VaultInfo,
   EntryPreview,
   DecryptedEntry,
   NewEntry,
   UpdateEntry,
   TrashedEntryPreview,
+  VaultStorageMetrics,
   DecryptedHistoryItem,
   TotpCode,
   TotpConfig,
@@ -176,6 +179,18 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('empty_trash');
   }
 
+  async purgeExpiredTrash(maxAgeDays?: number): Promise<number> {
+    return invoke('purge_expired_trash', { maxAgeDays });
+  }
+
+  async getStorageMetrics(): Promise<VaultStorageMetrics> {
+    return invoke('get_storage_metrics');
+  }
+
+  async compactVault(): Promise<VaultStorageMetrics> {
+    return invoke('compact_vault');
+  }
+
   // ─── Password History ───────────────────────────────────────────
 
   async getPasswordHistory(entryId: string): Promise<DecryptedHistoryItem[]> {
@@ -300,6 +315,14 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('get_favicon', { domain });
   }
 
+  async setExternalFaviconsEnabled(enabled: boolean): Promise<void> {
+    return invoke('set_external_favicons_enabled', { enabled });
+  }
+
+  async isExternalFaviconsEnabled(): Promise<boolean> {
+    return invoke('is_external_favicons_enabled');
+  }
+
   async setMinimizeToTray(enabled: boolean): Promise<void> {
     return invoke('set_minimize_to_tray', { enabled });
   }
@@ -350,6 +373,18 @@ export class TauriBackend implements YntraVaultBackend {
 
   async reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string> {
     return invoke('reconstruct_master_password_hash', { shareA, shareB });
+  }
+
+  async generateEmergencyKit(masterPassword: string): Promise<EmergencyKit> {
+    return invoke('generate_emergency_kit', { masterPassword });
+  }
+
+  async getEmergencyKitAudit(): Promise<EmergencyKitAudit | null> {
+    return invoke('get_emergency_kit_audit');
+  }
+
+  async resetEmergencyKitAudit(): Promise<void> {
+    return invoke('reset_emergency_kit_audit');
   }
 
   // Export & Import

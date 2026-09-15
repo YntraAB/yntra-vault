@@ -34,6 +34,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   webdavUser: '',
   webdavAutoSync: false,
   p2pAddr: '127.0.0.1:5322',
+  externalFaviconsEnabled: true,
+  operationMode: 'standard',
 };
 
 export interface SettingsContextType {
@@ -119,6 +121,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       }).catch(() => {});
     }
   }, [settings.lockOnSystemLock]);
+
+  // Sync externalFaviconsEnabled setting to backend
+  useEffect(() => {
+    if (isTauri()) {
+      getBackend().then((b) => {
+        b.setExternalFaviconsEnabled(settings.externalFaviconsEnabled !== false).catch((err) => {
+          console.error('Failed to sync externalFaviconsEnabled setting:', err);
+        });
+      }).catch(() => {});
+    }
+  }, [settings.externalFaviconsEnabled]);
 
   const value = useMemo(() => ({ settings, updateSettings }), [settings, updateSettings]);
 

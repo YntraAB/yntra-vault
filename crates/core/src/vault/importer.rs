@@ -1000,26 +1000,45 @@ impl HeaderIndex {
     }
 }
 
+/// Unescape standard XML entities (&amp;, &lt;, &gt;, &quot;, &apos;).
+fn unescape_xml(input: &str) -> String {
+    input
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
 /// Helper function to extract `<Key Name="key">val</Key>` or `<key>val</key>` from KeePass XML string.
 fn extract_xml_key_value(block: &str, key: &str) -> String {
     let key_pattern = format!("<Key>{}</Key>", key);
     if let Some(pos) = block.find(&key_pattern) {
         let rest = &block[pos + key_pattern.len()..];
-        if let Some(v_start) = rest.find("<Value>") {
-            let val_rest = &rest[v_start + 7..];
-            if let Some(v_end) = val_rest.find("</Value>") {
-                return val_rest[..v_end].trim().to_string();
+        // Match <Value> or <Value attribute="value">
+        if let Some(v_tag_start) = rest.find("<Value") {
+            let after_v = &rest[v_tag_start + 6..];
+            if let Some(close_bracket) = after_v.find('>') {
+                let val_rest = &after_v[close_bracket + 1..];
+                if let Some(v_end) = val_rest.find("</Value>") {
+                    return unescape_xml(val_rest[..v_end].trim());
+                }
             }
         }
     }
 
-    // Direct tag fallback: <Key>Value</Key>
-    let direct_tag = format!("<{}>", key);
+    // Direct tag fallback: <Key>Value</Key> or <Key attr="...">Value</Key>
+    let direct_tag = format!("<{}", key);
     let direct_end = format!("</{}>", key);
     if let Some(s) = block.find(&direct_tag) {
-        let rest = &block[s + direct_tag.len()..];
-        if let Some(e) = rest.find(&direct_end) {
-            return rest[..e].trim().to_string();
+        let after_tag = &block[s + direct_tag.len()..];
+        if after_tag.starts_with('>') || after_tag.starts_with(' ') {
+            if let Some(close_bracket) = after_tag.find('>') {
+                let val_rest = &after_tag[close_bracket + 1..];
+                if let Some(e) = val_rest.find(&direct_end) {
+                    return unescape_xml(val_rest[..e].trim());
+                }
+            }
         }
     }
 
@@ -1082,5 +1101,41 @@ mod tests {
     fn test_totp_uri_cleaner() {
         assert_eq!(clean_totp_secret("otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP&issuer=Test"), Some("JBSWY3DPEHPK3PXP".to_string()));
         assert_eq!(clean_totp_secret("jbsw y3dp-ehpk 3pxp"), Some("JBSWY3DPEHPK3PXP".to_string()));
+    }
+
+    #[test]
+    fn test_keepass_xml_protected_in_memory_and_entity_unescape() {
+        let xml_data = r#"<KeePassFile>
+            <Root>
+                <Group>
+                    <Entry>
+                        <String>
+                            <Key>Title</Key>
+                            <Value>Banking &amp; Finance</Value>
+                        </String>
+                        <String>
+                            <Key>UserName</Key>
+                            <Value>john_doe</Value>
+                        </String>
+                        <String>
+                            <Key>Password</Key>
+                            <Value ProtectInMemory="True">P@ss&amp;w0rd&lt;123&gt;</Value>
+                        </String>
+                        <String>
+                            <Key>URL</Key>
+                            <Value>https://bank.example.com</Value>
+                        </String>
+                    </Entry>
+                </Group>
+            </Root>
+        </KeePassFile>"#;
+
+        let res = Importer::parse_str(xml_data, ImportFormat::KeepassXml).unwrap();
+        assert_eq!(res.total_found, 1);
+        let entry = &res.entries[0];
+        assert_eq!(entry.title, "Banking & Finance");
+        assert_eq!(entry.username, "john_doe");
+        assert_eq!(entry.password, "P@ss&w0rd<123>");
+        assert_eq!(entry.url, "https://bank.example.com");
     }
 }

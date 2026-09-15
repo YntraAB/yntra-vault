@@ -4,6 +4,7 @@
 //! missing 2FA on critical services, and transient memory zeroization.
 
 use chrono::Utc;
+use rand::RngCore;
 use std::collections::HashMap;
 use uuid::Uuid;
 use zeroize::Zeroize;
@@ -12,6 +13,7 @@ use crate::error::VaultError;
 use crate::vault::manager::VaultManager;
 use crate::vault::types::{
     BreachStatus, IssueSeverity, IssueType, SecurityAudit, SecurityIssue, StrengthLevel,
+    StrengthScore,
 };
 
 /// Helper to check if a service domain is known to support 2FA.
@@ -43,29 +45,54 @@ impl VaultManager {
 
         let total = self.data.entries.len();
 
-        // Decrypt all passwords for reuse detection and on-the-fly strength checking
-        let mut plain_passwords = Vec::with_capacity(total);
+        // Ephemeral keyed hash map for zero-plaintext password reuse detection
+        let mut ephemeral_key = [0u8; 32];
+        rand::rng().fill_bytes(&mut ephemeral_key);
+        let mut hash_map: HashMap<[u8; 32], Vec<(Uuid, String)>> = HashMap::new();
+
+        struct EntryAuditMeta {
+            blind_hash: Option<[u8; 32]>,
+            strength: Option<StrengthScore>,
+        }
+
+        let mut audit_items: Vec<EntryAuditMeta> = Vec::with_capacity(total);
+
         for entry in &self.data.entries {
             let pwd_bytes =
                 Self::decrypt_entry_field(&entry.encrypted_password, &keys.entry_key, &entry.id, "password")?;
-            let pwd = String::from_utf8(pwd_bytes.to_vec())
-                .map_err(|e| VaultError::DecryptionError(e.to_string()))?;
-            plain_passwords.push((entry.id, entry.title.clone(), pwd));
-        }
 
-        // Group non-empty passwords to identify reused passwords
-        let mut pwd_map: HashMap<String, Vec<(Uuid, String)>> = HashMap::new();
-        for (id, title, pwd) in &plain_passwords {
-            if !pwd.is_empty() {
-                pwd_map
-                    .entry(pwd.clone())
+            if !pwd_bytes.is_empty() {
+                let blind_hash = *blake3::keyed_hash(&ephemeral_key, &pwd_bytes).as_bytes();
+                hash_map
+                    .entry(blind_hash)
                     .or_default()
-                    .push((*id, title.clone()));
+                    .push((entry.id, entry.title.clone()));
+
+                let strength = match &entry.strength_score {
+                    Some(score) => score.clone(),
+                    None => {
+                        let pwd_str = zeroize::Zeroizing::new(
+                            String::from_utf8(pwd_bytes.to_vec())
+                                .map_err(|e| VaultError::DecryptionError(e.to_string()))?,
+                        );
+                        crate::breach::strength::analyze_password(&pwd_str)
+                    }
+                };
+
+                audit_items.push(EntryAuditMeta {
+                    blind_hash: Some(blind_hash),
+                    strength: Some(strength),
+                });
+            } else {
+                audit_items.push(EntryAuditMeta {
+                    blind_hash: None,
+                    strength: None,
+                });
             }
         }
 
         for (i, entry) in self.data.entries.iter().enumerate() {
-            let (_, _, pwd) = &plain_passwords[i];
+            let item = &audit_items[i];
 
             // Breach status
             if let BreachStatus::Breached { breach_count, .. } = &entry.breach_status {
@@ -80,29 +107,26 @@ impl VaultManager {
             }
 
             // Perform password strength, reuse, and age audits only if password is non-empty
-            if !pwd.is_empty() {
+            if let Some(blind_hash) = &item.blind_hash {
                 // Weak password (fallback to real-time calculation if None)
-                let score = match &entry.strength_score {
-                    Some(score) => score.clone(),
-                    None => crate::breach::strength::analyze_password(pwd),
-                };
-
-                if score.level <= StrengthLevel::Weak {
-                    weak += 1;
-                    issues.push(SecurityIssue {
-                        entry_id: entry.id,
-                        entry_title: entry.title.clone(),
-                        issue_type: IssueType::WeakPassword,
-                        severity: IssueSeverity::Warning,
-                        description: format!(
-                            "Password strength: {:?} ({:.0} bits entropy)",
-                            score.level, score.entropy_bits
-                        ),
-                    });
+                if let Some(score) = &item.strength {
+                    if score.level <= StrengthLevel::Weak {
+                        weak += 1;
+                        issues.push(SecurityIssue {
+                            entry_id: entry.id,
+                            entry_title: entry.title.clone(),
+                            issue_type: IssueType::WeakPassword,
+                            severity: IssueSeverity::Warning,
+                            description: format!(
+                                "Password strength: {:?} ({:.0} bits entropy)",
+                                score.level, score.entropy_bits
+                            ),
+                        });
+                    }
                 }
 
                 // Reused password
-                if let Some(duplicates) = pwd_map.get(pwd) {
+                if let Some(duplicates) = hash_map.get(blind_hash) {
                     if duplicates.len() > 1 {
                         reused += 1;
                         let other_services: Vec<String> = duplicates
@@ -147,13 +171,8 @@ impl VaultManager {
             }
         }
 
-        // Zeroize decrypted passwords in memory for security
-        for (_, _, mut pwd) in plain_passwords {
-            pwd.zeroize();
-        }
-        for (mut pwd, _) in pwd_map {
-            pwd.zeroize();
-        }
+        // Zeroize ephemeral key
+        ephemeral_key.zeroize();
 
         // Calculate health score (0-100), clamping penalty to prevent u8 overflow
         let raw_penalty = breached * 20 + weak * 10 + reused * 15 + old * 2 + no_2fa * 5;

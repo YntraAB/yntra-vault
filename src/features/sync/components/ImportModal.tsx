@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -44,6 +44,21 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
 
   const [importedCount, setImportedCount] = useState<number>(0);
 
+  // Reset modal state on open
+  const handleReset = useCallback(() => {
+    setStep('brand');
+    setPreviewResult(null);
+    setSelectedEntries({});
+    setSearchQuery('');
+    setImportedCount(0);
+    setIsDragging(false);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    handleReset();
+    onClose();
+  }, [handleReset, onClose]);
+
   // Close on Escape key press
   useEffect(() => {
     if (!isOpen) return;
@@ -54,24 +69,45 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, handleClose]);
 
-  // Reset modal state on open
-  const handleReset = () => {
-    setStep('brand');
-    setPreviewResult(null);
-    setSelectedEntries({});
-    setSearchQuery('');
-    setImportedCount(0);
-    setIsDragging(false);
-  };
+  const applyPreviewResult = useCallback((res: ImportPreviewResult) => {
+    setPreviewResult(res);
+    const initSelected: Record<number, boolean> = {};
+    res.entries.forEach((_, idx) => {
+      initSelected[idx] = true;
+    });
+    setSelectedEntries(initSelected);
+    setStep('preview');
+  }, []);
 
-  const handleClose = () => {
-    handleReset();
-    onClose();
-  };
+  const parseFile = useCallback(async (path: string) => {
+    if (!backend) return;
+    setParsing(true);
+    try {
+      const res = await backend.parseImportFile(path, selectedBrand.supportedFormatKey);
+      applyPreviewResult(res);
+    } catch (err) {
+      addToast({ message: t('toast.parse_failed', { err: String(err) }), type: 'error' });
+    } finally {
+      setParsing(false);
+    }
+  }, [addToast, applyPreviewResult, backend, selectedBrand.supportedFormatKey, t]);
 
-  const handleSelectFile = async () => {
+  const parseContent = useCallback(async (content: string) => {
+    if (!backend) return;
+    setParsing(true);
+    try {
+      const res = await backend.parseImportContent(content, selectedBrand.supportedFormatKey);
+      applyPreviewResult(res);
+    } catch (err) {
+      addToast({ message: t('toast.parse_failed', { err: String(err) }), type: 'error' });
+    } finally {
+      setParsing(false);
+    }
+  }, [addToast, applyPreviewResult, backend, selectedBrand.supportedFormatKey, t]);
+
+  const handleSelectFile = useCallback(async () => {
     try {
       const selected = await openFileDialog({
         multiple: false,
@@ -92,43 +128,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
     } catch (err) {
       console.error('File dialog error:', err);
     }
-  };
-
-  const parseFile = async (path: string) => {
-    if (!backend) return;
-    setParsing(true);
-    try {
-      const res = await backend.parseImportFile(path, selectedBrand.supportedFormatKey);
-      applyPreviewResult(res);
-    } catch (err) {
-      addToast({ message: t('toast.parse_failed', { err: String(err) }), type: 'error' });
-    } finally {
-      setParsing(false);
-    }
-  };
-
-  const parseContent = async (content: string) => {
-    if (!backend) return;
-    setParsing(true);
-    try {
-      const res = await backend.parseImportContent(content, selectedBrand.supportedFormatKey);
-      applyPreviewResult(res);
-    } catch (err) {
-      addToast({ message: t('toast.parse_failed', { err: String(err) }), type: 'error' });
-    } finally {
-      setParsing(false);
-    }
-  };
-
-  const applyPreviewResult = (res: ImportPreviewResult) => {
-    setPreviewResult(res);
-    const initSelected: Record<number, boolean> = {};
-    res.entries.forEach((_, idx) => {
-      initSelected[idx] = true;
-    });
-    setSelectedEntries(initSelected);
-    setStep('preview');
-  };
+  }, [parseFile]);
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();

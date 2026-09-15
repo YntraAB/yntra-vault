@@ -184,9 +184,14 @@ fn generate_random(options: &GeneratorOptions) -> String {
         password[pos] = digit_chars[rng.random_range(0..digit_chars.len())];
         pos += 1;
     }
-    if options.symbols && !password.iter().any(|c| SYMBOLS.contains(*c)) && pos < options.length {
-        let sym_chars: Vec<char> = SYMBOLS.chars().collect();
-        password[pos] = sym_chars[rng.random_range(0..sym_chars.len())];
+    if options.symbols && pos < options.length {
+        let sym_source = options.custom_symbols.as_deref().unwrap_or(SYMBOLS);
+        if !password.iter().any(|c| sym_source.contains(*c)) {
+            let sym_chars: Vec<char> = sym_source.chars().collect();
+            if !sym_chars.is_empty() {
+                password[pos] = sym_chars[rng.random_range(0..sym_chars.len())];
+            }
+        }
     }
 
     // Fisher-Yates shuffle
@@ -323,6 +328,28 @@ mod tests {
         assert!(!pw.contains('l'));
         assert!(!pw.contains('1'));
         assert!(!pw.contains('I'));
+    }
+
+    #[test]
+    fn test_custom_symbols() {
+        let custom = "!@#";
+        let options = GeneratorOptions {
+            mode: GeneratorMode::Random,
+            length: 100,
+            symbols: true,
+            custom_symbols: Some(custom.to_string()),
+            uppercase: false,
+            lowercase: true,
+            digits: false,
+            ..Default::default()
+        };
+
+        let pw = generate_password(&options);
+        assert!(pw.chars().any(|c| custom.contains(c)));
+        // Must only contain lowercase letters and custom symbols (no standard symbols outside custom)
+        for c in pw.chars() {
+            assert!(c.is_ascii_lowercase() || custom.contains(c), "Unexpected char: {}", c);
+        }
     }
 }
 

@@ -75,17 +75,11 @@ export default function Login() {
     }
 
     if (currentVault?.path) {
-      // Auto-select and populate saved Key File if previously used for this vault
+      // Security: Do not auto-persist or auto-load keyfile paths to protect 2FA factor isolation.
+      // Purge any legacy stored paths.
       try {
-        const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
-        const savedKf = savedKeyFiles[currentVault.path] || (currentVault as any).keyFilePath;
-        if (savedKf) {
-          setUseKeyFile(true);
-          setKeyFilePath(savedKf);
-        }
-      } catch (e) {
-        console.error('Failed to load key file preference:', e);
-      }
+        localStorage.removeItem('yntra-vault-keyfiles');
+      } catch {}
 
       getBackend().then(async (backend) => {
         try {
@@ -182,6 +176,77 @@ export default function Login() {
     }
   }, [activeView, biometricAvailable, handleUnlockBiometric, loading]);
 
+  const handleHardwareUnlock = useCallback(async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setError('');
+    if (isLockedOut) {
+      setError(`Too many attempts. Try again in ${lockoutRemaining}s`);
+      return;
+    }
+
+    if (!password) {
+      setError(t('login.err_enter_password') || 'Please enter your master password');
+      inputRef.current?.focus();
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (isTauri() && currentVault) {
+        const backend = await getBackend();
+        const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
+
+        // Retrieve persistent challenge salt and protocol from vault file header
+        const challInfo = await backend.getHardware2FaChallenge(currentVault.path);
+        if (!challInfo || !challInfo.enabled) {
+          throw new Error('Hardware 2FA header not found in vault file');
+        }
+
+        const hwResp = await backend.performHardware2FaChallenge(
+          challInfo.protocol,
+          challInfo.challenge_salt,
+          challInfo.credential_id?.length ? challInfo.credential_id : undefined,
+        );
+
+        const info = await backend.openVaultWithHardware2Fa(currentVault.path, password, kf, hwResp);
+
+        // Save to recent vaults list & update search paths using internal ID
+        const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+        const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+        const newVault = { id: info.id, name: info.name, path: info.path };
+        localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+
+        setCurrentVault(newVault);
+        setIsLocked(false);
+        setPassword('');
+        setAttempts(0);
+        navigate('/app');
+      }
+    } catch (err: any) {
+      console.error('Hardware unlock error:', err);
+      const nextAttempts = attempts + 1;
+      setAttempts(nextAttempts);
+
+      if (nextAttempts >= MAX_ATTEMPTS) {
+        const delay = LOCKOUT_DELAYS[Math.min(nextAttempts, LOCKOUT_DELAYS.length - 1)];
+        setLockedUntil(Date.now() + delay);
+        setError(`Too many failed attempts. Locked for ${delay / 1000}s`);
+      } else {
+        const errMsg = err?.toString() || 'Hardware key authentication failed';
+        if (errMsg.includes('InvalidPassword')) {
+          setError('Incorrect master password');
+        } else if (errMsg.includes('Hardware2FaAuthFailed')) {
+          setError('Security key authentication failed. Touch rejected or timed out.');
+        } else {
+          setError(errMsg);
+        }
+      }
+      triggerShake();
+    } finally {
+      setLoading(false);
+    }
+  }, [password, isLockedOut, lockoutRemaining, currentVault, useKeyFile, keyFilePath, attempts, triggerShake, setCurrentVault, setIsLocked, navigate, t]);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -222,24 +287,10 @@ export default function Login() {
           info = { id: currentVault?.id || crypto.randomUUID(), name: currentVault?.name || 'Vault', path: currentVault?.path || '' };
         }
 
-        // Save key file path preference for this vault
-        const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
-        try {
-          const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
-          if (kf) {
-            savedKeyFiles[info.path] = kf;
-          } else {
-            delete savedKeyFiles[info.path];
-          }
-          localStorage.setItem('yntra-vault-keyfiles', JSON.stringify(savedKeyFiles));
-        } catch (e) {
-          console.error('Failed to save key file preference:', e);
-        }
-
         // Save to recent vaults list & update search paths using internal ID
         const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
         const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
-        const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
+        const newVault = { id: info.id, name: info.name, path: info.path };
         localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
         // Update currentVault state in global context with real ID & path
@@ -286,91 +337,8 @@ export default function Login() {
         setLoading(false);
       }
     },
-    [password, useKeyFile, keyFilePath, hardware2FaRequired, biometricAvailable, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining]
+    [password, useKeyFile, keyFilePath, hardware2FaRequired, handleHardwareUnlock, biometricAvailable, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining, t, triggerShake]
   );
-
-  const handleHardwareUnlock = useCallback(async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setError('');
-    if (isLockedOut) {
-      setError(`Too many attempts. Try again in ${lockoutRemaining}s`);
-      return;
-    }
-
-    if (!password) {
-      setError(t('login.err_enter_password') || 'Please enter your master password');
-      inputRef.current?.focus();
-      return;
-    }
-
-    setLoading(true);
-    try {
-      if (isTauri() && currentVault) {
-        const backend = await getBackend();
-        const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
-
-        // Retrieve persistent challenge salt and protocol from vault file header
-        const challInfo = await backend.getHardware2FaChallenge(currentVault.path);
-        if (!challInfo || !challInfo.enabled) {
-          throw new Error('Hardware 2FA header not found in vault file');
-        }
-
-        const hwResp = await backend.performHardware2FaChallenge(
-          challInfo.protocol,
-          challInfo.challenge_salt,
-          challInfo.credential_id?.length ? challInfo.credential_id : undefined,
-        );
-
-        const info = await backend.openVaultWithHardware2Fa(currentVault.path, password, kf, hwResp);
-
-        try {
-          const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
-          if (kf) {
-            savedKeyFiles[info.path] = kf;
-          } else {
-            delete savedKeyFiles[info.path];
-          }
-          localStorage.setItem('yntra-vault-keyfiles', JSON.stringify(savedKeyFiles));
-        } catch (e) {
-          console.error('Failed to save key file preference:', e);
-        }
-
-        // Save to recent vaults list & update search paths using internal ID
-        const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
-        const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
-        const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
-        localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
-
-        setCurrentVault(newVault);
-        setIsLocked(false);
-        setPassword('');
-        setAttempts(0);
-        navigate('/app');
-      }
-    } catch (err: any) {
-      console.error('Hardware unlock error:', err);
-      const nextAttempts = attempts + 1;
-      setAttempts(nextAttempts);
-
-      if (nextAttempts >= MAX_ATTEMPTS) {
-        const delay = LOCKOUT_DELAYS[Math.min(nextAttempts, LOCKOUT_DELAYS.length - 1)];
-        setLockedUntil(Date.now() + delay);
-        setError(`Too many failed attempts. Locked for ${delay / 1000}s`);
-      } else {
-        const errMsg = err?.toString() || 'Hardware key authentication failed';
-        if (errMsg.includes('InvalidPassword')) {
-          setError('Incorrect master password');
-        } else if (errMsg.includes('Hardware2FaAuthFailed')) {
-          setError('Security key authentication failed. Touch rejected or timed out.');
-        } else {
-          setError(errMsg);
-        }
-      }
-      triggerShake();
-    } finally {
-      setLoading(false);
-    }
-  }, [password, isLockedOut, lockoutRemaining, currentVault, useKeyFile, keyFilePath, attempts, triggerShake, setCurrentVault, setIsLocked, navigate, t]);
 
   const handleEmergencyRecovery = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -416,10 +384,9 @@ export default function Login() {
         info = { id: currentVault?.id || crypto.randomUUID(), name: currentVault?.name || 'Vault', path: currentVault?.path || '' };
       }
 
-      const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
       const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
       const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
-      const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
+      const newVault = { id: info.id, name: info.name, path: info.path };
       localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
       setCurrentVault(newVault);

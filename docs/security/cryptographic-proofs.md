@@ -54,7 +54,7 @@ Where domain info strings are defined as:
 * `yntra-vault-encryption-key-v1`: Vault-level outer payload envelope
 * `yntra-vault-entry-encryption-key-v1`: Per-entry field-level encryption
 * `yntra-vault-hmac-integrity-key-v1`: Legacy HMAC and P2P session authentication
-* `yntra-vault-search-index-key-v1`: Blind search indexing
+* `yntra-vault-trigram-search-key-v1`: Blind trigram search indexing
 
 **Security Invariant (Domain Separation)**:
 Under the standard PRF assumption of HMAC-SHA512, compromise of any single subkey (e.g. `SearchKey` or an individual `EntryKey`) yields zero information regarding `VaultKey`, other subkeys, or the original master password.
@@ -177,7 +177,34 @@ When testing passwords against public breach databases, Yntra Vault implements s
 5. **Local Matching**: The client evaluates whether $H_{\text{suffix}}$ exists within the returned set entirely within local memory.
 
 **Mathematical Privacy Guarantee**:
-The remote API receives $16^5 = 1{,}048{,}576$ possible prefixes. The server cannot determine which password within that prefix cluster was tested, and the complete hash never leaves the local machine.
+### 5.3 Peer-to-Peer Mutual Authentication Protocol
+To prevent unauthenticated password oracles during local network synchronization, the P2P sync protocol implements strict client-first verification:
+1. Listener generates a 32-byte CSPRNG challenge (`server_challenge`) and transmits it to the peer.
+2. Client computes `client_sig = HMAC-SHA512(server_challenge, hmac_key)` and transmits `(client_challenge, client_sig)`.
+3. Listener verifies `client_sig` using constant-time verification *before* computing or transmitting any response. Connections failing verification are terminated with `UNAUTHOR`.
+4. Only upon successful client verification does the listener compute `server_sig = HMAC-SHA512(client_challenge, hmac_key)` and return authentication confirmation.
+
+### 5.4 Keyed HMAC Emergency Kit Fingerprinting
+Master password recovery sheets include an integrity checksum and audit log fingerprint. Rather than computing an unkeyed cryptographic digest of the raw master password (which would provide an offline brute-force verification oracle if the paper sheet is compromised), the fingerprint is computed as a keyed Pseudorandom Function (PRF):
+
+$$\text{Fingerprint} = \text{Truncate}_8\left(\text{HMAC-SHA512}\left(\text{"yntra-vault-emergency-kit-audit-fingerprint-v1"}, K_{\text{hmac}}\right)\right)$$
+
+Because $K_{\text{hmac}}$ is derived through Argon2id (256MB RAM, 4 passes) and HKDF-SHA512, an attacker possessing only the printed recovery sheet cannot evaluate candidate passwords against the fingerprint without allocating full Argon2id memory per attempt, and cannot precompute rainbow tables across vaults.
+
+### 5.5 Multi-Part ccTLD & SSO Boundary Isolation (Smart Login)
+Automated credential autofill enforces strict effective top-level domain (`eTLD+1`) boundary isolation. Naive domain extraction splitting on the final two components collapses distinct organizations sharing a multi-part country code (e.g. `victim.co.uk` and `attacker.co.uk` collapsing to `co.uk`), allowing cross-tenant credential injection. Yntra Vault's `base_domain` incorporates an explicit list of multi-part ccTLD public suffixes and ccTLD heuristics to guarantee that `eTLD+1` matches exactly before credentials can be populated. Furthermore, SSO auth domain pairings (`AUTH_DOMAINS`) enforce strict boundary and dot-prefix matching.
+
+### 5.6 CSV Formula Injection Sanitization (CWE-1236)
+Decrypted vault exports to CSV format (`export_csv`) neutralize spreadsheet formula injection / DDE attacks. Any field whose initial character or trimmed character starts with `=`, `+`, `-`, `@`, `\t`, or `\r` is prepended with a single quote (`'`), instructing spreadsheet engines (Excel, LibreOffice Calc) to interpret the cell strictly as literal text.
+
+### 5.7 Settings & Sensitive State Zeroization on Vault Lock
+When `VaultManager::lock()` is called, `self.data.settings` is reset to `Default::default()`, actively purging WebDAV sync credentials, remote endpoints, and emergency kit audit logs from volatile memory alongside cryptographic keys, entries, tags, and search indices.
+
+### 5.8 Keyfile 2FA Factor Isolation
+Keyfiles represent a distinct "something you have" authentication factor. To prevent the physical location of keyfiles from being exposed to local non-privileged processes or web storage dumps, client applications are forbidden from storing keyfile filesystem paths in `localStorage` (`yntra-vault-keyfiles` or inside `yntra-vault-recent-vaults`).
+
+### 5.9 Atomic Key-Wrap File Creation
+Linux fallback key wrapping (`linux_get_or_create_wrap_key`) requires valid `XDG_CONFIG_HOME` or `HOME` directories, enforces `0o700` directory permissions, and creates the wrap key file atomically with mode `0o600` via `OpenOptionsExt::mode`, eliminating umask permission race conditions and rejecting insecure `/tmp` fallback paths.
 
 ---
 
@@ -185,12 +212,22 @@ The remote API receives $16^5 = 1{,}048{,}576$ possible prefixes. The server can
 
 | Security Property | Mechanism | File Location |
 | ----------------- | --------- | ------------- |
-| KDF Resistance | Argon2id ($m=256\text{MB}, t=4, p=4$) | `src-core/src/crypto/kdf.rs` |
-| Subkey Separation | HKDF-SHA512 with distinct info tags | `src-core/src/crypto/kdf.rs` |
-| Envelope AEAD | XChaCha20-Poly1305 + Header AAD | `src-core/src/crypto/cipher.rs` |
-| Field-Level AEAD | XChaCha20-Poly1305 / AES-256-GCM | `src-core/src/crypto/cipher.rs` |
-| RAM Locking & Canary | 3-Page `LockedBuffer` with `PAGE_NOACCESS` | `src-core/src/crypto/locked_buffer.rs` |
-| Volatile Zeroization | `ZeroizeOnDrop` + `write_volatile` | `src-core/src/crypto/mod.rs` |
-| Heap Scrambling | Ephemeral XChaCha20-Poly1305 | `src-core/src/crypto/scrambled.rs` |
-| Atomic File Writes | Temp file `write()` + atomic `rename()` | `src-core/src/vault/manager.rs` |
-| k-Anonymity Query | 5-char SHA-1 prefix over HTTPS | `src-core/src/breach/hibp.rs` |
+| KDF Resistance | Argon2id ($m=256\text{MB}, t=4, p=4$) | `crates/crypto/src/kdf.rs` |
+| Subkey Separation | HKDF-SHA512 with distinct info tags | `crates/crypto/src/kdf.rs` |
+| Envelope AEAD | XChaCha20-Poly1305 + Header AAD | `crates/crypto/src/cipher.rs` |
+| Field-Level AEAD | XChaCha20-Poly1305 / AES-256-GCM | `crates/crypto/src/cipher.rs` |
+| RAM Locking & Canary | 3-Page `LockedBuffer` with `PAGE_NOACCESS` | `crates/crypto/src/locked_buffer.rs` |
+| Volatile Zeroization | `ZeroizeOnDrop` + `write_volatile` | `crates/crypto/src/lib.rs` |
+| Heap Scrambling | Ephemeral XChaCha20-Poly1305 | `crates/crypto/src/scrambled.rs` |
+| Atomic File Writes | Temp file `write()` + atomic `rename()` | `crates/core/src/vault/manager.rs` |
+| k-Anonymity Query | 5-char SHA-1 prefix over HTTPS | `crates/core/src/services/hibp.rs` |
+| P2P Mutual Auth | Client-first challenge-response HMAC verification | `crates/core/src/services/sync/mod.rs` |
+| Hardware 2FA KEK | Argon2id 256MB key stretching | `crates/crypto/src/hardware2fa.rs` |
+| Constant-Time Verification | `subtle::ConstantTimeEq` comparisons | `crates/core/src/totp/mod.rs` & `crates/cli/src/ipc.rs` |
+| Emergency Kit PRF Checksum | Keyed HMAC over session $K_{\text{hmac}}$ | `crates/core/src/vault/emergency.rs` |
+| eTLD+1 ccTLD Isolation | Multi-part ccTLD public suffix resolution | `crates/core/src/smartlogin/discovery.rs` |
+| CDP JS String Escaping | `serde_json::to_string` DOM serialization | `crates/core/src/smartlogin/engine.rs` |
+| CSV Formula Defense | CWE-1236 quote-prefixing on export | `crates/core/src/vault/import_export.rs` |
+| Settings Memory Scrubbing | Reset `self.data.settings` on `lock()` | `crates/core/src/vault/manager.rs` |
+| Keyfile Factor Isolation | Strict exclusion from browser `localStorage` | `src/pages/Login.tsx` & `CreateVaultModal.tsx` |
+| Atomic Wrap Key Creation | `OpenOptionsExt::mode(0o600)` on Unix | `crates/crypto/src/tpm.rs` |

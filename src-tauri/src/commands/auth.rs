@@ -308,6 +308,36 @@ pub async fn reconstruct_master_password_hash(share_a: String, share_b: String) 
 }
 
 #[tauri::command]
+pub async fn generate_emergency_kit(
+    mut master_password: String,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::vault::EmergencyKit, String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    let res = manager.generate_emergency_kit(&master_password).map_err(|e| e.to_string());
+    master_password.zeroize();
+    res
+}
+
+#[tauri::command]
+pub async fn get_emergency_kit_audit(
+    state: State<'_, AppState>,
+) -> Result<Option<yntra_vault_core::vault::EmergencyKitAudit>, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    Ok(manager.get_emergency_kit_audit())
+}
+
+#[tauri::command]
+pub async fn reset_emergency_kit_audit(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.reset_emergency_kit_audit().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn create_vault_bytes(
     name: String,
     mut password_bytes: Vec<u8>,

@@ -53,22 +53,8 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
       setStep('select');
       setError(null);
       setMasterPassword('');
-      if (currentVault?.path) {
-        try {
-          const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
-          const kf = savedKeyFiles[currentVault.path] || (currentVault as any)?.keyFilePath;
-          if (kf) {
-            setUseKeyFile(true);
-            setKeyFilePath(kf);
-          } else {
-            setUseKeyFile(false);
-            setKeyFilePath('');
-          }
-        } catch {
-          setUseKeyFile(false);
-          setKeyFilePath('');
-        }
-      }
+      setUseKeyFile(false);
+      setKeyFilePath('');
     }
   }, [open, currentVault]);
 

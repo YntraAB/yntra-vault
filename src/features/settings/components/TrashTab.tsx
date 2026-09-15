@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Trash, Trash2, RotateCcw } from 'lucide-react';
+import { Trash, Trash2, RotateCcw, Archive } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEntries } from '@/contexts/EntriesContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
+import { formatBytes } from '@/lib/utils';
 import { ActionTooltip } from '@/components/ui/tooltip';
 import { SettingSection } from './SettingSection';
 import { DeleteTrashModal } from './DeleteTrashModal';
-import type { TrashedEntryPreview } from '@/lib/backend';
+import type { TrashedEntryPreview, VaultStorageMetrics } from '@/lib/backend';
 
 export function TrashTab() {
   const { currentVault } = useAuth();
@@ -19,6 +20,8 @@ export function TrashTab() {
 
   const [trashItems, setTrashItems] = useState<TrashedEntryPreview[]>([]);
   const [loadingTrash, setLoadingTrash] = useState(false);
+  const [metrics, setMetrics] = useState<VaultStorageMetrics | null>(null);
+  const [compacting, setCompacting] = useState(false);
 
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
@@ -44,9 +47,36 @@ export function TrashTab() {
     }
   }, [backend, currentVault]);
 
+  const fetchMetrics = useCallback(async () => {
+    if (!backend || !currentVault) return;
+    try {
+      const m = await backend.getStorageMetrics();
+      setMetrics(m);
+    } catch (e) {
+      console.error('Failed to fetch storage metrics:', e);
+    }
+  }, [backend, currentVault]);
+
   useEffect(() => {
     fetchTrash();
-  }, [fetchTrash]);
+    fetchMetrics();
+  }, [fetchTrash, fetchMetrics]);
+
+  const handleCompact = async () => {
+    if (!backend) return;
+    setCompacting(true);
+    try {
+      const freshMetrics = await backend.compactVault();
+      setMetrics(freshMetrics);
+      addToast({ message: t('toast.vault_compacted'), type: 'success' });
+      await fetchTrash();
+      await refreshEntries();
+    } catch (e) {
+      addToast({ message: String(e), type: 'error' });
+    } finally {
+      setCompacting(false);
+    }
+  };
 
   const handleRestore = async (id: string) => {
     if (!backend) return;
@@ -54,6 +84,7 @@ export function TrashTab() {
       await backend.restoreFromTrash(id);
       addToast({ message: t('settings.entry_restored'), type: 'success' });
       await fetchTrash();
+      await fetchMetrics();
       await refreshEntries();
     } catch (e) {
       addToast({ message: t('toast.restore_failed', { err: String(e) }), type: 'error' });
@@ -84,6 +115,7 @@ export function TrashTab() {
         await backend.emptyTrash();
         addToast({ message: t('settings.trash_emptied'), type: 'success' });
         await fetchTrash();
+        await fetchMetrics();
       } catch (e) {
         addToast({ message: t('toast.empty_trash_failed', { err: String(e) }), type: 'error' });
       }
@@ -92,6 +124,7 @@ export function TrashTab() {
         await backend.permanentDelete(deleteModalState.itemId);
         addToast({ message: t('settings.entry_deleted_permanently'), type: 'success' });
         await fetchTrash();
+        await fetchMetrics();
       } catch (e) {
         addToast({ message: t('toast.permanent_delete_failed', { err: String(e) }), type: 'error' });
       }
@@ -135,7 +168,10 @@ export function TrashTab() {
                     {item.title}
                   </span>
                   <span className="text-[10px] text-[var(--text-secondary)]">
-                    Deleted: {new Date(item.deleted_at).toLocaleDateString()} • {item.days_until_permanent} days remaining
+                    {t('settings.trash_deleted_meta', {
+                      date: new Date(item.deleted_at).toLocaleDateString(),
+                      days: item.days_until_permanent,
+                    })}
                   </span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
@@ -164,6 +200,55 @@ export function TrashTab() {
             ))}
           </div>
         )}
+      </SettingSection>
+
+      {/* Storage Footprint & Compaction */}
+      <SettingSection
+        label={t('settings.storage_compaction_title')}
+        tooltip={t('settings.storage_compaction_tooltip')}
+      >
+        <div className="flex flex-col gap-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="flex flex-col gap-0.5 rounded-[3px] bg-[var(--bg-base)] p-2 border border-[var(--border-subtle)]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                {t('settings.storage_db_file')}
+              </span>
+              <span className="text-[13px] font-semibold text-[var(--text-primary)]">
+                {metrics ? formatBytes(metrics.vault_file_bytes) : '—'}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5 rounded-[3px] bg-[var(--bg-base)] p-2 border border-[var(--border-subtle)]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                {t('settings.storage_active_attachments')}
+              </span>
+              <span className="text-[13px] font-semibold text-[var(--text-primary)]">
+                {metrics ? `${formatBytes(metrics.active_attachment_bytes)} (${metrics.active_attachment_count} st)` : '—'}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5 rounded-[3px] bg-[var(--bg-base)] p-2 border border-[var(--border-subtle)]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                {t('settings.storage_trash')}
+              </span>
+              <span className="text-[13px] font-semibold text-[var(--text-primary)]">
+                {metrics ? t('settings.storage_entries_count', { count: metrics.trashed_entry_count }) : '—'}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+            {t('settings.storage_compaction_desc')}
+          </p>
+
+          <button
+            type="button"
+            disabled={compacting}
+            onClick={handleCompact}
+            className="flex items-center justify-center gap-1.5 self-start rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            <Archive size={13} className={compacting ? 'animate-spin' : ''} />
+            <span>{compacting ? t('settings.compacting') : t('settings.compact_vault_button')}</span>
+          </button>
+        </div>
       </SettingSection>
 
       <DeleteTrashModal

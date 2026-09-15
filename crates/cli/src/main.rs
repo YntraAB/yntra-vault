@@ -69,7 +69,7 @@ struct Cli {
     path: Option<PathBuf>,
 
     /// Master password for non-interactive execution [env: YNTRA_PASSWORD]
-    #[arg(short = 'p', long, global = true, env = "YNTRA_PASSWORD")]
+    #[arg(short = 'p', long, global = true, env = "YNTRA_PASSWORD", hide = true)]
     password: Option<String>,
 
     /// Keyfile path for dual-factor vault unlock [env: YNTRA_KEYFILE]
@@ -489,6 +489,14 @@ fn get_exit_code(err: &VaultError) -> i32 {
 }
 
 async fn run(cli: Cli) -> Result<()> {
+    if std::env::args().any(|a| a == "-p" || a.starts_with("--password=") || a == "--password") {
+        eprintln!(
+            "{}",
+            "Security Advisory: Passing master passwords via CLI arguments exposes secrets in the OS process table (ps aux) and shell history. Prefer YNTRA_PASSWORD env var, stdin pipe, or 'yntra unlock' session daemon."
+                .yellow()
+        );
+    }
+
     let vault_path = cli.path.unwrap_or_else(|| {
         PathBuf::from(env::var("YNTRA_VAULT_PATH").unwrap_or_else(|_| "vault.vdb".to_string()))
     });

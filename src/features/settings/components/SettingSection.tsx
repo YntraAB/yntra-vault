@@ -38,24 +38,27 @@ export function SettingRow({
   children,
 }: SettingRowProps) {
   return (
-    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] py-3 select-none">
-      <div>
+    <div className="flex items-center justify-between gap-6 border-b border-[var(--border-subtle)] py-3 select-none">
+      <div className="min-w-0 flex-1">
         <div className="text-[13px] text-[var(--text-primary)] flex items-center">
           <span>{label}</span>
           {tooltip && (
             <ActionTooltip content={tooltip}>
-              <Info size={12} className="ml-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors cursor-help" />
+              <Info size={12} className="ml-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors cursor-help shrink-0" />
             </ActionTooltip>
           )}
         </div>
         {description && (
-          <div className="mt-0.5 text-[12px] text-[var(--text-secondary)]">{description}</div>
+          <div className="mt-0.5 text-[12px] text-[var(--text-secondary)] leading-relaxed">{description}</div>
         )}
       </div>
-      {children}
+      <div className="shrink-0 flex items-center justify-end">
+        {children}
+      </div>
     </div>
   );
 }
+
 
 export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (

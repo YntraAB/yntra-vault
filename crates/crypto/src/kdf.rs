@@ -38,8 +38,11 @@ impl Default for KdfParams {
 
 impl KdfParams {
     const MIN_MEMORY_KB: u32 = 65_536;   // 64 MB absolute minimum
+    const MAX_MEMORY_KB: u32 = 1_048_576; // 1 GB maximum limit
     const MIN_ITERATIONS: u32 = 2;
+    const MAX_ITERATIONS: u32 = 64;       // 64 passes maximum limit
     const MIN_PARALLELISM: u32 = 1;
+    const MAX_PARALLELISM: u32 = 32;      // 32 threads maximum limit
     const REQUIRED_OUTPUT_LEN: usize = 64;
 
     pub fn validate(&self) -> Result<(), VaultError> {
@@ -48,14 +51,29 @@ impl KdfParams {
                 "KDF memory_kb {} below minimum {}", self.memory_kb, Self::MIN_MEMORY_KB
             )));
         }
+        if self.memory_kb > Self::MAX_MEMORY_KB {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF memory_kb {} exceeds maximum {}", self.memory_kb, Self::MAX_MEMORY_KB
+            )));
+        }
         if self.iterations < Self::MIN_ITERATIONS {
             return Err(VaultError::InvalidFormat(format!(
                 "KDF iterations {} below minimum {}", self.iterations, Self::MIN_ITERATIONS
             )));
         }
+        if self.iterations > Self::MAX_ITERATIONS {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF iterations {} exceeds maximum {}", self.iterations, Self::MAX_ITERATIONS
+            )));
+        }
         if self.parallelism < Self::MIN_PARALLELISM {
             return Err(VaultError::InvalidFormat(format!(
                 "KDF parallelism {} below minimum {}", self.parallelism, Self::MIN_PARALLELISM
+            )));
+        }
+        if self.parallelism > Self::MAX_PARALLELISM {
+            return Err(VaultError::InvalidFormat(format!(
+                "KDF parallelism {} exceeds maximum {}", self.parallelism, Self::MAX_PARALLELISM
             )));
         }
         if self.output_len != Self::REQUIRED_OUTPUT_LEN {
@@ -358,6 +376,32 @@ mod tests {
 
         assert_ne!(mk1.as_bytes(), mk2.as_bytes());
         assert_ne!(mk1.as_bytes(), mk3.as_bytes());
+    }
+
+    #[test]
+    fn test_kdf_params_bounds_validation() {
+        let valid_params = KdfParams::default();
+        assert!(valid_params.validate().is_ok());
+
+        let mut low_mem = valid_params.clone();
+        low_mem.memory_kb = 32_768;
+        assert!(low_mem.validate().is_err());
+
+        let mut high_mem = valid_params.clone();
+        high_mem.memory_kb = 2_097_152; // 2 GB
+        assert!(high_mem.validate().is_err());
+
+        let mut low_iter = valid_params.clone();
+        low_iter.iterations = 1;
+        assert!(low_iter.validate().is_err());
+
+        let mut high_iter = valid_params.clone();
+        high_iter.iterations = 65;
+        assert!(high_iter.validate().is_err());
+
+        let mut high_parallel = valid_params.clone();
+        high_parallel.parallelism = 64;
+        assert!(high_parallel.validate().is_err());
     }
 }
 

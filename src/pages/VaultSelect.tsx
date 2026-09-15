@@ -119,18 +119,15 @@ export default function VaultSelect() {
     >
       <div className="w-full max-w-[420px] py-6">
         {/* Header */}
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex flex-col items-center">
           <img
             src="/white-logo.png"
             alt="Yntra Vault Logo"
             className="h-24 w-24 rounded-xl object-cover"
           />
-          <h1 className="text-[20px] font-semibold tracking-tight text-[var(--text-primary)]">
+          <h1 className="mt-4 text-[20px] font-semibold tracking-tight text-[var(--text-primary)]">
             {t('vault_select.title')}
           </h1>
-          <p className="text-[13px] text-[var(--text-secondary)]">
-            {t('vault_select.subtitle')}
-          </p>
         </div>
 
         {!isTauri() && (

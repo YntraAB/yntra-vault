@@ -209,6 +209,9 @@ All commands are invoked from the React frontend via `@tauri-apps/api/core::invo
 | `change_master_password` | `current`, `new_password`, `current_key_file?`, `new_key_file?` | `()` |
 | `get_vault_path` | — | `string` |
 | `generate_key_file` | `path` | `()` |
+| `generate_emergency_kit` | `master_password` | `EmergencyKit` |
+| `get_emergency_kit_audit` | — | `Option<EmergencyKitAudit>` |
+| `reset_emergency_kit_audit` | — | `()` |
 
 ### Smart Login (CDP)
 
@@ -257,6 +260,9 @@ All commands are invoked from the React frontend via `@tauri-apps/api/core::invo
 | `restore_from_trash` | `id` | `()` |
 | `permanent_delete` | `id` | `()` |
 | `empty_trash` | — | `()` |
+| `purge_expired_trash` | `max_age_days?` | `usize` |
+| `get_storage_metrics` | — | `VaultStorageMetrics` |
+| `compact_vault` | — | `VaultStorageMetrics` |
 
 ### Attachments
 

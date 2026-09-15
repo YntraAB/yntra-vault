@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import type { PasswordEntry } from '@/types';
-import { entryPreviewToPasswordEntry, decryptedEntryToPasswordEntry } from './context/EntriesContext';
+import { entryPreviewToPasswordEntry, decryptedEntryToPasswordEntry, isRecoveryField } from './context/EntriesContext';
 import type { EntryPreview, DecryptedEntry } from '@/lib/backend';
 
 describe('Entries Feature Slice', () => {
@@ -321,6 +321,66 @@ describe('Entries Feature Slice', () => {
     // Simulate failure & rollback
     entriesState = prevEntries;
     expect(entriesState[0].pinned).toBe(false);
+  });
+
+  it('extracts recovery codes from custom fields and strips them from customFields list', () => {
+    const decrypted: DecryptedEntry = {
+      id: 'entry-recovery',
+      title: 'GitHub 2FA',
+      username: 'dev',
+      password: 'pwd',
+      url: 'https://github.com',
+      email: '',
+      notes: '',
+      tags: [],
+      favorite: false,
+      pinned: false,
+      totp_secret: 'JBSWY3DPEHPK3PXP',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      custom_fields: [
+        {
+          id: 'cf-rec-1',
+          name: '2FA Recovery Codes',
+          field_type: 'Password',
+          value: 'abcd-1234\nefgh-5678',
+          sensitive: true,
+        },
+        {
+          id: 'cf-rec-2',
+          name: '2FA Recovery Cod',
+          field_type: 'Password',
+          value: 'ijkl-9012',
+          sensitive: true,
+        },
+        {
+          id: 'cf-normal',
+          name: 'Security Question',
+          field_type: 'Text',
+          value: 'Fluffy',
+          sensitive: false,
+        },
+      ],
+    };
+
+    const entry = decryptedEntryToPasswordEntry(decrypted);
+    expect(entry.recoveryCodes).toBe('abcd-1234\nefgh-5678\nijkl-9012');
+    expect(entry.customFields).toHaveLength(1);
+    expect(entry.customFields[0].name).toBe('Security Question');
+  });
+
+  it('correctly matches recovery field variations with isRecoveryField', () => {
+    expect(isRecoveryField('2FA Recovery Codes')).toBe(true);
+    expect(isRecoveryField('2fa recovery codes')).toBe(true);
+    expect(isRecoveryField('2FA Recovery Cod')).toBe(true);
+    expect(isRecoveryField('2fa recovery code')).toBe(true);
+    expect(isRecoveryField('2FA Backup Codes')).toBe(true);
+    expect(isRecoveryField('Recovery Codes')).toBe(true);
+    expect(isRecoveryField('Recovery Code')).toBe(true);
+    expect(isRecoveryField('Backup Codes')).toBe(true);
+    expect(isRecoveryField('Password')).toBe(false);
+    expect(isRecoveryField('PIN')).toBe(false);
+    expect(isRecoveryField('')).toBe(false);
   });
 });
 

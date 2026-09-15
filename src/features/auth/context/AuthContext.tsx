@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Vault } from '@/types';
 import { isTauri, getBackend, type YntraVaultBackend } from '@/lib/backend';
+import { clearTransientWebdavPassword } from '@/lib/sessionSecrets';
 import { useToast } from '@/contexts/ToastContext';
 
 export interface AuthContextType {
@@ -80,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const lockVault = useCallback(async () => {
     setIsLocked(true);
+    clearTransientWebdavPassword();
     if (backend) {
       try {
         await backend.lockVault();

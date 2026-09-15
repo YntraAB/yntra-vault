@@ -11,6 +11,7 @@ use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use data_encoding::BASE32_NOPAD;
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use crate::error::VaultError;
 
 type HmacSha1 = Hmac<Sha1>;
@@ -18,11 +19,12 @@ type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
 
 /// TOTP algorithm selection.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TotpAlgorithm {
     SHA1,
     SHA256,
     SHA512,
+    Steam,
 }
 
 impl Default for TotpAlgorithm {
@@ -88,12 +90,23 @@ pub fn generate_totp_at(config: &TotpConfig, timestamp: u64) -> crate::Result<To
     if config.digits == 0 || config.digits > 9 {
         return Err(VaultError::TotpError("TOTP digits must be between 1 and 9".into()));
     }
-    if config.secret.trim().is_empty() {
+    let trimmed_secret = config.secret.trim();
+    if trimmed_secret.is_empty() {
         return Err(VaultError::TotpError("TOTP secret cannot be empty".into()));
     }
 
+    // Auto-detect and parse URI format if passed directly in secret
+    if trimmed_secret.starts_with("steam://") || trimmed_secret.starts_with("otpauth://") {
+        if let Ok(mut parsed) = parse_otpauth_uri(trimmed_secret) {
+            if config.algorithm != TotpAlgorithm::SHA1 && parsed.algorithm == TotpAlgorithm::SHA1 {
+                parsed.algorithm = config.algorithm;
+            }
+            return generate_totp_at(&parsed, timestamp);
+        }
+    }
+
     // Decode the base32 secret
-    let secret_upper = config.secret.to_uppercase().replace(" ", "");
+    let secret_upper = trimmed_secret.to_uppercase().replace(" ", "");
     // Add padding if needed for base32
     let padded = match secret_upper.len() % 8 {
         0 => secret_upper.clone(),
@@ -109,7 +122,7 @@ pub fn generate_totp_at(config: &TotpConfig, timestamp: u64) -> crate::Result<To
 
     // Compute HMAC based on algorithm
     let hmac_result = match config.algorithm {
-        TotpAlgorithm::SHA1 => {
+        TotpAlgorithm::SHA1 | TotpAlgorithm::Steam => {
             let mut mac = HmacSha1::new_from_slice(&secret_bytes)
                 .map_err(|e| VaultError::TotpError(format!("HMAC-SHA1 init: {}", e)))?;
             mac.update(&counter_bytes);
@@ -129,16 +142,28 @@ pub fn generate_totp_at(config: &TotpConfig, timestamp: u64) -> crate::Result<To
         }
     };
 
-    // Dynamic truncation (RFC 4226 Section 5.4)
+    // Dynamic truncation (RFC 4226 Section 5.4 / Steam Guard)
     let offset = (hmac_result.last().unwrap_or(&0) & 0x0F) as usize;
     let binary = ((hmac_result[offset] & 0x7F) as u32) << 24
         | (hmac_result[offset + 1] as u32) << 16
         | (hmac_result[offset + 2] as u32) << 8
         | (hmac_result[offset + 3] as u32);
 
-    let modulus = 10u32.pow(config.digits);
-    let otp = binary % modulus;
-    let code = format!("{:0>width$}", otp, width = config.digits as usize);
+    let code = if config.algorithm == TotpAlgorithm::Steam {
+        const STEAM_CHARS: &[u8; 26] = b"23456789BCDFGHJKMNPQRTVWXY";
+        let mut steam_code = String::with_capacity(5);
+        let mut temp = binary;
+        for _ in 0..5 {
+            let idx = (temp % 26) as usize;
+            steam_code.push(STEAM_CHARS[idx] as char);
+            temp /= 26;
+        }
+        steam_code
+    } else {
+        let modulus = 10u32.pow(config.digits);
+        let otp = binary % modulus;
+        format!("{:0>width$}", otp, width = config.digits as usize)
+    };
 
     // Calculate seconds remaining
     let seconds_remaining = config.period - (timestamp % config.period);
@@ -164,7 +189,7 @@ pub fn verify_totp(config: &TotpConfig, code: &str, window: Option<u32>) -> crat
         // Check current and past periods
         let ts = timestamp.saturating_sub(delta);
         let generated = generate_totp_at(config, ts)?;
-        if generated.code == code {
+        if generated.code.len() == code.len() && bool::from(generated.code.as_bytes().ct_eq(code.as_bytes())) {
             return Ok(true);
         }
 
@@ -172,7 +197,7 @@ pub fn verify_totp(config: &TotpConfig, code: &str, window: Option<u32>) -> crat
         if i > 0 {
             let ts = timestamp.saturating_add(delta);
             let generated = generate_totp_at(config, ts)?;
-            if generated.code == code {
+            if generated.code.len() == code.len() && bool::from(generated.code.as_bytes().ct_eq(code.as_bytes())) {
                 return Ok(true);
             }
         }
@@ -181,12 +206,27 @@ pub fn verify_totp(config: &TotpConfig, code: &str, window: Option<u32>) -> crat
     Ok(false)
 }
 
-/// Parse an otpauth:// URI into a TotpConfig.
+/// Parse an otpauth:// or steam:// URI into a TotpConfig.
 /// Format: otpauth://totp/Label?secret=BASE32&issuer=Name&algorithm=SHA1&digits=6&period=30
 pub fn parse_otpauth_uri(uri: &str) -> crate::Result<TotpConfig> {
+    if uri.starts_with("steam://") {
+        let secret = uri.trim_start_matches("steam://").trim();
+        if secret.is_empty() {
+            return Err(VaultError::TotpError("Missing secret in steam:// URI".into()));
+        }
+        return Ok(TotpConfig {
+            secret: secret.to_string(),
+            algorithm: TotpAlgorithm::Steam,
+            digits: 5,
+            period: 30,
+            issuer: Some("Steam".to_string()),
+            label: Some("Steam".to_string()),
+        });
+    }
+
     if !uri.starts_with("otpauth://totp/") {
         return Err(VaultError::TotpError(
-            "URI must start with otpauth://totp/".into(),
+            "URI must start with otpauth://totp/ or steam://".into(),
         ));
     }
 
@@ -212,6 +252,7 @@ pub fn parse_otpauth_uri(uri: &str) -> crate::Result<TotpConfig> {
                     config.algorithm = match value.to_uppercase().as_str() {
                         "SHA256" => TotpAlgorithm::SHA256,
                         "SHA512" => TotpAlgorithm::SHA512,
+                        "STEAM" => TotpAlgorithm::Steam,
                         _ => TotpAlgorithm::SHA1,
                     };
                 }
@@ -226,6 +267,13 @@ pub fn parse_otpauth_uri(uri: &str) -> crate::Result<TotpConfig> {
                 _ => {}
             }
         }
+    }
+
+    if config.issuer.as_deref().map(|s| s.eq_ignore_ascii_case("steam")).unwrap_or(false)
+        && config.algorithm == TotpAlgorithm::SHA1
+    {
+        config.algorithm = TotpAlgorithm::Steam;
+        config.digits = 5;
     }
 
     if config.secret.is_empty() {
@@ -410,6 +458,61 @@ mod tests {
     fn test_parse_invalid_uri() {
         assert!(parse_otpauth_uri("https://example.com").is_err());
         assert!(parse_otpauth_uri("otpauth://totp/Test?digits=6").is_err()); // missing secret
+    }
+
+    #[test]
+    fn test_steam_guard_generation() {
+        let config = TotpConfig {
+            secret: TEST_SECRET_SHA1.to_string(),
+            algorithm: TotpAlgorithm::Steam,
+            digits: 5,
+            period: 30,
+            ..Default::default()
+        };
+
+        let code1 = generate_totp_at(&config, 1000000).unwrap();
+        assert_eq!(code1.code.len(), 5);
+        const STEAM_CHARS: &[u8; 26] = b"23456789BCDFGHJKMNPQRTVWXY";
+        for ch in code1.code.bytes() {
+            assert!(STEAM_CHARS.contains(&ch));
+        }
+
+        let code2 = generate_totp_at(&config, 1000000).unwrap();
+        assert_eq!(code1.code, code2.code);
+
+        let code3 = generate_totp_at(&config, 1000030).unwrap();
+        assert_ne!(code1.code, code3.code);
+    }
+
+    #[test]
+    fn test_parse_steam_uri() {
+        let uri = "steam://JBSWY3DPEHPK3PXP";
+        let config = parse_otpauth_uri(uri).unwrap();
+        assert_eq!(config.secret, "JBSWY3DPEHPK3PXP");
+        assert_eq!(config.algorithm, TotpAlgorithm::Steam);
+        assert_eq!(config.digits, 5);
+
+        let uri_issuer = "otpauth://totp/Steam:user?secret=JBSWY3DPEHPK3PXP&issuer=Steam";
+        let config_issuer = parse_otpauth_uri(uri_issuer).unwrap();
+        assert_eq!(config_issuer.algorithm, TotpAlgorithm::Steam);
+        assert_eq!(config_issuer.digits, 5);
+    }
+
+    #[test]
+    fn test_generate_totp_direct_uri() {
+        let direct_steam = TotpConfig {
+            secret: "steam://JBSWY3DPEHPK3PXP".to_string(),
+            ..Default::default()
+        };
+        let code = generate_totp_at(&direct_steam, 1000000).unwrap();
+        assert_eq!(code.code.len(), 5);
+
+        let direct_otp = TotpConfig {
+            secret: "otpauth://totp/Test:user?secret=JBSWY3DPEHPK3PXP&digits=8".to_string(),
+            ..Default::default()
+        };
+        let code2 = generate_totp_at(&direct_otp, 1000000).unwrap();
+        assert_eq!(code2.code.len(), 8);
     }
 }
 

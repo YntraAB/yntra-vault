@@ -6,7 +6,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use yntra_vault_core::error::VaultError;
-use yntra_vault_core::vault::entry::{NewEntry, UpdateEntry};
+use yntra_vault_core::vault::entry::{DecryptedEntry, NewEntry, UpdateEntry};
 use yntra_vault_core::vault::format::{FileHeader, KdfParams, VaultFile, FORMAT_VERSION};
 use yntra_vault_core::vault::manager::{read_key_file_safely, VaultManager};
 use yntra_vault_core::vault::types::*;
@@ -954,5 +954,217 @@ fn test_restore_from_trash_updates_updated_at_and_survives_sync() {
     manager.lock();
     assert!(matches!(manager.restore_from_trash(id).unwrap_err(), VaultError::VaultLocked));
 }
+
+#[test]
+fn test_trash_compaction_and_storage_metrics() {
+    let test_vault = TestVault::new();
+    let password = "TestPassword123!";
+    let mut manager = VaultManager::create("Trash Metrics Vault", password, &test_vault.path).unwrap();
+
+    let att_data = b"STORAGE METRICS SAMPLE PAYLOAD 12345".to_vec();
+    let entry1 = NewEntry {
+        title: "Entry With File".to_string(),
+        username: "user1".to_string(),
+        password: "secretpassword".to_string(),
+        url: "https://example.com".to_string(),
+        email: "user1@example.com".to_string(),
+        notes: "Notes".to_string(),
+        tags: vec!["Work".to_string(), "Finance".to_string()],
+        totp_secret: None,
+        custom_fields: Vec::new(),
+        entry_type: Some(EntryType::Login),
+        generate_passkey: None,
+        attachments: Some(vec![NewAttachment {
+            name: "test.dat".to_string(),
+            mime_type: "application/octet-stream".to_string(),
+            data: att_data.clone(),
+        }]),
+    };
+    let id1 = manager.add_entry(entry1).unwrap();
+
+    let entry2 = NewEntry {
+        title: "Plain Entry".to_string(),
+        username: "user2".to_string(),
+        password: "plainpassword".to_string(),
+        url: "https://plain.com".to_string(),
+        email: "user2@plain.com".to_string(),
+        notes: "".to_string(),
+        tags: vec!["Personal".to_string()],
+        totp_secret: None,
+        custom_fields: Vec::new(),
+        entry_type: Some(EntryType::Login),
+        generate_passkey: None,
+        attachments: None,
+    };
+    let id2 = manager.add_entry(entry2).unwrap();
+
+    // Verify initial metrics
+    let metrics = manager.get_storage_metrics().unwrap();
+    assert_eq!(metrics.entry_count, 2);
+    assert_eq!(metrics.trashed_entry_count, 0);
+    assert_eq!(metrics.active_attachment_count, 1);
+    assert_eq!(metrics.active_attachment_bytes, att_data.len() as u64);
+    assert_eq!(metrics.trashed_attachment_count, 0);
+    assert_eq!(metrics.trashed_attachment_bytes, 0);
+    assert_eq!(metrics.tag_count, 3);
+    assert!(metrics.vault_file_bytes > 0);
+    assert_eq!(manager.trash_count().unwrap(), 0);
+
+    // Delete id2 to trash
+    manager.delete_entry(id2).unwrap();
+    assert_eq!(manager.trash_count().unwrap(), 1);
+
+    // Delete id1 (with attachment) to trash
+    manager.delete_entry(id1).unwrap();
+    assert_eq!(manager.trash_count().unwrap(), 2);
+
+    let metrics_after_trash = manager.get_storage_metrics().unwrap();
+    assert_eq!(metrics_after_trash.entry_count, 0);
+    assert_eq!(metrics_after_trash.trashed_entry_count, 2);
+    assert_eq!(metrics_after_trash.active_attachment_count, 0);
+    assert_eq!(metrics_after_trash.trashed_attachment_count, 1);
+    assert_eq!(metrics_after_trash.trashed_attachment_bytes, att_data.len() as u64);
+
+    // Retention check: purge_expired_trash(30) should not delete fresh trash
+    let purged_zero = manager.purge_expired_trash(30).unwrap();
+    assert_eq!(purged_zero, 0);
+    assert_eq!(manager.trash_count().unwrap(), 2);
+
+    // Artificially age id2 to 35 days ago
+    for t in &mut manager.data.trash {
+        if t.entry.id == id2 {
+            t.deleted_at = Utc::now() - chrono::Duration::days(35);
+        }
+    }
+
+    // Now purge entries older than 30 days
+    let purged_one = manager.purge_expired_trash(30).unwrap();
+    assert_eq!(purged_one, 1);
+    assert_eq!(manager.trash_count().unwrap(), 1);
+
+    // Compacting the vault
+    let compacted_metrics = manager.compact_vault().unwrap();
+    assert_eq!(compacted_metrics.trashed_entry_count, 1);
+
+    // Purge all remaining trash
+    let purged_remaining = manager.purge_all_trash().unwrap();
+    assert_eq!(purged_remaining, 1);
+    assert_eq!(manager.trash_count().unwrap(), 0);
+
+    let final_metrics = manager.get_storage_metrics().unwrap();
+    assert_eq!(final_metrics.trashed_entry_count, 0);
+    assert_eq!(final_metrics.trashed_attachment_count, 0);
+    assert_eq!(final_metrics.trashed_attachment_bytes, 0);
+
+    // Locked vault rejection
+    manager.lock();
+    assert!(matches!(manager.trash_count().unwrap_err(), VaultError::VaultLocked));
+    assert!(matches!(manager.get_storage_metrics().unwrap_err(), VaultError::VaultLocked));
+    assert!(matches!(manager.purge_expired_trash(30).unwrap_err(), VaultError::VaultLocked));
+    assert!(matches!(manager.compact_vault().unwrap_err(), VaultError::VaultLocked));
+}
+
+#[test]
+fn test_export_csv_and_json_lifecycle() {
+    let test_vault = TestVault::new();
+    let password = "TestPassword123!";
+    let mut manager = VaultManager::create("Export Test Vault", password, &test_vault.path).unwrap();
+
+    let entry1 = NewEntry {
+        title: "Test \"Quotes\" Service".to_string(),
+        username: "alice_export".to_string(),
+        password: "p@ss\"word\n123".to_string(),
+        url: "https://alice.example.com".to_string(),
+        email: "alice@example.com".to_string(),
+        notes: "Multi-line\nnotes\r\ntest".to_string(),
+        tags: vec!["Dev".to_string(), "Testing".to_string()],
+        totp_secret: Some("JBSWY3DPEHPK3PXP".to_string()),
+        custom_fields: Vec::new(),
+        entry_type: Some(EntryType::Login),
+        generate_passkey: None,
+        attachments: None,
+    };
+    manager.add_entry(entry1).unwrap();
+
+    let entry2 = NewEntry {
+        title: "=cmd|' /C calc'!A0".to_string(),
+        username: "@malicious_user".to_string(),
+        password: "+password_formula".to_string(),
+        url: "https://safe.example.com".to_string(),
+        email: "-email_formula@example.com".to_string(),
+        notes: "\tTabPrefixedNote".to_string(),
+        tags: vec![],
+        totp_secret: None,
+        custom_fields: Vec::new(),
+        entry_type: Some(EntryType::Login),
+        generate_passkey: None,
+        attachments: None,
+    };
+    manager.add_entry(entry2).unwrap();
+
+    let csv_path = test_vault.path.with_extension("export.csv");
+    let json_path = test_vault.path.with_extension("export.json");
+
+    // Export CSV
+    manager.export_csv(&csv_path).unwrap();
+    assert!(csv_path.exists());
+    let csv_content = std::fs::read_to_string(&csv_path).unwrap();
+    assert!(csv_content.starts_with("Title,Username,Email,Password,URL,Notes,TOTP,Tags\n"));
+    assert!(csv_content.contains("\"Test \"\"Quotes\"\" Service\""));
+    assert!(csv_content.contains("\"alice_export\""));
+    assert!(csv_content.contains("Dev;Testing"));
+
+    // Verify formula injection sanitization
+    assert!(csv_content.contains("\"'=cmd|' /C calc'!A0\""));
+    assert!(csv_content.contains("\"'@malicious_user\""));
+    assert!(csv_content.contains("\"'+password_formula\""));
+    assert!(csv_content.contains("\"'-email_formula@example.com\""));
+    assert!(csv_content.contains("\"'\tTabPrefixedNote\""));
+
+    // Export JSON
+    manager.export_json(&json_path).unwrap();
+    assert!(json_path.exists());
+    let json_content = std::fs::read_to_string(&json_path).unwrap();
+    let parsed: Vec<DecryptedEntry> = serde_json::from_str(&json_content).unwrap();
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[0].title, "Test \"Quotes\" Service");
+    assert_eq!(parsed[0].username, "alice_export");
+    assert_eq!(parsed[0].password, "p@ss\"word\n123");
+    assert_eq!(parsed[0].totp_secret.as_deref(), Some("JBSWY3DPEHPK3PXP"));
+
+    // Locked vault rejection
+    manager.lock();
+    assert!(matches!(manager.export_csv(&csv_path).unwrap_err(), VaultError::VaultLocked));
+    assert!(matches!(manager.export_json(&json_path).unwrap_err(), VaultError::VaultLocked));
+
+    let _ = std::fs::remove_file(csv_path);
+    let _ = std::fs::remove_file(json_path);
+}
+
+#[test]
+fn test_lock_clears_settings_and_sensitive_state() {
+    let test_vault = TestVault::new();
+    let password = "TestPassword123!";
+    let mut manager = VaultManager::create("Settings Test Vault", password, &test_vault.path).unwrap();
+
+    // Verify initial settings exist
+    manager.data.settings.webdav.url = "https://dav.example.com".to_string();
+    manager.data.settings.webdav.username = "secret_user".to_string();
+    manager.data.settings.webdav.enabled = true;
+    assert!(!manager.data.settings.webdav.url.is_empty());
+
+    // Lock the vault
+    manager.lock();
+
+    // Sensitive settings must be cleared to Default
+    assert!(manager.data.settings.webdav.url.is_empty());
+    assert!(manager.data.settings.webdav.username.is_empty());
+    assert!(!manager.data.settings.webdav.enabled);
+    assert!(manager.data.entries.is_empty());
+    assert!(manager.data.tags.is_empty());
+    assert!(manager.data.trash.is_empty());
+}
+
+
 
 

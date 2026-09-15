@@ -16,6 +16,9 @@ impl VaultManager {
 
     /// Add a new tag to the vault.
     pub fn add_tag(&mut self, name: &str, color: &str, icon: &str) -> crate::Result<Uuid> {
+        if !self.is_unlocked() {
+            return Err(VaultError::VaultLocked);
+        }
         let id = Uuid::new_v4();
         self.data.tags.push(Tag {
             id,
@@ -29,6 +32,9 @@ impl VaultManager {
 
     /// Delete a tag and remove it from all entries referencing it.
     pub fn delete_tag(&mut self, id: Uuid) -> crate::Result<()> {
+        if !self.is_unlocked() {
+            return Err(VaultError::VaultLocked);
+        }
         let tag_name = self
             .data
             .tags
@@ -59,6 +65,9 @@ impl VaultManager {
 
     /// Update tag name, color, or icon, and update all entries referencing the old name.
     pub fn update_tag(&mut self, id: Uuid, name: &str, color: &str, icon: &str) -> crate::Result<()> {
+        if !self.is_unlocked() {
+            return Err(VaultError::VaultLocked);
+        }
         if let Some(tag) = self.data.tags.iter_mut().find(|t| t.id == id) {
             let old_name = tag.name.clone();
             tag.name = name.to_string();
@@ -87,6 +96,9 @@ impl VaultManager {
 
     /// Reorder tags according to the provided list of IDs.
     pub fn reorder_tags(&mut self, tag_ids: &[Uuid]) -> crate::Result<()> {
+        if !self.is_unlocked() {
+            return Err(VaultError::VaultLocked);
+        }
         let mut new_tags = Vec::with_capacity(self.data.tags.len());
         for id in tag_ids {
             if let Some(pos) = self.data.tags.iter().position(|t| t.id == *id) {

@@ -169,7 +169,11 @@ pub async fn launch_and_connect(
         "Launching {} with CDP...", browser_info.name
     ));
 
-    // Clean up stale lock files if left over from taskkill
+    // Clean up stale lock files or active port indicators if left over from previous runs
+    let active_port_path = browser_info.profile_dir.join("DevToolsActivePort");
+    if active_port_path.exists() {
+        let _ = std::fs::remove_file(&active_port_path);
+    }
     for lock_name in &["SingletonLock", "lockfile", "SingletonCookie", "SingletonSocket"] {
         let lock_path = browser_info.profile_dir.join(lock_name);
         if lock_path.exists() {
@@ -194,7 +198,7 @@ pub async fn launch_and_connect(
 
     let mut child = spawn_browser_process(&exe, &args, browser_info, logger)?;
 
-    let ws_url = wait_for_cdp_endpoint(&mut child, port, config.page_load_timeout_secs * 1000).await?;
+    let ws_url = wait_for_cdp_endpoint(&mut child, port, &browser_info.profile_dir, config.page_load_timeout_secs * 1000).await?;
     connect_and_get_page(url, &ws_url, config, logger).await
 }
 
@@ -383,13 +387,23 @@ pub fn is_elevated() -> bool {
     false
 }
 
+pub const ALLOWED_BROWSER_PROCESSES: &[&str] = &[
+    "chrome.exe", "msedge.exe", "brave.exe", "chromium.exe", "opera.exe", "vivaldi.exe",
+    "google-chrome", "google-chrome-stable", "microsoft-edge", "brave-browser", "chromium", "opera", "vivaldi",
+];
+
 /// Close a browser gracefully by process name.
 pub fn close_browser(process_name: &str) -> Result<(), String> {
+    let clean_name = process_name.trim();
+    if !ALLOWED_BROWSER_PROCESSES.iter().any(|&p| p.eq_ignore_ascii_case(clean_name)) {
+        return Err(format!("Disallowed or invalid browser process name: {clean_name}"));
+    }
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         let mut kill_cmd = std::process::Command::new("taskkill");
-        kill_cmd.args(["/IM", process_name, "/F"]);
+        kill_cmd.args(["/IM", clean_name, "/F"]);
         kill_cmd.creation_flags(0x08000000);
         let output = kill_cmd.output()
             .map_err(|e| format!("Failed to run taskkill: {e}"))?;
@@ -768,11 +782,12 @@ fn spawn_browser_process(
 async fn wait_for_cdp_endpoint(
     child: &mut BrowserChild,
     port: u16,
+    profile_dir: &std::path::Path,
     timeout_ms: u64,
 ) -> crate::Result<String> {
-    let endpoint = format!("http://127.0.0.1:{port}/json/version");
     let deadline = tokio::time::Instant::now()
         + tokio::time::Duration::from_millis(timeout_ms);
+    let active_port_path = profile_dir.join("DevToolsActivePort");
 
     loop {
         // Fast-fail if browser process exited on startup
@@ -788,8 +803,32 @@ async fn wait_for_cdp_endpoint(
             ));
         }
 
-        match reqwest::get(&endpoint).await {
-            Ok(resp) => {
+        // 1. Dynamic port allocation: Check DevToolsActivePort inside profile directory
+        if port == 0 || active_port_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&active_port_path) {
+                let mut lines = content.lines();
+                if let (Some(port_str), Some(ws_path)) = (lines.next(), lines.next()) {
+                    if let Ok(assigned_port) = port_str.trim().parse::<u16>() {
+                        let endpoint = format!("http://127.0.0.1:{assigned_port}/json/version");
+                        if let Ok(resp) = reqwest::get(&endpoint).await {
+                            if let Ok(text) = resp.text().await {
+                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    if let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+                                        return Ok(ws.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        return Ok(format!("ws://127.0.0.1:{assigned_port}{ws_path}"));
+                    }
+                }
+            }
+        }
+
+        // 2. Fixed port fallback
+        if port != 0 {
+            let endpoint = format!("http://127.0.0.1:{port}/json/version");
+            if let Ok(resp) = reqwest::get(&endpoint).await {
                 if let Ok(text) = resp.text().await {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                         if let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
@@ -797,9 +836,6 @@ async fn wait_for_cdp_endpoint(
                         }
                     }
                 }
-            }
-            Err(_) => {
-                // CDP not ready yet, retry
             }
         }
 

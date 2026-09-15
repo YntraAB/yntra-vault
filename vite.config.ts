@@ -8,6 +8,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    headers: {
+      'Cache-Control': 'no-store',
+    },
     watch: {
       // Exclude Rust build artifacts and database files from Vite's file watcher
       // to prevent EBUSY locks on Windows during cargo tauri dev and atomic saves

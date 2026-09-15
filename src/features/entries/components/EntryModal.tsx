@@ -12,7 +12,7 @@ import {
   Globe, User, Mail, Key, FileText, ShieldCheck, Loader2,
   Paperclip, Upload, QrCode, FolderOpen,
 } from 'lucide-react';
-import { useEntries } from '../context/EntriesContext';
+import { useEntries, decryptedEntryToPasswordEntry, isRecoveryField } from '../context/EntriesContext';
 import { useUi } from '@/contexts/UiContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -77,6 +77,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
   const isEdit = !!editEntry;
 
   const [form, setForm] = useState(EMPTY_ENTRY);
+  const [originalPassword, setOriginalPassword] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showCustomPasswords, setShowCustomPasswords] = useState<Record<string, boolean>>({});
   const [showGenerator, setShowGenerator] = useState(false);
@@ -182,7 +183,18 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
     if (open) {
       if (editEntry) {
         const populateForm = (target: PasswordEntry) => {
-          const layoutCf = target.customFields.find(cf => cf.name === '_field_order');
+          let recoveryCodes = target.recoveryCodes || '';
+          const cleanedCustomFields = (target.customFields || []).filter((f) => {
+            if (isRecoveryField(f.name)) {
+              if (f.value && f.value.trim()) {
+                recoveryCodes = recoveryCodes ? `${recoveryCodes}\n${f.value.trim()}` : f.value.trim();
+              }
+              return false;
+            }
+            return true;
+          });
+
+          const layoutCf = cleanedCustomFields.find(cf => cf.name === '_field_order');
           let initialStandard: StandardFieldKey[] = [];
 
           if (layoutCf && layoutCf.value) {
@@ -196,7 +208,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
             if (target.url) initialStandard.push('url');
             if (target.email) initialStandard.push('email');
             if (target.notes) initialStandard.push('notes');
-            if (target.totpSecret && target.totpSecret !== 'has-totp') initialStandard.push('totpSecret');
+            if ((target.totpSecret && target.totpSecret !== 'has-totp') || recoveryCodes) initialStandard.push('totpSecret');
             if (target.hasPasskey) initialStandard.push('passkey');
             if (target.attachments && target.attachments.length > 0) initialStandard.push('attachments');
             if (initialStandard.length === 0) {
@@ -209,7 +221,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
             initialStandard.push('attachments');
           }
 
-          const layout = getFieldLayout(target.customFields, initialStandard);
+          const layout = getFieldLayout(cleanedCustomFields, initialStandard);
           setFieldsOrder(layout);
 
           setForm({
@@ -223,12 +235,16 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
             favorite: target.favorite,
             pinned: target.pinned,
             totpSecret: target.totpSecret === 'has-totp' ? '' : target.totpSecret,
-            customFields: target.customFields.map(f => ({ ...f })),
+            recoveryCodes: recoveryCodes || undefined,
+            customFields: cleanedCustomFields.map(f => ({ ...f })),
             hasPasskey: target.hasPasskey,
             passkeyPublicKey: target.passkeyPublicKey,
             generatePasskey: undefined,
             passkeyAction: undefined,
           });
+          if (target.password && target.password !== '••••••••') {
+            setOriginalPassword(target.password);
+          }
           setExistingAttachments(target.attachments || []);
         };
 
@@ -240,41 +256,11 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
           return backend.getEntry(editEntry.id);
         }).then((decrypted: any) => {
           if (isCancelled || !decrypted) return;
-          const attachments = (decrypted.attachments || []).map((a: any) => ({
-            id: a.id,
-            name: a.name,
-            size: a.size,
-            mimeType: a.mime_type || a.mimeType,
-            createdAt: a.created_at || a.createdAt,
-          }));
-          const fullEntry: PasswordEntry = {
-            id: decrypted.id,
-            title: decrypted.title,
-            username: decrypted.username,
-            password: decrypted.password,
-            url: decrypted.url,
-            email: decrypted.email,
-            notes: decrypted.notes,
-            tags: decrypted.tags,
-            favorite: decrypted.favorite,
-            pinned: decrypted.pinned,
-            totpSecret: decrypted.totp_secret ?? undefined,
-            customFields: (decrypted.custom_fields || []).map((f: any) => ({
-              id: f.id,
-              name: f.name,
-              type: f.field_type.toLowerCase() as any,
-              value: f.value,
-            })),
-            hasPasskey: decrypted.has_passkey,
-            passkeyPublicKey: decrypted.passkey_public_key ?? undefined,
-            createdAt: decrypted.created_at,
-            updatedAt: decrypted.updated_at,
-            attachments,
-            attachmentCount: attachments.length,
-          };
+          const fullEntry = decryptedEntryToPasswordEntry(decrypted);
           populateForm(fullEntry);
         }).catch(() => {});
       } else {
+        setOriginalPassword(null);
         setFieldsOrder(['username', 'password', 'url']);
         const initialTags: string[] = [];
         let initialFavorite = false;
@@ -556,7 +542,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
       }
 
       // Save fields order as metadata
-      let customFields = form.customFields.filter(cf => cf.name !== '_field_order');
+      const customFields = form.customFields.filter(cf => cf.name !== '_field_order' && !isRecoveryField(cf.name));
       customFields.push({
         id: crypto.randomUUID(),
         name: '_field_order',
@@ -877,7 +863,16 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                             {form.password && !showGenerator && (
                               <div className="flex flex-col gap-1.5 mt-1.5 px-0.5">
                                 <PasswordStrength password={form.password} compact />
-                                <BreachIndicator password={form.password} compact />
+                                <BreachIndicator
+                                  password={form.password}
+                                  status={editEntry?.breachStatus}
+                                  entryId={
+                                    editEntry && (originalPassword === null || form.password === originalPassword)
+                                      ? editEntry.id
+                                      : undefined
+                                  }
+                                  compact
+                                />
                               </div>
                             )}
                             <AnimatePresence>

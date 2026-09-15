@@ -128,6 +128,8 @@ export interface AppSettings {
   webdavUser?: string;
   webdavAutoSync?: boolean;
   p2pAddr?: string;
+  externalFaviconsEnabled?: boolean;
+  operationMode?: 'standard' | 'airgap';
 }
 
 export interface TOTPState {

@@ -11,6 +11,9 @@
  * - MockBackend (development) — uses in-memory data
  */
 
+import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry } from '@/types/ipc';
+export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry };
+
 // ─── Types ──────────────────────────────────────────────────────────────
 
 export interface VaultInfo {
@@ -198,7 +201,7 @@ export interface TotpCode {
 
 export interface TotpConfig {
   secret: string;
-  algorithm: 'SHA1' | 'SHA256' | 'SHA512';
+  algorithm: 'SHA1' | 'SHA256' | 'SHA512' | 'Steam';
   digits: number;
   period: number;
   issuer: string | null;
@@ -260,6 +263,17 @@ export interface TrashedEntryPreview {
   title: string;
   deleted_at: string;
   days_until_permanent: number;
+}
+
+export interface VaultStorageMetrics {
+  entry_count: number;
+  trashed_entry_count: number;
+  tag_count: number;
+  active_attachment_count: number;
+  active_attachment_bytes: number;
+  trashed_attachment_count: number;
+  trashed_attachment_bytes: number;
+  vault_file_bytes: number;
 }
 
 export interface DecryptedHistoryItem {
@@ -372,11 +386,14 @@ export interface YntraVaultBackend {
   addAttachment(entryId: string, name: string, mimeType: string, data: number[]): Promise<AttachmentInfo>;
   deleteAttachment(entryId: string, attachmentId: string): Promise<void>;
 
-  // Trash
+  // Trash & Compaction
   listTrash(): Promise<TrashedEntryPreview[]>;
   restoreFromTrash(id: string): Promise<void>;
   permanentDelete(id: string): Promise<void>;
   emptyTrash(): Promise<void>;
+  purgeExpiredTrash(maxAgeDays?: number): Promise<number>;
+  getStorageMetrics(): Promise<VaultStorageMetrics>;
+  compactVault(): Promise<VaultStorageMetrics>;
 
   // Password History
   getPasswordHistory(entryId: string): Promise<DecryptedHistoryItem[]>;
@@ -417,6 +434,8 @@ export interface YntraVaultBackend {
   disableAutostart(): Promise<void>;
   isAutostartEnabled(): Promise<boolean>;
   getFavicon(domain: string): Promise<string | null>;
+  setExternalFaviconsEnabled(enabled: boolean): Promise<void>;
+  isExternalFaviconsEnabled(): Promise<boolean>;
   setMinimizeToTray(enabled: boolean): Promise<void>;
   setWindowCaptureProtection(enable: boolean): Promise<void>;
   setLockOnFocusLoss(enabled: boolean): Promise<void>;
@@ -430,6 +449,9 @@ export interface YntraVaultBackend {
   splitMasterPassword(password: string): Promise<string[]>;
   reconstructMasterPassword(shareA: string, shareB: string): Promise<string>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
+  generateEmergencyKit(masterPassword: string): Promise<EmergencyKit>;
+  getEmergencyKitAudit(): Promise<EmergencyKitAudit | null>;
+  resetEmergencyKitAudit(): Promise<void>;
 
   // Export & Import
   exportVault(destPath: string): Promise<void>;

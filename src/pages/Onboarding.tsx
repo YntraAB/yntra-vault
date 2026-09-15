@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Moon, Sun, Monitor, Check, ArrowRight, ArrowLeft, Clock, Clipboard, ChevronDown, ChevronUp, Search, X, FolderInput } from 'lucide-react';
+import { Moon, Sun, Monitor, Check, ArrowRight, ArrowLeft, Clock, Clipboard, ChevronDown, ChevronUp, Search, X, FolderInput, Globe, Shield } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings } from '@/features/settings';
 import { ImportModal } from '@/features/sync';
+import { isTauri, getBackend } from '@/lib/backend';
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -18,8 +19,24 @@ export default function Onboarding() {
   const [langSearch, setLangSearch] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
 
+  const [operationMode, setOperationMode] = useState<'standard' | 'airgap'>(
+    settings?.operationMode === 'airgap' ? 'airgap' : 'standard'
+  );
+  const [externalFaviconsEnabled, setExternalFaviconsEnabled] = useState(
+    settings?.externalFaviconsEnabled ?? (settings?.operationMode === 'airgap' ? false : true)
+  );
+
   const [autoLockMinutes, setAutoLockMinutes] = useState(settings?.autoLockMinutes ?? 15);
   const [clipboardClearSeconds, setClipboardClearSeconds] = useState(settings?.clipboardClearSeconds ?? 30);
+
+  const handleSelectMode = (mode: 'standard' | 'airgap') => {
+    setOperationMode(mode);
+    if (mode === 'standard') {
+      setExternalFaviconsEnabled(true);
+    } else if (mode === 'airgap') {
+      setExternalFaviconsEnabled(false);
+    }
+  };
 
   const filteredLanguages = useMemo(() => {
     let list = languages;
@@ -44,17 +61,25 @@ export default function Onboarding() {
     updateSettings({
       autoLockMinutes,
       clipboardClearSeconds,
+      operationMode,
+      externalFaviconsEnabled,
     });
+    if (isTauri()) {
+      getBackend().then((b) => {
+        b.setExternalFaviconsEnabled(externalFaviconsEnabled).catch(() => {});
+      }).catch(() => {});
+    }
     localStorage.setItem('yntra-vault-setup-completed', 'true');
     navigate('/');
   };
 
   const stepTitles = [
-    t('onboarding.step_language'),
-    t('onboarding.step_theme'),
-    t('onboarding.step_security'),
-    'Import',
-    t('onboarding.ready_title'),
+    t('onboarding.step_language') || 'Language',
+    t('onboarding.step_theme') || 'Theme',
+    t('onboarding.step_mode') || 'Mode',
+    t('onboarding.step_security') || 'Security',
+    t('onboarding.step_import') || 'Import',
+    t('onboarding.ready_title') || 'Ready',
   ];
 
   return (
@@ -79,7 +104,7 @@ export default function Onboarding() {
           <img
             src="/white-logo.png"
             alt="Yntra Vault Logo"
-            className="mb-3 h-20 w-20 rounded-xl object-cover shadow-md"
+            className="mb-3 h-20 w-20 rounded-xl object-cover"
           />
           <h1 className="text-[20px] font-semibold tracking-tight text-[var(--text-primary)]">
             {t('onboarding.welcome_title')}
@@ -231,11 +256,11 @@ export default function Onboarding() {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2.5 mt-1">
+                <div className="grid grid-cols-3 gap-2 mt-1">
                   {[
-                    { id: 'dark', label: t('settings.theme_dark'), icon: Moon, swatchBg: 'bg-[#18181b]', swatchBorder: 'border-zinc-700', textCol: 'text-zinc-300' },
-                    { id: 'light', label: t('settings.theme_light'), icon: Sun, swatchBg: 'bg-[#f4f4f5]', swatchBorder: 'border-zinc-300', textCol: 'text-zinc-700' },
-                    { id: 'system', label: t('settings.theme_system'), icon: Monitor, swatchBg: 'bg-zinc-500/20 dark:bg-zinc-700/40', swatchBorder: 'border-zinc-500/40', textCol: 'text-[var(--text-secondary)]' },
+                    { id: 'dark' as const, label: t('settings.theme_dark'), icon: Moon },
+                    { id: 'light' as const, label: t('settings.theme_light'), icon: Sun },
+                    { id: 'system' as const, label: t('settings.theme_system'), icon: Monitor },
                   ].map((item) => {
                     const isSelected = theme === item.id;
                     const Icon = item.icon;
@@ -243,18 +268,15 @@ export default function Onboarding() {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => setTheme(item.id as any)}
-                        className={`flex flex-col items-center justify-center h-24 rounded-[3px] border p-2 text-center transition-colors ${
+                        onClick={() => setTheme(item.id)}
+                        className={`flex h-20 flex-col items-center justify-center gap-2 rounded-[3px] border text-[12px] font-medium transition-colors cursor-pointer select-none ${
                           isSelected
-                            ? 'border-[var(--border-focus)] bg-[var(--bg-active)]'
-                            : 'border-[var(--border)] bg-[var(--bg-base)] hover:bg-[var(--bg-hover)]'
+                            ? 'border-[var(--text-primary)] bg-[var(--bg-active)] text-[var(--text-primary)]'
+                            : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:border-[var(--border-focus)] hover:text-[var(--text-primary)]'
                         }`}
                       >
-                        {/* Mini Window Wireframe Swatch */}
-                        <div className={`mb-2 flex h-8 w-12 items-center justify-center rounded border ${item.swatchBg} ${item.swatchBorder} shadow-xs`}>
-                          <Icon size={14} className={item.textCol} />
-                        </div>
-                        <span className="text-[12px] font-medium text-[var(--text-primary)]">{item.label}</span>
+                        <Icon size={18} className={isSelected ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'} />
+                        <span>{item.label}</span>
                       </button>
                     );
                   })}
@@ -262,8 +284,81 @@ export default function Onboarding() {
               </motion.div>
             )}
 
-            {/* STEP 2: SECURITY DEFAULTS */}
+            {/* STEP 2: OPERATION MODE */}
             {step === 2 && (
+              <motion.div
+                key="step-mode"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.15 }}
+                className="flex flex-col gap-3"
+              >
+                <div>
+                  <h2 className="text-[14px] font-medium text-[var(--text-primary)]">
+                    {t('onboarding.step_mode')}
+                  </h2>
+                  <p className="text-[12px] text-[var(--text-secondary)]">
+                    {t('onboarding.step_mode_desc')}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2.5 mt-1">
+                  {[
+                    {
+                      id: 'standard' as const,
+                      title: t('onboarding.mode_standard_title') || 'Standard',
+                      icon: Globe,
+                      desc: t('onboarding.mode_standard_desc') || 'Hämtar automatiskt ikoner för webbplatser så att logotyper visas i valvlistan.',
+                    },
+                    {
+                      id: 'airgap' as const,
+                      title: t('onboarding.mode_airgap_title') || 'Slutet system',
+                      icon: Shield,
+                      desc: t('onboarding.mode_airgap_desc') || 'Blockerar all nätverksåtkomst och ikonhämtning för total offline-isolering.',
+                    },
+                  ].map((modeItem) => {
+                    const isSelected = operationMode === modeItem.id;
+                    const Icon = modeItem.icon;
+                    return (
+                      <button
+                        key={modeItem.id}
+                        type="button"
+                        onClick={() => handleSelectMode(modeItem.id)}
+                        className={`group flex items-start gap-3 rounded-[3px] border p-3 text-left transition-colors cursor-pointer select-none ${
+                          isSelected
+                            ? 'border-[var(--text-primary)] bg-[var(--bg-active)]'
+                            : 'border-[var(--border)] bg-[var(--bg-base)] hover:border-[var(--border-focus)]'
+                        }`}
+                      >
+                        {/* White / Neutral Icon Container */}
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border transition-colors mt-0.5 ${
+                            isSelected
+                              ? 'border-[var(--border-focus)] bg-[var(--bg-elevated)] text-[var(--text-primary)]'
+                              : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]'
+                          }`}
+                        >
+                          <Icon size={18} />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-medium text-[var(--text-primary)]">
+                            {modeItem.title}
+                          </div>
+                          <p className="mt-1 text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                            {modeItem.desc}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 3: SECURITY DEFAULTS */}
+            {step === 3 && (
               <motion.div
                 key="step-security"
                 initial={{ opacity: 0, y: 6 }}
@@ -296,7 +391,7 @@ export default function Onboarding() {
                         { val: 5, label: '5 min' },
                         { val: 15, label: '15 min' },
                         { val: 30, label: '30 min' },
-                        { val: 0, label: 'Never' },
+                        { val: 0, label: t('time.never') || 'Never' },
                       ].map((opt) => (
                         <button
                           key={opt.val}
@@ -328,7 +423,7 @@ export default function Onboarding() {
                         { val: 15, label: '15 sec' },
                         { val: 30, label: '30 sec' },
                         { val: 60, label: '60 sec' },
-                        { val: 0, label: 'Never' },
+                        { val: 0, label: t('time.never') || 'Never' },
                       ].map((opt) => (
                         <button
                           key={opt.val}
@@ -349,8 +444,8 @@ export default function Onboarding() {
               </motion.div>
             )}
 
-            {/* STEP 3: COMPETITOR IMPORT */}
-            {step === 3 && (
+            {/* STEP 4: COMPETITOR IMPORT */}
+            {step === 4 && (
               <motion.div
                 key="step-import"
                 initial={{ opacity: 0, y: 6 }}
@@ -361,37 +456,37 @@ export default function Onboarding() {
               >
                 <div>
                   <h2 className="text-[14px] font-medium text-[var(--text-primary)]">
-                    Import Existing Passwords
+                    {t('onboarding.step_import') || 'Import'}
                   </h2>
                   <p className="text-[12px] text-[var(--text-secondary)]">
-                    Migrate logins from Bitwarden, 1Password, KeePass, Chrome, or LastPass.
+                    {t('onboarding.step_import_desc') || 'Migrate logins from Bitwarden, 1Password, KeePass, or Chrome.'}
                   </p>
                 </div>
 
                 <div className="flex flex-col items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-4 text-center gap-2 mt-1">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--text-primary)] border border-[var(--border)]">
-                    <FolderInput size={18} />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-[3px] bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border)]">
+                    <FolderInput size={16} />
                   </div>
                   <p className="text-[12px] font-medium text-[var(--text-primary)]">
-                    Import credentials safely in RAM
+                    {t('onboarding.import_title') || 'Import Saved Logins'}
                   </p>
-                  <p className="text-[10px] text-[var(--text-tertiary)] max-w-[280px]">
-                    Multi-format auto-detection with duplicate conflict resolution.
+                  <p className="text-[11px] text-[var(--text-secondary)] max-w-[280px] leading-snug">
+                    {t('onboarding.import_sub') || 'Migrate logins directly from Bitwarden, 1Password, KeePass, or Chrome in RAM.'}
                   </p>
                   <button
                     type="button"
                     onClick={() => setShowImportModal(true)}
-                    className="mt-1 flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer"
+                    className="mt-1 flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
                   >
-                    <FolderInput size={13} />
-                    <span>Launch Competitor Importer</span>
+                    <FolderInput size={13} className="text-[var(--text-secondary)]" />
+                    <span>{t('onboarding.launch_importer') || 'Launch Importer'}</span>
                   </button>
                 </div>
               </motion.div>
             )}
 
-            {/* STEP 4: READY */}
-            {step === 4 && (
+            {/* STEP 5: READY */}
+            {step === 5 && (
               <motion.div
                 key="step-ready"
                 initial={{ opacity: 0, y: 6 }}
@@ -400,13 +495,13 @@ export default function Onboarding() {
                 transition={{ duration: 0.15 }}
                 className="flex flex-col items-center justify-center text-center gap-2 py-4"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--text-primary)] border border-[var(--border)]">
-                  <Check size={20} />
+                <div className="flex h-9 w-9 items-center justify-center rounded-[3px] bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)]">
+                  <Check size={16} />
                 </div>
                 <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
                   {t('onboarding.ready_title')}
                 </h2>
-                <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed max-w-[280px]">
                   {t('onboarding.ready_desc')}
                 </p>
               </motion.div>
@@ -427,13 +522,13 @@ export default function Onboarding() {
             </button>
           ) : <div />}
 
-          {step < 4 ? (
+          {step < 5 ? (
             <button
               type="button"
               onClick={() => setStep(step + 1)}
               className="flex h-9 items-center gap-1 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 ml-auto cursor-pointer"
             >
-              {step === 3 ? 'Skip / Next' : t('onboarding.next')}
+              {step === 4 ? (t('onboarding.skip_or_next') || 'Skip / Next') : t('onboarding.next')}
               <ArrowRight size={13} />
             </button>
           ) : (

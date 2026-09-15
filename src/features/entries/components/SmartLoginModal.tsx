@@ -38,7 +38,7 @@ interface SmartLoginModalProps {
 export default function SmartLoginModal({
   isOpen, onClose, entryTitle, phase,
   events, result, error,
-  browserName, browserNeedsClose: _browserNeedsClose,
+  browserName,
   dontAskAgain, onDontAskAgainChange,
   onConfirmClose, onCancel,
 }: SmartLoginModalProps) {
@@ -58,9 +58,6 @@ export default function SmartLoginModal({
   const isCaptcha = result === 'RequiresCaptcha';
   const isMfa = result && typeof result === 'object' && 'RequiresMfa' in (result as Record<string, unknown>);
   const isCancelled = result === 'Cancelled';
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // const hasError = error || (phase === 'done' && !isSuccess && !isCaptcha && !isMfa && !isCancelled);
 
   const handleCopyLog = async () => {
     const text = events.map(e => e.message).join('\n');

@@ -36,10 +36,42 @@ describe('Audit Feature Slice', () => {
       expect(config.textColor).toContain('text-red-500');
       expect(config.shortLabel).toBe('breach.count_short:500');
     });
+    it('returns reused warning config instead of safe when password is reused in vault', () => {
+      const config = getStatusConfig(
+        { type: 'Safe', checked_at: '' },
+        mockT,
+        { isReused: true, reusedServices: 'Main' }
+      );
+      expect(config.textColor).toContain('text-purple-400');
+      expect(config.shortLabel).toBe('breach.reused_status');
+      expect(config.label).toBe('breach.no_breaches_reused');
+    });
+
+    it('returns reused warning config even if breach status is Unknown', () => {
+      const config = getStatusConfig(
+        { type: 'Unknown' },
+        mockT,
+        { isReused: true, reusedServices: 'Steam' }
+      );
+      expect(config.textColor).toContain('text-purple-400');
+      expect(config.shortLabel).toBe('breach.reused_status');
+    });
+
+    it('returns weak warning config instead of safe when password is weak', () => {
+      const config = getStatusConfig(
+        { type: 'Safe', checked_at: '' },
+        mockT,
+        { isWeak: true }
+      );
+      expect(config.textColor).toContain('text-amber-400');
+      expect(config.shortLabel).toBe('security.stat_weak');
+      expect(config.label).toBe('breach.no_breaches_weak');
+    });
   });
 
   describe('getLocalizedIssueDescription', () => {
     const mockT = (key: string, params?: Record<string, string | number>) => {
+      if (params?.count && params?.services) return `Reused across ${params.count} accounts: ${params.services}`;
       if (params?.count) return `Found in ${params.count} breaches`;
       if (params?.services) return `Reused with ${params.services}`;
       if (params?.days) return `Older than ${params.days} days`;
@@ -66,6 +98,25 @@ describe('Audit Feature Slice', () => {
         description: 'Reused with: Google, GitHub',
       };
       expect(getLocalizedIssueDescription(issue, mockT)).toBe('Reused with Google, GitHub');
+    });
+
+    it('formats grouped reused password issue description with all account names', () => {
+      const groupedIssue = {
+        id: 'group-1',
+        issue_type: 'ReusedPassword',
+        severity: 'Warning',
+        entry_id: '1',
+        entry_title: 'Github, Main',
+        description: 'Password is reused on: Main',
+        is_group: true,
+        group_entries: [
+          { id: '1', title: 'Github' },
+          { id: '2', title: 'Main' },
+        ],
+      };
+      expect(getLocalizedIssueDescription(groupedIssue, mockT)).toBe(
+        'Reused across 2 accounts: Github, Main'
+      );
     });
   });
 });

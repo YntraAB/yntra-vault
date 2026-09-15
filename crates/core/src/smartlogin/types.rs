@@ -197,7 +197,7 @@ pub struct SmartLoginConfig {
 impl Default for SmartLoginConfig {
     fn default() -> Self {
         Self {
-            cdp_port: 9222,
+            cdp_port: 0,
             page_load_timeout_secs: 15,
             dom_settle_timeout_secs: 5,
             max_state_transitions: 8,

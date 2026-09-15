@@ -56,6 +56,7 @@ export {
   useFilteredEntries,
   entryPreviewToPasswordEntry,
   decryptedEntryToPasswordEntry,
+  isRecoveryField,
 } from './context/EntriesContext';
 export type { EntriesContextType } from './context/EntriesContext';
 

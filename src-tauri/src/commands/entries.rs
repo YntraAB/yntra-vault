@@ -3,7 +3,7 @@ use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 use yntra_vault_core::totp::{self, TotpConfig};
-use yntra_vault_core::vault::entry::TrashedEntryPreview;
+use yntra_vault_core::vault::{TrashedEntryPreview, VaultStorageMetrics};
 use yntra_vault_core::vault::history::DecryptedHistoryItem;
 use yntra_vault_core::vault::manager::{DecryptedEntry, NewEntry, UpdateEntry};
 use yntra_vault_core::vault::types::*;
@@ -154,6 +154,36 @@ pub async fn empty_trash(state: State<'_, AppState>) -> Result<(), String> {
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
     manager.empty_trash().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn purge_expired_trash(
+    max_age_days: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager
+        .purge_expired_trash(max_age_days.unwrap_or(30))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_storage_metrics(
+    state: State<'_, AppState>,
+) -> Result<VaultStorageMetrics, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    manager.get_storage_metrics().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn compact_vault(
+    state: State<'_, AppState>,
+) -> Result<VaultStorageMetrics, String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.compact_vault().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

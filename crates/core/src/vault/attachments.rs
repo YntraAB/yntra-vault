@@ -9,6 +9,9 @@ use crate::error::VaultError;
 use crate::vault::manager::VaultManager;
 use crate::vault::types::{AttachmentInfo, FieldScope, FileAttachment};
 
+/// Maximum allowed file attachment size (25 MB) to prevent out-of-memory errors during vault MessagePack serialization.
+pub const MAX_ATTACHMENT_SIZE: usize = 25 * 1024 * 1024;
+
 impl VaultManager {
     /// Decrypt and return the raw byte payload of a file attachment.
     pub fn get_attachment_data(&self, entry_id: Uuid, attachment_id: Uuid) -> crate::Result<Vec<u8>> {
@@ -46,6 +49,14 @@ impl VaultManager {
         mime_type: &str,
         data: &[u8],
     ) -> crate::Result<AttachmentInfo> {
+        if data.len() > MAX_ATTACHMENT_SIZE {
+            return Err(VaultError::InvalidFormat(format!(
+                "Attachment size ({} bytes) exceeds maximum allowed limit of {} bytes (25 MB)",
+                data.len(),
+                MAX_ATTACHMENT_SIZE
+            )));
+        }
+
         let entry_key = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();
         let now = Utc::now();
         let attachment_id = Uuid::new_v4();
@@ -110,5 +121,49 @@ impl VaultManager {
         self.save()?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_attachment_max_size_enforcement() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("attachments.vdb");
+        let mut mgr = VaultManager::create("Test Vault", "TestPass#123", &db_path).unwrap();
+
+        let entry = mgr.add_entry(crate::vault::manager::NewEntry {
+            title: "Test Entry".into(),
+            username: "user".into(),
+            password: "pass".into(),
+            url: "".into(),
+            email: "".into(),
+            notes: "".into(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: None,
+            generate_passkey: None,
+            attachments: None,
+        }).unwrap();
+
+        // Valid small attachment succeeds
+        let valid_data = b"small attachment payload";
+        let info = mgr.add_attachment(entry, "notes.txt", "text/plain", valid_data).unwrap();
+        assert_eq!(info.name, "notes.txt");
+
+        // Oversized attachment (> 25MB) fails with InvalidFormat
+        let oversized = vec![0u8; MAX_ATTACHMENT_SIZE + 1];
+        let err = mgr.add_attachment(entry, "huge.bin", "application/octet-stream", &oversized);
+        assert!(err.is_err());
+        match err.err().unwrap() {
+            VaultError::InvalidFormat(msg) => {
+                assert!(msg.contains("exceeds maximum allowed limit"));
+            }
+            other => panic!("Expected InvalidFormat for oversized attachment, got {:?}", other),
+        }
     }
 }

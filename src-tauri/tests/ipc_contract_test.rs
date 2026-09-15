@@ -60,7 +60,7 @@ fn test_tauri2_capabilities_declaration() {
         "core:event:default",
         "clipboard-manager:default",
         "clipboard-manager:allow-write-text",
-        "clipboard-manager:allow-read-text",
+        "clipboard-manager:allow-clear",
         "dialog:default",
         "dialog:allow-open",
         "dialog:allow-save",
@@ -68,7 +68,6 @@ fn test_tauri2_capabilities_declaration() {
         "notification:allow-notify",
         "shell:default",
         "shell:allow-open",
-        "fs:default",
     ];
 
     for req in required_perms {
@@ -78,6 +77,12 @@ fn test_tauri2_capabilities_declaration() {
             req
         );
     }
+
+    // Security invariant: allow-read-text must NOT be granted to prevent clipboard snooping
+    assert!(
+        !perm_strings.contains(&"clipboard-manager:allow-read-text"),
+        "clipboard-manager:allow-read-text must not be permitted in default capabilities"
+    );
 }
 
 #[test]
@@ -162,6 +167,9 @@ fn test_ipc_schema_contract_covers_all_commands() {
         "restore_from_trash",
         "permanent_delete",
         "empty_trash",
+        "purge_expired_trash",
+        "get_storage_metrics",
+        "compact_vault",
         // Password History
         "get_password_history",
         // TOTP
@@ -192,6 +200,8 @@ fn test_ipc_schema_contract_covers_all_commands() {
         "disable_autostart",
         "is_autostart_enabled",
         "get_favicon",
+        "set_external_favicons_enabled",
+        "is_external_favicons_enabled",
         "set_minimize_to_tray",
         "webdav_upload",
         "webdav_download",
@@ -202,6 +212,9 @@ fn test_ipc_schema_contract_covers_all_commands() {
         "split_master_password",
         "reconstruct_master_password",
         "reconstruct_master_password_hash",
+        "generate_emergency_kit",
+        "get_emergency_kit_audit",
+        "reset_emergency_kit_audit",
         // Export & Import
         "export_vault",
         "export_vault_csv",

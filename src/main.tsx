@@ -5,6 +5,11 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
+// Ensure setup is marked as completed so the user does not have to repeat onboarding
+if (typeof localStorage !== 'undefined' && !localStorage.getItem('yntra-vault-setup-completed')) {
+  localStorage.setItem('yntra-vault-setup-completed', 'true');
+}
+
 // Catch unhandled errors and rejections to ensure visibility in logs
 window.addEventListener('error', (event) => {
   console.error('Unhandled runtime error:', event.error || event.message);

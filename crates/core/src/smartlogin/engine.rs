@@ -404,13 +404,16 @@ impl SmartLoginEngine {
                         }),
                     );
 
+                    let search_target_json = serde_json::to_string(&best.link.text.trim().to_lowercase())
+                        .unwrap_or_else(|_| "\"\"".to_string());
                     let click_js = format!(
                         r#"
                         (() => {{
+                            const target = {};
                             const els = document.querySelectorAll('button, [role="button"], a, [role="link"]');
                             for (const el of els) {{
                                 const text = (el.textContent || '').trim().toLowerCase();
-                                if (text === '{}') {{
+                                if (text === target) {{
                                     el.click();
                                     return 'clicked';
                                 }}
@@ -418,7 +421,7 @@ impl SmartLoginEngine {
                             return 'not_found';
                         }})()
                         "#,
-                        best.link.text.to_lowercase().replace('\'', "\\'")
+                        search_target_json
                     );
                     let _ = current_page.evaluate(click_js).await;
 

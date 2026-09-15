@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { Fingerprint, KeyRound, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Loader2, FileText, Download, ChevronDown, ChevronUp, ShieldCheck, History, RotateCcw } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
 import { SecurityDashboard } from '@/features/audit';
-import { SettingSection, Toggle } from './SettingSection';
-import { isTauri, type BiometricInfo } from '@/lib/backend';
+import { SettingSection, SettingRow, Toggle } from './SettingSection';
+import { isTauri, type BiometricInfo, type EmergencyKit, type EmergencyKitAudit } from '@/lib/backend';
 
 export interface SecurityTabProps {
   bioActive: boolean;
@@ -17,6 +17,7 @@ export interface SecurityTabProps {
   onOpenHwModal: (mode: 'enroll' | 'test') => void;
   onDisableHw: () => void;
   onOpenChangePassword: () => void;
+  onNavigateToEntry?: (entryId: string) => void;
 }
 
 export function SecurityTab({
@@ -28,324 +29,402 @@ export function SecurityTab({
   onOpenHwModal,
   onDisableHw,
   onOpenChangePassword,
+  onNavigateToEntry,
 }: SecurityTabProps) {
   const { settings, updateSettings } = useSettings();
   const { addToast } = useToast();
   const { t } = useTranslation();
   const { backend } = useBackend();
 
-  // Shamir state
+  // Shamir & Emergency Kit state
   const [shamirPass, setShamirPass] = useState('');
-  const [shares, setShares] = useState<string[]>([]);
-  const [shareA, setShareA] = useState('');
-  const [shareB, setShareB] = useState('');
-  const [reconstructedPass, setReconstructedPass] = useState('');
+  const [emergencyKit, setEmergencyKit] = useState<EmergencyKit | null>(null);
+  const [audit, setAudit] = useState<EmergencyKitAudit | null>(null);
+  const [isGeneratingKit, setIsGeneratingKit] = useState(false);
+  const [isResettingAudit, setIsResettingAudit] = useState(false);
+  const [showKitSheet, setShowKitSheet] = useState(false);
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
+  const [passError, setPassError] = useState(false);
+
+  useEffect(() => {
+    backend?.getEmergencyKitAudit().then(setAudit).catch(() => {});
+  }, [backend]);
+
+  const handleGenerateKit = async () => {
+    if (!backend || !shamirPass || isGeneratingKit) return;
+    setIsGeneratingKit(true);
+    setPassError(false);
+    try {
+      const kit = await backend.generateEmergencyKit(shamirPass);
+      setEmergencyKit(kit);
+      setShamirPass('');
+      const updatedAudit = await backend.getEmergencyKitAudit();
+      setAudit(updatedAudit);
+      addToast({ message: t('toast.recovery_shares_generated') || 'Emergency Kit generated', type: 'success' });
+    } catch (err) {
+      const errStr = String(err);
+      if (errStr.toLowerCase().includes('password') || errStr.toLowerCase().includes('lösenord')) {
+        setPassError(true);
+        addToast({ message: t('error.invalid_password'), type: 'error' });
+      } else {
+        addToast({ message: t('toast.split_failed', { err: errStr }), type: 'error' });
+      }
+    } finally {
+      setIsGeneratingKit(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
       {/* Security Health Dashboard */}
       <SettingSection label={t('security.title')}>
-        <SecurityDashboard />
+        <SecurityDashboard
+          onNavigateToEntry={onNavigateToEntry}
+          onOpenChangePassword={onOpenChangePassword}
+        />
       </SettingSection>
 
       {/* Master Password */}
-      <SettingSection
+      <SettingRow
         label={t('settings.master_password')}
+        description={t('settings.master_password_desc')}
         tooltip={t('settings.tooltip_change_password')}
       >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('security.master_password')}
-        </p>
         <button
+          type="button"
           onClick={onOpenChangePassword}
-          className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
+          className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer whitespace-nowrap shrink-0"
         >
           {t('settings.change_password')}
         </button>
-      </SettingSection>
+      </SettingRow>
 
       {/* Window Capture Protection */}
-      <SettingSection
+      <SettingRow
         label={t('settings.capture_protection_label')}
+        description={t('settings.capture_protection_desc')}
         tooltip={t('settings.tooltip_capture_protection')}
       >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.capture_protection_desc')}
-        </p>
-        <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-          <div className="flex flex-col">
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">
-              {t('settings.capture_protection_enable')}
-            </span>
-            <span className="text-[11px] text-[var(--text-tertiary)]">
-              {settings.windowCaptureProtection !== false ? t('settings.capture_protection_active') : t('common.disabled')}
-            </span>
-          </div>
-          <Toggle
-            checked={settings.windowCaptureProtection !== false}
-            onChange={(checked) => updateSettings({ windowCaptureProtection: checked })}
-          />
-        </div>
-      </SettingSection>
+        <Toggle
+          checked={settings.windowCaptureProtection !== false}
+          onChange={(checked) => updateSettings({ windowCaptureProtection: checked })}
+        />
+      </SettingRow>
 
-      {/* Aggressive Auto-Lock */}
-      <SettingSection
-        label={t('settings.aggressive_autolock_label')}
+      {/* System Lock & Focus Loss Auto-Lock */}
+      <SettingRow
+        label={t('settings.lock_on_system_lock_label')}
+        description={t('settings.lock_on_system_lock_desc')}
         tooltip={t('settings.tooltip_aggressive_autolock')}
       >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.aggressive_autolock_desc')}
-        </p>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-            <div className="flex flex-col">
-              <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                {t('settings.lock_on_system_lock_label')}
-              </span>
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                {settings.lockOnSystemLock !== false ? t('settings.lock_on_system_lock_active') : t('common.disabled')}
-              </span>
-            </div>
-            <Toggle
-              checked={settings.lockOnSystemLock !== false}
-              onChange={(checked) => updateSettings({ lockOnSystemLock: checked })}
-            />
-          </div>
+        <Toggle
+          checked={settings.lockOnSystemLock !== false}
+          onChange={(checked) => updateSettings({ lockOnSystemLock: checked })}
+        />
+      </SettingRow>
 
-          <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-            <div className="flex flex-col">
-              <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                {t('settings.lock_on_focus_loss_label')}
-              </span>
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                {settings.lockOnFocusLoss === true ? t('settings.lock_on_focus_loss_active') : t('common.disabled')}
-              </span>
-            </div>
-            <Toggle
-              checked={settings.lockOnFocusLoss === true}
-              onChange={(checked) => updateSettings({ lockOnFocusLoss: checked })}
-            />
-          </div>
-        </div>
-      </SettingSection>
+      <SettingRow
+        label={t('settings.lock_on_focus_loss_label')}
+        description={t('settings.lock_on_focus_loss_desc')}
+        tooltip={t('settings.tooltip_aggressive_autolock')}
+      >
+        <Toggle
+          checked={settings.lockOnFocusLoss === true}
+          onChange={(checked) => updateSettings({ lockOnFocusLoss: checked })}
+        />
+      </SettingRow>
 
       {/* Biometric Unlock */}
-      <SettingSection
-        label={t('settings.biometric_unlock')}
+      <SettingRow
+        label={bioInfo?.biometric_type || t('settings.biometric_hardware_title')}
+        description={
+          hwActive
+            ? t('settings.biometric_disabled_hw')
+            : bioActive
+              ? t('settings.biometric_enrolled')
+              : t('settings.biometric_desc')
+        }
         tooltip={t('settings.tooltip_biometric')}
       >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.biometric_desc')}
-        </p>
-        <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-          <div className="flex items-center gap-3">
-            <Fingerprint className="text-[var(--accent)]" size={20} />
-            <div className="flex flex-col">
-              <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                {bioInfo?.biometric_type || t('settings.biometric_hardware_title')}
-              </span>
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                {hwActive
-                  ? 'Disabled while Hardware 2FA is active'
-                  : bioActive
-                    ? t('settings.biometric_enrolled')
-                    : t('settings.biometric_disabled')}
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={onToggleBiometric}
-            disabled={hwActive || isTogglingBio}
-            className={`h-8 rounded-[3px] px-3 text-[12px] font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 select-none ${
-              hwActive || isTogglingBio
-                ? 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] opacity-50 cursor-not-allowed'
-                : bioActive
-                  ? 'border border-[var(--destructive)] bg-transparent text-[var(--destructive)] hover:bg-[var(--destructive)]/10'
-                  : 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-            }`}
-          >
-            {isTogglingBio ? (
-              <>
-                <Loader2 size={12} className="animate-spin" />
-                <span>Verifying...</span>
-              </>
-            ) : bioActive ? (
-              t('common.disable')
-            ) : (
-              t('common.enable')
-            )}
-          </button>
-        </div>
-      </SettingSection>
+        <button
+          type="button"
+          onClick={onToggleBiometric}
+          disabled={hwActive || isTogglingBio}
+          className={`h-8 rounded-[3px] px-3 text-[12px] font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 select-none whitespace-nowrap shrink-0 ${
+            hwActive || isTogglingBio
+              ? 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] opacity-50 cursor-not-allowed'
+              : bioActive
+                ? 'border border-[var(--destructive)] bg-transparent text-[var(--destructive)] hover:bg-[var(--destructive)]/10'
+                : 'border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+          }`}
+        >
+          {isTogglingBio ? (
+            <>
+              <Loader2 size={12} className="animate-spin" />
+              <span>Verifying...</span>
+            </>
+          ) : bioActive ? (
+            t('common.disable')
+          ) : (
+            t('common.enable')
+          )}
+        </button>
+      </SettingRow>
 
       {/* Hardware 2FA / YubiKey */}
-      <SettingSection
-        label={t('settings.hardware_2fa')}
+      <SettingRow
+        label={t('settings.yubikey_title')}
+        description={hwActive ? t('settings.yubikey_enrolled') : t('settings.hardware_2fa_desc')}
         tooltip={t('settings.tooltip_hardware_2fa')}
       >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.hardware_2fa_desc')}
-        </p>
-        <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-          <div className="flex items-center gap-3">
-            <KeyRound className="text-white" size={20} />
-            <div className="flex flex-col">
-              <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                {t('settings.yubikey_title')}
-              </span>
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                {hwActive ? t('settings.yubikey_enrolled') : t('settings.yubikey_not_enrolled')}
-              </span>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {hwActive ? (
-              <>
-                <button
-                  onClick={() => onOpenHwModal('test')}
-                  className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                >
-                  {t('settings.test_key')}
-                </button>
-                <button
-                  onClick={onDisableHw}
-                  className="h-8 rounded-[3px] border border-[var(--destructive)] bg-transparent px-3 text-[12px] font-medium text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-colors cursor-pointer"
-                >
-                  {t('common.disable')}
-                </button>
-              </>
-            ) : (
+        <div className="flex gap-2 shrink-0">
+          {hwActive ? (
+            <>
               <button
-                onClick={() => onOpenHwModal('enroll')}
-                className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                type="button"
+                onClick={() => onOpenHwModal('test')}
+                className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                {t('common.enable')}
+                {t('settings.test_key')}
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={onDisableHw}
+                className="h-8 rounded-[3px] border border-[var(--destructive)] bg-transparent px-3 text-[12px] font-medium text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                {t('common.disable')}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenHwModal('enroll')}
+              className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {t('common.enable')}
+            </button>
+          )}
         </div>
-      </SettingSection>
+      </SettingRow>
+
 
       {/* Emergency Recovery */}
       <SettingSection
         label={t('settings.emergency_recovery')}
         tooltip={t('settings.tooltip_emergency_recovery')}
       >
-        <p className="mb-3 text-[12px] text-[var(--text-secondary)]">
+        <p className="mb-2.5 text-[12px] text-[var(--text-secondary)]">
           {t('settings.emergency_recovery_desc')}
         </p>
-        <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-          <div className="flex gap-2">
-            <input
-              type="password"
-              placeholder={t('settings.verify_master_placeholder')}
-              value={shamirPass}
-              onChange={(e) => setShamirPass(e.target.value)}
-              className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-            />
-            <button
-              onClick={async () => {
-                if (!backend || !shamirPass) return;
-                try {
-                  const res = await backend.splitMasterPassword(shamirPass);
-                  setShares(res);
-                  addToast({ message: t('toast.recovery_shares_generated'), type: 'success' });
-                } catch (err) {
-                  addToast({ message: t('toast.split_failed', { err: String(err) }), type: 'error' });
-                }
-              }}
-              className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
-            >
-              {t('settings.split_button')}
-            </button>
+        <div className="flex flex-col gap-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3.5">
+          {/* Status & Audit Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[var(--border-subtle)]">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck size={14} className={audit?.active_fingerprint ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'} />
+                <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                  {audit?.active_fingerprint
+                    ? t('settings.emergency_status_active', { fingerprint: audit.active_fingerprint })
+                    : t('settings.emergency_status_none')}
+                </span>
+              </div>
+              {audit?.last_generated_at && (
+                <span className="text-[10px] text-[var(--text-tertiary)]">
+                  {t('settings.emergency_last_generated', { date: new Date(audit.last_generated_at).toLocaleString() })}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {audit?.history && audit.history.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAuditLogs(!showAuditLogs)}
+                  className="flex items-center gap-1 h-6.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 text-[10.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                >
+                  <History size={11} />
+                  {t('settings.emergency_audit_toggle', { count: audit.history.length })}
+                </button>
+              )}
+              {audit?.active_fingerprint && (
+                <button
+                  type="button"
+                  disabled={isResettingAudit}
+                  onClick={async () => {
+                    if (!backend) return;
+                    setIsResettingAudit(true);
+                    try {
+                      await backend.resetEmergencyKitAudit();
+                      const updated = await backend.getEmergencyKitAudit();
+                      setAudit(updated);
+                      setEmergencyKit(null);
+                      addToast({ message: t('toast.emergency_kit_reset'), type: 'success' });
+                    } catch (err) {
+                      addToast({ message: String(err), type: 'error' });
+                    } finally {
+                      setIsResettingAudit(false);
+                    }
+                  }}
+                  className="flex items-center gap-1 h-6.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 text-[10.5px] font-medium text-[var(--text-secondary)] hover:text-red-400 hover:border-red-500/30 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isResettingAudit ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                  {t('settings.reset_kit_button')}
+                </button>
+              )}
+            </div>
           </div>
 
-          {shares.length > 0 && (
-            <div className="flex flex-col gap-1.5 mt-2 border-t border-[var(--border-subtle)] pt-2.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.recovery_shares_label')}</span>
-              {shares.map((s, idx) => (
-                <div key={idx} className="flex items-center justify-between gap-2 rounded-[3px] bg-[var(--bg-base)] px-2 py-1">
-                  <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">{s}</span>
-                  <button
-                    onClick={() => {
-                      if (isTauri()) {
-                        backend?.copyToClipboard(s, true, 30).catch(() => {});
-                      } else {
-                        navigator.clipboard.writeText(s).catch(() => {});
-                      }
-                      addToast({ message: t('toast.share_copied', { index: idx + 1 }), type: 'success' });
-                    }}
-                    className="text-[10px] font-medium text-[var(--text-primary)] hover:underline cursor-pointer"
-                  >
-                    {t('common.copy')}
-                  </button>
-                </div>
-              ))}
+          {/* Audit Logs Drawer */}
+          {showAuditLogs && audit?.history && audit.history.length > 0 && (
+            <div className="flex flex-col gap-1.5 rounded-[3px] bg-[var(--bg-base)] p-2.5 border border-[var(--border-subtle)] text-[10px]">
+              <div className="flex items-center justify-between text-[var(--text-tertiary)] font-semibold uppercase tracking-wider pb-1 border-b border-[var(--border-subtle)]">
+                <span>{t('settings.emergency_audit_title')}</span>
+                <span className="normal-case font-normal text-[9px]">{t('settings.emergency_audit_desc')}</span>
+              </div>
+              <div className="flex flex-col gap-1 max-h-36 overflow-y-auto pr-1">
+                {audit.history.slice().reverse().map((entry, idx) => (
+                  <div key={idx} className="flex items-center justify-between py-1 border-b border-[var(--border-subtle)] last:border-b-0 font-mono">
+                    <span className="text-[var(--text-tertiary)]">
+                      {new Date(entry.timestamp).toLocaleString()}
+                    </span>
+                    <span className="text-[var(--text-secondary)]">
+                      {entry.fingerprint !== '-' ? `#${entry.fingerprint}` : '—'}
+                    </span>
+                    <span className="text-[var(--text-primary)] uppercase text-[9px] font-sans">
+                      {entry.action === 'generated'
+                        ? t('settings.emergency_action_generated')
+                        : entry.action === 'reset'
+                        ? t('settings.emergency_action_reset')
+                        : t('settings.emergency_action_invalidated')}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </div>
 
-        <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 mt-3">
-          <div className="flex flex-col">
-            <span className="text-[11px] font-medium text-[var(--text-primary)]">
-              {t('settings.verify_recovery_shares') || 'Verify & Test Recovery Shares'}
-            </span>
-            <span className="text-[11px] text-[var(--text-tertiary)]">
-              {t('settings.verify_recovery_shares_desc') || 'Test your paper recovery shares to verify they successfully reconstruct your master password.'}
-            </span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <input
-              type="text"
-              placeholder={t('settings.share1_placeholder')}
-              value={shareA}
-              onChange={(e) => setShareA(e.target.value)}
-              className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-            />
-            <input
-              type="text"
-              placeholder={t('settings.share2_placeholder')}
-              value={shareB}
-              onChange={(e) => setShareB(e.target.value)}
-              className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-            />
-            <button
-              onClick={async () => {
-                if (!backend || !shareA || !shareB) return;
-                try {
-                  const res = await backend.reconstructMasterPassword(shareA, shareB);
-                  setReconstructedPass(res);
-                  addToast({ message: t('toast.password_reconstructed') || 'Master password reconstructed successfully', type: 'success' });
-                } catch (err) {
-                  addToast({ message: t('toast.reconstruction_failed', { err: String(err) }), type: 'error' });
-                }
-              }}
-              className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
-            >
-              {t('settings.verify_shares_button') || 'Verify & Reconstruct Shares'}
-            </button>
-            {reconstructedPass && (
-              <div className="flex flex-col gap-1 mt-1 bg-[var(--bg-base)] p-2.5 rounded-[3px] border border-green-500/30">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.reconstructed_password_label') || 'Reconstructed Master Password'}</span>
-                  <button
-                    onClick={() => {
-                      if (isTauri()) {
-                        backend?.copyToClipboard(reconstructedPass, true, 30).catch(() => {});
-                      } else {
-                        navigator.clipboard.writeText(reconstructedPass).catch(() => {});
-                      }
-                      addToast({ message: t('toast.password_copied') || 'Password copied to clipboard', type: 'success' });
-                    }}
-                    className="text-[10px] font-medium text-green-500 hover:underline cursor-pointer"
-                  >
-                    {t('common.copy')}
-                  </button>
-                </div>
-                <span className="font-mono text-[12px] text-green-400 break-all select-all font-semibold">{reconstructedPass}</span>
-              </div>
+          {/* Generator Input */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex gap-2">
+              <input
+                type="password"
+                placeholder={t('settings.verify_master_placeholder')}
+                value={shamirPass}
+                onChange={(e) => {
+                  setShamirPass(e.target.value);
+                  if (passError) setPassError(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isGeneratingKit && shamirPass) {
+                    handleGenerateKit();
+                  }
+                }}
+                className={`h-8 flex-1 rounded-[3px] border bg-[var(--bg-base)] px-2.5 text-[12px] placeholder:text-[12px] placeholder:text-[var(--text-tertiary)] text-[var(--text-primary)] outline-none transition-colors ${
+                  passError
+                    ? 'border-[var(--destructive)] focus:border-[var(--destructive)]'
+                    : 'border-[var(--border)] focus:border-[var(--border-focus)]'
+                }`}
+              />
+              <button
+                disabled={isGeneratingKit || !shamirPass}
+                onClick={handleGenerateKit}
+                className="h-8 flex items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                {isGeneratingKit ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+                {audit?.active_fingerprint ? t('settings.generate_new_emergency_kit') : t('settings.generate_emergency_kit')}
+              </button>
+            </div>
+            {passError && (
+              <span className="text-[11px] text-[var(--destructive)] font-medium">
+                {t('error.invalid_password')}
+              </span>
             )}
           </div>
+
+          {/* Active Generated Kit Box */}
+          {emergencyKit && (
+            <div className="flex flex-col gap-2 mt-1 border-t border-[var(--border-subtle)] pt-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-semibold text-[var(--text-primary)]">
+                  {t('settings.emergency_kit_sheet_title', {
+                    vault: emergencyKit.vault_name,
+                    threshold: 2,
+                    total: emergencyKit.shares.length,
+                  })}
+                </span>
+                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                  #{emergencyKit.verification_hash}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!emergencyKit) return;
+                    const blob = new Blob([emergencyKit.document_markdown], { type: 'text/markdown;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const cleanName = emergencyKit.vault_name.replace(/\.vdb$/i, '');
+                    a.download = `yntra-emergency-kit-${cleanName}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    addToast({ message: t('toast.sheet_downloaded'), type: 'success' });
+                  }}
+                  className="flex items-center gap-1.5 h-7 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                >
+                  <Download size={12} />
+                  {t('settings.download_sheet_md')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowKitSheet(!showKitSheet)}
+                  className="flex items-center gap-1 h-7 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer ml-auto"
+                >
+                  {showKitSheet ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  {showKitSheet ? t('settings.hide_preview') : t('settings.show_preview')}
+                </button>
+              </div>
+
+              {/* Emergency Shares without green badges or preachy notices */}
+              <div className="flex flex-col gap-1.5 mt-1">
+                {emergencyKit.shares.map((s) => (
+                  <div key={s.share_index} className="flex flex-col gap-1 rounded-[3px] bg-[var(--bg-base)] p-2 border border-[var(--border-subtle)]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-[var(--text-primary)]">
+                        {t('settings.share_part', { index: s.share_index })}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (isTauri()) {
+                            backend?.copyToClipboard(s.share_data, true, 30).catch(() => {});
+                          } else {
+                            navigator.clipboard.writeText(s.share_data).catch(() => {});
+                          }
+                          addToast({ message: t('toast.share_copied', { index: s.share_index }), type: 'success' });
+                        }}
+                        className="text-[10px] font-medium text-[var(--text-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('common.copy')}
+                      </button>
+                    </div>
+                    <span className="font-mono text-[10px] text-[var(--text-secondary)] select-all truncate">
+                      {s.share_data}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Collapsible Sheet Preview */}
+              {showKitSheet && (
+                <pre className="mt-2 max-h-48 overflow-y-auto rounded-[3px] bg-[var(--bg-base)] p-2.5 font-mono text-[10px] text-[var(--text-secondary)] whitespace-pre-wrap border border-[var(--border)] leading-relaxed select-all">
+                  {emergencyKit.document_markdown}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       </SettingSection>
     </div>

@@ -39,6 +39,15 @@ pub fn bench_totp(c: &mut Criterion) {
         label: Some("security@example.com".to_string()),
     };
 
+    let config_steam = TotpConfig {
+        secret: secret.to_string(),
+        algorithm: TotpAlgorithm::Steam,
+        digits: 5,
+        period: 30,
+        issuer: Some("Steam".to_string()),
+        label: Some("steamuser".to_string()),
+    };
+
     let timestamp = 1700000000u64;
 
     group.bench_function("TOTP Generate (SHA-1 6-digit)", |b| {
@@ -51,6 +60,10 @@ pub fn bench_totp(c: &mut Criterion) {
 
     group.bench_function("TOTP Generate (SHA-512 8-digit)", |b| {
         b.iter(|| generate_totp_at(black_box(&config_sha512), black_box(timestamp)).unwrap());
+    });
+
+    group.bench_function("TOTP Generate (Steam Guard 5-char)", |b| {
+        b.iter(|| generate_totp_at(black_box(&config_steam), black_box(timestamp)).unwrap());
     });
 
     group.finish();

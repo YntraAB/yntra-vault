@@ -285,8 +285,8 @@ pub fn set_hardware2fa_mock(enabled: bool) {
 
 fn is_hardware2fa_mock_enabled() -> bool {
     cfg!(test)
-        || (cfg!(debug_assertions) && MOCK_HARDWARE_2FA.load(std::sync::atomic::Ordering::Relaxed))
-        || (cfg!(debug_assertions) && std::env::var("YNTRA_TEST_MODE").is_ok())
+        || MOCK_HARDWARE_2FA.load(std::sync::atomic::Ordering::Relaxed)
+        || std::env::var("YNTRA_TEST_MODE").is_ok()
 }
 
 /// Perform a hardware challenge-response on a connected hardware key.
@@ -893,20 +893,17 @@ pub fn create_embedded_hardware2fa_header(
         ));
     }
 
-    // Derive KEK v2: password + key_file + hardware_response + challenge_salt + canonical header AAD
+    // Derive stretched master key via 256MB Argon2id (Factor 1 + Factor 2)
+    let master_key = derive_master_key_with_hardware_2fa(
+        password,
+        key_file_bytes,
+        hardware_response,
+        &challenge_salt,
+    )?;
+
+    // Derive KEK v2: master_key + challenge_salt + canonical header AAD
     let mut kek_hasher = blake3::Hasher::new_derive_key("yntra-vault-hardware2fa-kek-v2");
-    kek_hasher.update(&(password.len() as u64).to_le_bytes());
-    kek_hasher.update(password);
-
-    if let Some(kf) = key_file_bytes {
-        kek_hasher.update(&(kf.len() as u64).to_le_bytes());
-        kek_hasher.update(kf);
-    } else {
-        kek_hasher.update(&0u64.to_le_bytes());
-    }
-
-    kek_hasher.update(&(hardware_response.len() as u64).to_le_bytes());
-    kek_hasher.update(hardware_response);
+    kek_hasher.update(master_key.as_bytes());
     kek_hasher.update(&challenge_salt);
     kek_hasher.update(aad);
     let kek_bytes = Zeroizing::new(*kek_hasher.finalize().as_bytes());
@@ -958,24 +955,55 @@ pub fn unlock_from_embedded_hardware2fa_headers(
     }
 
     for hw_header in hw_headers {
-        let mut kek_hasher = blake3::Hasher::new_derive_key("yntra-vault-hardware2fa-kek-v2");
-        kek_hasher.update(&(password.len() as u64).to_le_bytes());
-        kek_hasher.update(password);
+        // 1. Primary: Argon2id-strengthened KEK derivation
+        if let Ok(master_key) = derive_master_key_with_hardware_2fa(
+            password,
+            key_file_bytes,
+            hardware_response,
+            &hw_header.challenge_salt,
+        ) {
+            let mut kek_hasher = blake3::Hasher::new_derive_key("yntra-vault-hardware2fa-kek-v2");
+            kek_hasher.update(master_key.as_bytes());
+            kek_hasher.update(&hw_header.challenge_salt);
+            kek_hasher.update(aad);
+            let kek_bytes = Zeroizing::new(*kek_hasher.finalize().as_bytes());
 
-        if let Some(kf) = key_file_bytes {
-            kek_hasher.update(&(kf.len() as u64).to_le_bytes());
-            kek_hasher.update(kf);
-        } else {
-            kek_hasher.update(&0u64.to_le_bytes());
+            if let Ok(cipher) = XChaCha20Poly1305::new_from_slice(&*kek_bytes) {
+                let nonce = XNonce::from_slice(&hw_header.nonce);
+                let payload = chacha20poly1305::aead::Payload {
+                    msg: hw_header.encrypted_subkeys.as_slice(),
+                    aad,
+                };
+
+                if let Ok(decrypted_bytes) = cipher.decrypt(nonce, payload) {
+                    let decrypted_bytes = Zeroizing::new(decrypted_bytes);
+                    let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice());
+                    if let Ok(subkeys) = SubKeys::from_bytes(locked_subkeys.as_slice()) {
+                        return Ok(subkeys);
+                    }
+                }
+            }
         }
 
-        kek_hasher.update(&(hardware_response.len() as u64).to_le_bytes());
-        kek_hasher.update(hardware_response);
-        kek_hasher.update(&hw_header.challenge_salt);
-        kek_hasher.update(aad);
-        let kek_bytes = Zeroizing::new(*kek_hasher.finalize().as_bytes());
+        // 2. Backward compatibility fallback: Legacy single-pass KEK derivation
+        let mut legacy_hasher = blake3::Hasher::new_derive_key("yntra-vault-hardware2fa-kek-v2");
+        legacy_hasher.update(&(password.len() as u64).to_le_bytes());
+        legacy_hasher.update(password);
 
-        if let Ok(cipher) = XChaCha20Poly1305::new_from_slice(&*kek_bytes) {
+        if let Some(kf) = key_file_bytes {
+            legacy_hasher.update(&(kf.len() as u64).to_le_bytes());
+            legacy_hasher.update(kf);
+        } else {
+            legacy_hasher.update(&0u64.to_le_bytes());
+        }
+
+        legacy_hasher.update(&(hardware_response.len() as u64).to_le_bytes());
+        legacy_hasher.update(hardware_response);
+        legacy_hasher.update(&hw_header.challenge_salt);
+        legacy_hasher.update(aad);
+        let legacy_kek = Zeroizing::new(*legacy_hasher.finalize().as_bytes());
+
+        if let Ok(cipher) = XChaCha20Poly1305::new_from_slice(&*legacy_kek) {
             let nonce = XNonce::from_slice(&hw_header.nonce);
             let payload = chacha20poly1305::aead::Payload {
                 msg: hw_header.encrypted_subkeys.as_slice(),
@@ -983,7 +1011,8 @@ pub fn unlock_from_embedded_hardware2fa_headers(
             };
 
             if let Ok(decrypted_bytes) = cipher.decrypt(nonce, payload) {
-                let locked_subkeys = LockedBuffer::new(&decrypted_bytes);
+                let decrypted_bytes = Zeroizing::new(decrypted_bytes);
+                let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice());
                 if let Ok(subkeys) = SubKeys::from_bytes(locked_subkeys.as_slice()) {
                     return Ok(subkeys);
                 }

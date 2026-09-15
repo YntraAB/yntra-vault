@@ -7181,7 +7181,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "yntra-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "clap",
@@ -7196,6 +7196,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "subtle",
  "tokio",
  "uuid",
  "yntra-crypto",
@@ -7205,7 +7206,7 @@ dependencies = [
 
 [[package]]
 name = "yntra-crypto"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -7234,7 +7235,7 @@ dependencies = [
 
 [[package]]
 name = "yntra-vault-app"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "serde",
@@ -7257,7 +7258,7 @@ dependencies = [
 
 [[package]]
 name = "yntra-vault-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -7286,6 +7287,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "url",
  "uuid",
  "windows 0.58.0",
  "windows-core 0.58.0",

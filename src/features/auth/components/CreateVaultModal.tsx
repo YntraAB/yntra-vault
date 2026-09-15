@@ -201,17 +201,12 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
         info = { id: crypto.randomUUID(), name: name.trim(), path: targetPath };
       }
 
-      // Save to recent vaults using the real ID
-      const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
-      if (kf) {
-        const savedKeyFiles = JSON.parse(localStorage.getItem('yntra-vault-keyfiles') || '{}');
-        savedKeyFiles[info.path] = kf;
-        localStorage.setItem('yntra-vault-keyfiles', JSON.stringify(savedKeyFiles));
-      }
+      // Do not persist keyfile paths in localStorage to preserve 2FA factor isolation
+      localStorage.removeItem('yntra-vault-keyfiles');
 
       const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
       const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
-      const newVault = { id: info.id, name: info.name, path: info.path, keyFilePath: kf };
+      const newVault = { id: info.id, name: info.name, path: info.path };
       localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
       // Trigger the new-vault tutorial on first open

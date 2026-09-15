@@ -131,6 +131,18 @@ impl VaultManager {
         // Invalidate stale envelopes so user can re-enroll with their physical key under the new master password.
         self.hardware2fa = None;
 
+        // Invalidate active emergency kit shares derived from the old master password
+        if let Some(ref mut audit) = self.data.settings.emergency_kit_audit {
+            if !audit.active_fingerprint.is_empty() {
+                audit.history.push(crate::vault::types::EmergencyKitAuditEntry {
+                    timestamp: chrono::Utc::now(),
+                    fingerprint: audit.active_fingerprint.clone(),
+                    action: "invalidated".into(),
+                });
+                audit.active_fingerprint.clear();
+            }
+        }
+
         if self.biometric.is_some() {
             let temp_header = FileHeader {
                 version: FORMAT_VERSION,

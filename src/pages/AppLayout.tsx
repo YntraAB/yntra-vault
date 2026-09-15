@@ -5,7 +5,7 @@ import { ChevronLeft } from 'lucide-react';
 import { useAuth, useAutoLock } from '@/features/auth';
 import { useSettings, SettingsPanel } from '@/features/settings';
 import { useUi } from '@/contexts/UiContext';
-import { useEntries, PasswordList, PasswordDetail, CreateTagModal } from '@/features/entries';
+import { useEntries, PasswordList, PasswordDetail, CreateTagModal, EntryModal } from '@/features/entries';
 import { useToast } from '@/contexts/ToastContext';
 import { useMobile } from '@/hooks/use-mobile';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -20,7 +20,16 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const { currentVault, isLocked, lockVault } = useAuth();
   const { settings } = useSettings();
-  const { settingsOpen, setSettingsOpen, isEntryModalOpen, setIsEntryModalOpen, isCreateTagOpen, setIsCreateTagOpen } = useUi();
+  const {
+    settingsOpen,
+    setSettingsOpen,
+    isEntryModalOpen,
+    editingEntry,
+    openNewEntryModal,
+    closeEntryModal,
+    isCreateTagOpen,
+    setIsCreateTagOpen,
+  } = useUi();
   const { selectedEntry, selectEntryById } = useEntries();
   const { addToast } = useToast();
 
@@ -58,7 +67,7 @@ export default function AppLayout() {
         e.preventDefault();
         e.stopPropagation();
         if (!isEntryModalOpen) {
-          setIsEntryModalOpen(true);
+          openNewEntryModal();
         }
         return;
       }
@@ -66,7 +75,7 @@ export default function AppLayout() {
 
     window.addEventListener('keydown', handleGlobalShortcuts, true);
     return () => window.removeEventListener('keydown', handleGlobalShortcuts, true);
-  }, [settings.keybinds, settingsOpen, isEntryModalOpen, setIsEntryModalOpen, lockVault, navigate, addToast, t]);
+  }, [settings.keybinds, settingsOpen, isEntryModalOpen, openNewEntryModal, lockVault, navigate, addToast, t]);
 
   // Redirect if not authenticated or locked
   useEffect(() => {
@@ -215,7 +224,7 @@ export default function AppLayout() {
             >
               <MobileHeader
                 onOpenDrawer={() => setMobileDrawerOpen(true)}
-                onNewEntry={() => setIsEntryModalOpen(true)}
+                onNewEntry={openNewEntryModal}
                 onToggleSearch={() => setMobileSearchVisible(!mobileSearchVisible)}
                 isSearchVisible={mobileSearchVisible}
               />
@@ -286,6 +295,11 @@ export default function AppLayout() {
           open={isCreateTagOpen}
           onClose={() => setIsCreateTagOpen(false)}
         />
+        <EntryModal
+          open={isEntryModalOpen}
+          editEntry={editingEntry}
+          onClose={closeEntryModal}
+        />
       </div>
     );
   }
@@ -304,6 +318,11 @@ export default function AppLayout() {
       <CreateTagModal
         open={isCreateTagOpen}
         onClose={() => setIsCreateTagOpen(false)}
+      />
+      <EntryModal
+        open={isEntryModalOpen}
+        editEntry={editingEntry}
+        onClose={closeEntryModal}
       />
     </div>
   );

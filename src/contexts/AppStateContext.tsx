@@ -46,6 +46,10 @@ export interface AppStateContextType {
   isLoadingDetail: boolean;
   isEntryModalOpen: boolean;
   setIsEntryModalOpen: (open: boolean) => void;
+  editingEntry?: PasswordEntry | null;
+  openNewEntryModal?: () => void;
+  openEditModal?: (entry: PasswordEntry) => void;
+  closeEntryModal?: () => void;
   setSelectedEntry: (entry: PasswordEntry | null) => void;
   setSearchTerm: (term: string) => void;
   setFilterCategory: (cat: FilterCategory) => void;

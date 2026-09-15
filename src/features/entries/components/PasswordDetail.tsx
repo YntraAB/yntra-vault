@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Pencil,
@@ -21,7 +21,7 @@ import {
   Play,
   MoreVertical,
 } from 'lucide-react';
-import { useEntries } from '../context/EntriesContext';
+import { useEntries, isRecoveryField } from '../context/EntriesContext';
 import { useSettings } from '@/features/settings';
 import { useToast } from '@/contexts/ToastContext';
 import { useUi } from '@/contexts/UiContext';
@@ -36,12 +36,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AutotypeButton } from './AutotypeButton';
 import SmartLoginButton from './SmartLoginButton';
-import { PasswordStrength, BreachIndicator } from '@/features/audit';
+import { PasswordStrength, BreachIndicator, useSecurityAudit } from '@/features/audit';
 import { DeleteEntryModal } from './DeleteEntryModal';
 import type { BreachStatus } from '@/lib/backend';
 import { useTotp } from '../hooks/useTotp';
 import { useBackend } from '@/lib/useBackend';
-import { EntryModal } from './EntryModal';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 import { Favicon } from './Favicon';
 import { formatDate, getFieldLayout, openExternalUrl } from '@/lib/utils';
@@ -67,6 +66,7 @@ export function PasswordDetail() {
     setIsEditing,
     settingsOpen,
     isEntryModalOpen,
+    openEditModal,
     setFilterCategory,
   } = useUi();
   const { settings } = useSettings();
@@ -74,7 +74,6 @@ export function PasswordDetail() {
   const { backend } = useBackend();
   const [editData, setEditData] = useState(selectedEntry);
   const [showDelConfirm, setShowDelConfirm] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const [showTemporaryStats, setShowTemporaryStats] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -211,7 +210,7 @@ export function PasswordDetail() {
     if (!selectedEntry || isEditing) return;
 
     const handleCopyShortcuts = async (e: KeyboardEvent) => {
-      if (settingsOpen || isEntryModalOpen || showDelConfirm || showEditModal || previewAtt) {
+      if (settingsOpen || isEntryModalOpen || showDelConfirm || previewAtt) {
         return;
       }
 
@@ -305,7 +304,7 @@ export function PasswordDetail() {
       if (matchesShortcut(e, kb.editEntry)) {
         e.preventDefault();
         e.stopPropagation();
-        setShowEditModal(true);
+        openEditModal(selectedEntry);
         return;
       }
 
@@ -337,7 +336,7 @@ export function PasswordDetail() {
     settingsOpen,
     isEntryModalOpen,
     showDelConfirm,
-    showEditModal,
+    openEditModal,
     previewAtt,
     addToast,
     backend,
@@ -381,7 +380,7 @@ export function PasswordDetail() {
     }
   }, [editData, setIsEditing, updateEntry]);
 
-  const data = isEditing && editData ? editData : selectedEntry;
+  const data = isEditing && editData && editData.id === selectedEntry?.id ? editData : selectedEntry;
   const entryTags = data
     ? (data.tags.map((t) => tags.find((tag) => tag.name === t)).filter(Boolean) as Tag[])
     : [];
@@ -415,10 +414,27 @@ export function PasswordDetail() {
     }
   }
 
+  const effectiveRecoveryCodes = useMemo(() => {
+    if (!data) return undefined;
+    if (data.recoveryCodes && data.recoveryCodes.trim()) {
+      return data.recoveryCodes;
+    }
+    const legacy = data.customFields
+      .filter((cf) => isRecoveryField(cf.name) && cf.value && cf.value.trim())
+      .map((cf) => cf.value.trim())
+      .join('\n');
+    return legacy || undefined;
+  }, [data]);
+
   const displayCustomFields = data
-    ? data.customFields.filter(cf => cf.name !== '_field_order' && (isEditing || (cf.value && cf.value.trim() !== '')))
+    ? data.customFields.filter(
+        (cf) =>
+          cf.name !== '_field_order' &&
+          !isRecoveryField(cf.name) &&
+          (isEditing || (cf.value && cf.value.trim() !== ''))
+      )
     : [];
-  const layoutOrder = data ? getFieldLayout(data.customFields, activeStandard) : [];
+  const layoutOrder = data ? getFieldLayout(displayCustomFields, activeStandard) : [];
 
   const handleCopyTitle = useCallback(async () => {
     if (!data?.title) return;
@@ -617,15 +633,17 @@ export function PasswordDetail() {
                     </ActionTooltip>
 
                     {/* Smart Login */}
-                    <SmartLoginButton
-                      entryId={data.id}
-                      entryTitle={data.title}
-                      hasUrl={!!data.url}
-                    />
+                    {isTauri() && !!data.url && (
+                      <SmartLoginButton
+                        entryId={data.id}
+                        entryTitle={data.title}
+                        hasUrl={!!data.url}
+                      />
+                    )}
 
                     <ActionTooltip content={t('common.edit')}>
                       <button
-                        onClick={() => setShowEditModal(true)}
+                        onClick={() => selectedEntry && openEditModal(selectedEntry)}
                         className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
                       >
                         <Pencil size={14} className="shrink-0" />
@@ -740,6 +758,7 @@ export function PasswordDetail() {
                             password={data.password}
                             status={data.breachStatus}
                             showTemporaryStats={showTemporaryStats}
+                            entryId={selectedEntry.id}
                           />
                         )}
                       </div>
@@ -747,7 +766,7 @@ export function PasswordDetail() {
                   }
 
                   if (id === 'url') {
-                    const isAppPath = /[\\\/]|\.exe$|\.app$/i.test(data.url);
+                    const isAppPath = /[\\/]|\.exe$|\.app$/i.test(data.url);
                     return (
                       <motion.div
                         key="url"
@@ -880,75 +899,19 @@ export function PasswordDetail() {
 
                   if (id === 'totpSecret') {
                     return (
-                      <Fragment key="totpSecret">
-                        <TOTPField
-                          secret={data.totpSecret || ''}
-                          index={i}
-                        />
-
-                        {data.recoveryCodes && (
-                          <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 select-none">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                                  {t('detail.recovery_codes')}
-                                </span>
-                                <span className="text-[10px] text-[var(--text-tertiary)]/70">
-                                  ({data.recoveryCodes.split(/[\s,;\n]+/).filter(Boolean).length} keys)
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => setShowRecovery(!showRecovery)}
-                                className="text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                              >
-                                {showRecovery ? t('detail.hide_codes') : t('detail.show_codes')}
-                              </button>
-                            </div>
-
-                            {showRecovery && (
-                              <motion.div
-                                initial={{ opacity: 0, y: -4 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.1 }}
-                                className="space-y-2"
-                              >
-                                <div className="grid grid-cols-2 gap-1.5 font-mono text-[12px] max-h-36 overflow-y-auto pr-1">
-                                  {data.recoveryCodes.split(/[\s,;\n]+/).filter(Boolean).map((code, idx) => (
-                                    <RecoveryCodeItem
-                                      key={idx}
-                                      code={code}
-                                      index={idx}
-                                      onCopy={() => addToast({ message: t('toast.recovery_code_copied', { index: idx + 1 }), type: 'success' })}
-                                    />
-                                  ))}
-                                </div>
-                                <div className="flex justify-end">
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        if (isTauri()) {
-                                          const backend = await getBackend();
-                                          await backend.copyToClipboard(data.recoveryCodes || '', true, 30);
-                                        } else {
-                                          await navigator.clipboard.writeText(data.recoveryCodes || '');
-                                        }
-                                      } catch {
-                                        if (!isTauri()) {
-                                          navigator.clipboard.writeText(data.recoveryCodes || '').catch(() => {});
-                                        }
-                                      }
-                                      addToast({ message: t('detail.copied_all_recovery'), type: 'success' });
-                                    }}
-                                    className="rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                                  >
-                                    {t('detail.copy_all_codes')}
-                                  </button>
-                                </div>
-                              </motion.div>
-                            )}
-                          </div>
+                      <TOTPField
+                        key="totpSecret"
+                        secret={data.totpSecret || ''}
+                        index={i}
+                      >
+                        {effectiveRecoveryCodes && (
+                          <RecoveryCodesCard
+                            codes={effectiveRecoveryCodes}
+                            showRecovery={showRecovery}
+                            setShowRecovery={setShowRecovery}
+                          />
                         )}
-                      </Fragment>
+                      </TOTPField>
                     );
                   }
                 } else {
@@ -1045,6 +1008,17 @@ export function PasswordDetail() {
                   );
                 }
               })}
+
+              {!layoutOrder.includes('totpSecret') && effectiveRecoveryCodes && (
+                <div className="rounded-[3px] bg-[var(--bg-elevated)] px-3 py-2.5">
+                  <RecoveryCodesCard
+                    codes={effectiveRecoveryCodes}
+                    showRecovery={showRecovery}
+                    setShowRecovery={setShowRecovery}
+                    noBorder
+                  />
+                </div>
+              )}
             </div>
 
             {/* Passkey — only shown when active */}
@@ -1202,13 +1176,6 @@ export function PasswordDetail() {
 
 
 
-      {/* Edit modal */}
-      <EntryModal
-        open={showEditModal}
-        onClose={() => setShowEditModal(false)}
-        editEntry={selectedEntry}
-      />
-
       {/* Attachment Preview Modal */}
       <AttachmentPreviewModal
         open={!!previewAtt}
@@ -1217,6 +1184,96 @@ export function PasswordDetail() {
         data={previewData}
         onDownload={previewAtt ? () => handleDownloadAttachment(previewAtt) : undefined}
       />
+    </div>
+  );
+}
+
+function RecoveryCodesCard({
+  codes,
+  showRecovery,
+  setShowRecovery,
+  noBorder = false,
+}: {
+  codes: string;
+  showRecovery: boolean;
+  setShowRecovery: React.Dispatch<React.SetStateAction<boolean>>;
+  noBorder?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { addToast } = useToast();
+  const codeList = codes.split(/[\s,;\n]+/).filter(Boolean);
+
+  return (
+    <div className={noBorder ? 'select-none' : 'mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 select-none'}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+            {t('detail.recovery_codes')}
+          </span>
+          <span className="text-[10px] text-[var(--text-tertiary)]/70">
+            ({codeList.length} keys)
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowRecovery((v) => !v);
+          }}
+          className="text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+        >
+          {showRecovery ? t('detail.hide_codes') : t('detail.show_codes')}
+        </button>
+      </div>
+
+      {showRecovery && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.1 }}
+          className="mt-2.5 space-y-2"
+        >
+          <div className="grid grid-cols-2 gap-1.5 font-mono text-[12px] max-h-36 overflow-y-auto pr-1">
+            {codeList.map((code, idx) => (
+              <RecoveryCodeItem
+                key={idx}
+                code={code}
+                index={idx}
+                onCopy={() =>
+                  addToast({
+                    message: t('toast.recovery_code_copied', { index: idx + 1 }),
+                    type: 'success',
+                  })
+                }
+              />
+            ))}
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  if (isTauri()) {
+                    const backend = await getBackend();
+                    await backend.copyToClipboard(codes, true, 30);
+                  } else {
+                    await navigator.clipboard.writeText(codes);
+                  }
+                } catch {
+                  if (!isTauri()) {
+                    navigator.clipboard.writeText(codes).catch(() => {});
+                  }
+                }
+                addToast({ message: t('detail.copied_all_recovery'), type: 'success' });
+              }}
+              className="rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+            >
+              {t('detail.copy_all_codes')}
+            </button>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }
@@ -1263,7 +1320,17 @@ function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number
   );
 }
 
-function TOTPField({ secret, index, label = '2FA Code' }: { secret: string; index: number; label?: string }) {
+function TOTPField({
+  secret,
+  index,
+  label = '2FA Code',
+  children,
+}: {
+  secret: string;
+  index: number;
+  label?: string;
+  children?: React.ReactNode;
+}) {
   const { t } = useTranslation();
   const code = useTotp(secret);
   const isUrgent = code ? code.seconds_remaining <= 5 : false;
@@ -1280,37 +1347,45 @@ function TOTPField({ secret, index, label = '2FA Code' }: { secret: string; inde
       initial={{ opacity: 0, y: 2 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.1, delay: index * 0.02 }}
-      className="flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] px-3 py-2.5 transition-colors hover:bg-[var(--bg-hover)] mt-4"
+      className="rounded-[3px] bg-[var(--bg-elevated)] px-3 py-2.5 transition-colors"
     >
-      <span className="shrink-0 text-[var(--text-secondary)] select-none">
-        <ShieldCheck size={15} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] flex items-center gap-1.5 select-none">
-          <span>{label}</span>
-          {code && (
-            <CountdownRing progress={progress} size={10} urgent={isUrgent} />
-          )}
-        </div>
-        <div className="flex items-baseline gap-1.5">
-          <span className={`font-mono text-[13px] font-semibold tracking-wider select-all ${
-            isUrgent ? 'text-red-400 animate-pulse' : 'text-[var(--text-primary)]'
-          }`}>
-            {formattedCode}
-          </span>
-          {code && (
-            <span className="text-[10px] text-[var(--text-tertiary)] select-none">
-              ({code.seconds_remaining}s)
+      <div
+        className={`flex items-center gap-3 -mx-3 px-3 py-2.5 transition-colors hover:bg-[var(--bg-hover)] ${
+          children ? '-mt-2.5 rounded-t-[3px]' : '-my-2.5 rounded-[3px]'
+        }`}
+      >
+        <span className="shrink-0 text-[var(--text-secondary)] select-none">
+          <ShieldCheck size={15} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] flex items-center gap-1.5 select-none">
+            <span>{label}</span>
+            {code && (
+              <CountdownRing progress={progress} size={10} urgent={isUrgent} />
+            )}
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className={`font-mono text-[13px] font-semibold tracking-wider select-all ${
+              isUrgent ? 'text-red-400 animate-pulse' : 'text-[var(--text-primary)]'
+            }`}>
+              {formattedCode}
             </span>
-          )}
+            {code && (
+              <span className="text-[10px] text-[var(--text-tertiary)] select-none">
+                ({code.seconds_remaining}s)
+              </span>
+            )}
+          </div>
         </div>
+        {code && (
+          <div className="flex items-center gap-1">
+            <AutotypeButton value={code.code} />
+            <CopyButton value={code.code} />
+          </div>
+        )}
       </div>
-      {code && (
-        <div className="flex items-center gap-1">
-          <AutotypeButton value={code.code} />
-          <CopyButton value={code.code} />
-        </div>
-      )}
+
+      {children}
     </motion.div>
   );
 }
@@ -1355,9 +1430,11 @@ const PasswordSafetySection: React.FC<{
   password?: string;
   status?: BreachStatus;
   showTemporaryStats: boolean;
-}> = ({ password, status, showTemporaryStats }) => {
+  entryId?: string;
+}> = ({ password, status, showTemporaryStats, entryId }) => {
   const [breachStatus, setBreachStatus] = useState<BreachStatus | null>(status || null);
   const { selectedEntry, updateBreachStatus, saveVault } = useEntries();
+  const { audit } = useSecurityAudit();
 
   useEffect(() => {
     if (status) {
@@ -1367,15 +1444,28 @@ const PasswordSafetySection: React.FC<{
 
   if (!password) return null;
 
-  const isSafe = breachStatus?.type === 'Safe' || breachStatus?.type === 'Unknown';
+  const reusedIssue = entryId
+    ? audit?.issues.find((i) => i.entry_id === entryId && i.issue_type === 'ReusedPassword')
+    : undefined;
+  const weakIssue = entryId
+    ? audit?.issues.find((i) => i.entry_id === entryId && i.issue_type === 'WeakPassword')
+    : undefined;
+
+  const isBreached = breachStatus?.type === 'Breached';
+  const isReused = !!reusedIssue;
+  const isWeak = !!weakIssue;
+  const isSafe = (breachStatus?.type === 'Safe' || breachStatus?.type === 'Unknown') && !isReused && !isWeak;
   const shouldShowContainer = showTemporaryStats || !isSafe;
 
   if (!shouldShowContainer) return null;
 
-  const isBreached = breachStatus?.type === 'Breached';
   const borderAccentClass = isBreached
     ? 'border-l-2 border-l-red-500/80 bg-red-500/5'
-    : 'border-l-2 border-l-[var(--border-focus)]';
+    : isReused
+      ? 'border-l-2 border-l-purple-500/80 bg-purple-500/5'
+      : isWeak
+        ? 'border-l-2 border-l-amber-500/80 bg-amber-500/5'
+        : 'border-l-2 border-l-[var(--border-focus)]';
 
   return (
     <motion.div
@@ -1388,6 +1478,10 @@ const PasswordSafetySection: React.FC<{
       <BreachIndicator
         password={password}
         status={status}
+        entryId={entryId}
+        isReused={isReused}
+        reusedServices={reusedIssue ? reusedIssue.description.split(': ')[1] : undefined}
+        isWeak={isWeak}
         onStatusChange={async (newStatus) => {
           setBreachStatus(newStatus);
           if (selectedEntry) {

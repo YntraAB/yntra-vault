@@ -177,6 +177,17 @@ export interface TrashedEntryPreview {
   url?: string;
 }
 
+export interface VaultStorageMetrics {
+  entry_count: number;
+  trashed_entry_count: number;
+  tag_count: number;
+  active_attachment_count: number;
+  active_attachment_bytes: number;
+  trashed_attachment_count: number;
+  trashed_attachment_bytes: number;
+  vault_file_bytes: number;
+}
+
 export interface DecryptedHistoryItem {
   password: string;
   changed_at: string;
@@ -185,7 +196,7 @@ export interface DecryptedHistoryItem {
 
 // ─── TOTP & Generator ─────────────────────────────────────────────────────────
 
-export type TotpAlgorithm = 'SHA1' | 'SHA256' | 'SHA512';
+export type TotpAlgorithm = 'SHA1' | 'SHA256' | 'SHA512' | 'Steam';
 
 export interface TotpConfig {
   secret: string;
@@ -277,6 +288,37 @@ export interface Hardware2FaChallengeInfo {
   key_name: string;
   challenge_salt: number[];
   credential_id: number[];
+}
+
+export interface EmergencyShare {
+  share_index: number;
+  label: string;
+  share_data: string;
+}
+
+export interface EmergencyKit {
+  vault_id: string;
+  vault_name: string;
+  created_at: string;
+  generated_at: string;
+  format_version: number;
+  total_entries: number;
+  shares: EmergencyShare[];
+  verification_hash: string;
+  document_markdown: string;
+}
+
+export interface EmergencyKitAuditEntry {
+  timestamp: string;
+  fingerprint: string;
+  action: 'generated' | 'reset' | 'invalidated' | string;
+}
+
+export interface EmergencyKitAudit {
+  active_fingerprint: string;
+  last_generated_at: string;
+  generation_count: number;
+  history: EmergencyKitAuditEntry[];
 }
 
 export interface Tag {
@@ -512,6 +554,18 @@ export interface IpcCommands {
     args: Record<string, never> | undefined;
     return: void;
   };
+  purge_expired_trash: {
+    args: { maxAgeDays?: number } | undefined;
+    return: number;
+  };
+  get_storage_metrics: {
+    args: Record<string, never> | undefined;
+    return: VaultStorageMetrics;
+  };
+  compact_vault: {
+    args: Record<string, never> | undefined;
+    return: VaultStorageMetrics;
+  };
 
   // Password History
   get_password_history: {
@@ -555,6 +609,10 @@ export interface IpcCommands {
   change_master_password: {
     args: { current: string; newPassword: string; currentKeyFile?: string | null; newKeyFile?: string | null };
     return: void;
+  };
+  generate_emergency_kit: {
+    args: { masterPassword: string };
+    return: EmergencyKit;
   };
 
   // Tags
@@ -603,6 +661,14 @@ export interface IpcCommands {
   get_favicon: {
     args: { domain: string };
     return: string | null;
+  };
+  set_external_favicons_enabled: {
+    args: { enabled: boolean };
+    return: void;
+  };
+  is_external_favicons_enabled: {
+    args: Record<string, never> | undefined;
+    return: boolean;
   };
   set_minimize_to_tray: {
     args: { enabled: boolean };
@@ -663,6 +729,14 @@ export interface IpcCommands {
   reconstruct_master_password_hash: {
     args: { shareA: string; shareB: string };
     return: string;
+  };
+  get_emergency_kit_audit: {
+    args?: Record<string, never>;
+    return: EmergencyKitAudit | null;
+  };
+  reset_emergency_kit_audit: {
+    args?: Record<string, never>;
+    return: void;
   };
 
   // Export & Import

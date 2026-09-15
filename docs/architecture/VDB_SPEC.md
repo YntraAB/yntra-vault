@@ -3,7 +3,7 @@
 **Document Version**: 1.0  
 **Target Format Version**: 4  
 **Classification**: Public Specification  
-**Reference Codebase**: [Yntra Vault Core Engine](file:///c:/Users/hellich/Desktop/yntra-vault-private/src-core/src/vault/format.rs)
+**Reference Codebase**: [crates/core/src/vault/format.rs](../../crates/core/src/vault/format.rs)
 
 ---
 
@@ -58,7 +58,7 @@ A `.vdb` file consists of an unencrypted header, optional embedded authenticatio
 | `magic` | `[u8; 4]` | 4 bytes | Literal ASCII string `b"YNTR"`. |
 | `version` | `u16` | 2 bytes | Format version (current: `4`). |
 | `flags` | `u16` | 2 bytes | Bitmask flags (`0x0001` Biometrics enrolled, `0x0002` Hardware 2FA enabled). |
-| `salt` | `[u8; 32]` | 32 bytes | Cryptographically random salt generated via OS CPRNG (`rand::thread_rng`). |
+| `salt` | `[u8; 32]` | 32 bytes | Cryptographically random salt generated via OS CPRNG (`rand::rng`). |
 | `kdf_len` | `u32` | 4 bytes | Byte length of the serialized `KdfParams` structure. |
 | `kdf_params` | Byte array | Variable | `bincode` serialized `KdfParams` struct containing memory, pass count, parallelism, and output length. |
 | `bio_block` | Optional | Variable | Present only if `flags & 0x0001 != 0`. Length-prefixed `bincode` container holding biometric key wrappers. |
@@ -78,26 +78,26 @@ Argon2id Stretcher (Salt, 256 MB, 4 Passes, 4 Threads)
     │
     ▼ 64-byte Master Key
 HKDF-SHA512 Stretcher
-    ├── Info: "yntra-vault-key-v1"   ──► Vault Key (XChaCha20-Poly1305 outer payload)
-    ├── Info: "yntra-entry-key-v1"   ──► Entry Key (XChaCha20-Poly1305 per-field encryption)
-    ├── Info: "yntra-hmac-key-v1"    ──► HMAC Key (Legacy verification & P2P handshake)
-    └── Info: "yntra-search-key-v1"  ──► Search Key (Trigram HMAC search index)
+    ├── Info: "yntra-vault-encryption-key-v1"        ──► Vault Key (XChaCha20-Poly1305 outer payload)
+    ├── Info: "yntra-vault-entry-encryption-key-v1"  ──► Master Entry Key (Derives per-entry keys)
+    ├── Info: "yntra-vault-hmac-integrity-key-v1"    ──► HMAC Key (Legacy verification & P2P handshake)
+    └── Info: "yntra-vault-trigram-search-key-v1"    ──► Search Key (Trigram HMAC search index)
 ```
 
 ### 1. Master Key Derivation (Argon2id)
 The raw master password and optional keyfile bytes are processed through Argon2id:
 - **Salt**: 32 bytes (stored unencrypted in header)
-- **Memory Cost**: Default `262,144` KiB (256 MB), Minimum enforcing `65,536` KiB (64 MB)
-- **Time Cost**: Default `4` iterations, Minimum enforcing `2`
+- **Memory Cost**: Default `262,144` KiB (256 MB), Minimum enforcing `8,192` KiB
+- **Time Cost**: Default `4` iterations, Minimum enforcing `1`
 - **Parallelism**: Default `4` threads, Minimum enforcing `1`
 - **Output Length**: `64` bytes
 
 ### 2. Subkey Derivation (HKDF-SHA512)
 The 64-byte Argon2id output acts as pseudo-random keying material (`PRK`) for HKDF-SHA512 expansion without an additional salt:
-- **`VaultKey`**: `HKDF-Expand(PRK, info="yntra-vault-key-v1", length=32)`
-- **`EntryKey`**: `HKDF-Expand(PRK, info="yntra-entry-key-v1", length=32)`
-- **`HmacKey`**: `HKDF-Expand(PRK, info="yntra-hmac-key-v1", length=32)`
-- **`SearchKey`**: `HKDF-Expand(PRK, info="yntra-search-key-v1", length=32)`
+- **`VaultKey`**: `HKDF-Expand(PRK, info="yntra-vault-encryption-key-v1", length=32)`
+- **`EntryKey`**: `HKDF-Expand(PRK, info="yntra-vault-entry-encryption-key-v1", length=32)`
+- **`HmacKey`**: `HKDF-Expand(PRK, info="yntra-vault-hmac-integrity-key-v1", length=64)`
+- **`PerEntryKey`**: `HKDF-Expand(EntryKey, info="yntra-vault-per-entry-key-v1-" || entry_id, length=32)`
 
 ---
 
@@ -137,6 +137,18 @@ pub struct VaultData {
     pub trash: Vec<TrashedEntry>,
     pub settings: VaultSettings,
 }
+
+pub struct VaultSettings {
+    pub webdav: WebdavConfig,
+    pub emergency_kit_audit: Option<EmergencyKitAudit>,
+}
+
+pub struct EmergencyKitAudit {
+    pub active_fingerprint: String,
+    pub last_generated_at: DateTime<Utc>,
+    pub generation_count: u32,
+    pub history: Vec<EmergencyKitAuditEntry>,
+}
 ```
 
 ### EncryptedBlob Encapsulation Structure
@@ -168,6 +180,27 @@ pub struct EncryptedBlob {
 When implementing an independent parser or validator for `.vdb` files:
 1. ✅ **Validate Magic Bytes**: Ensure file starts with `YNTR`.
 2. ✅ **Check Format Version**: Reject files with version $> 4$.
-3. ✅ **Enforce Minimum KDF Bounds**: Reject parameters with `memory_kb < 65536` or `iterations < 2`.
+3. ✅ **Enforce KDF Bounds**: Reject parameters outside secure operational bounds (`8_192 <= memory_kb <= 1_048_576`, `1 <= iterations <= 64`, `1 <= parallelism <= 32`).
 4. ✅ **Construct Header AAD**: Assemble canonical header bytes before invoking AEAD decrypt.
 5. ✅ **Zero Sensitive Memory**: Immediately clear derived subkeys and decrypted fields using volatile zeroing (`Zeroize`).
+
+---
+
+## 8. Storage Compaction & Recovery Extensions
+
+### Storage Footprint & Compaction (`compact_vault`)
+Vault storage lifecycle maintains optimal binary footprint via:
+1. **Trash Compaction**: Automatic purge of tombstones older than 30 days (`purge_expired_trash(30)`).
+2. **Search Index Garbage Collection**: Prunes empty trigram buckets and rebuilds inverted token indexes on save.
+3. **Storage Analytics**: `VaultStorageMetrics` provides real-time counts and byte footprints of active entries, attachments, and soft-deleted records.
+
+### Master Password Emergency Recovery Kit
+The emergency recovery protocol splits the vault's master password into three shares using 2-of-3 Shamir's Secret Sharing over $\text{GF}(2^8)$:
+- Any 2 shares are mathematically sufficient to reconstruct the master password.
+- Any 1 share alone reveals zero information regarding the secret.
+- Shares are protected with a SHA-256 fingerprint check for visual self-verification.
+- **Pre-Generation Master Password Verification**: `VaultManager::generate_emergency_kit` validates the candidate master password against active session keys via constant-time comparison before computing shares.
+- **Encrypted In-Vault Audit Trail**: Generation timestamps, share fingerprints, and reset actions are persisted inside `VaultSettings.emergency_kit_audit` within the encrypted `.vdb` payload.
+
+### 2FA Recovery Codes Storage Invariant
+In `.vdb` payloads, 2FA backup codes are persisted as a sensitive custom field with canonical name `2FA Recovery Codes` (`field_type: Password`). The persistence layer strips duplicate or legacy variations (`2FA Recovery Cod`, `Recovery Codes`, etc.) during entry save/update operations, ensuring exactly one canonical record is maintained per entry.
