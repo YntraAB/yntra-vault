@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.7] - 2026-09-15
 
 ### Added
+- **Independent Multi-Platform Release Distribution**:
+  - Automated CI release packaging for Linux (`.AppImage`, `.deb`), Android (signed universal `.apk`), and Windows (`.exe` setup, `.msi`, portable `.exe`, standalone CLI).
+  - Implemented automated Android release signing via `jarsigner` with release keystore generation.
+- **Standalone Windows Portable & CLI Executables**:
+  - Published self-contained single-executable portable desktop bundle (`Yntra.Vault_0.1.7_portable.exe`) running without installation or administrator rights.
+  - Published standalone command-line interface executable (`Yntra.Vault_0.1.7_cli.exe`) for terminal workflows and automated scripting.
 - **Unified Trusted Devices Architecture**:
   - Implemented persistent device pairing registry in `VaultSettings.trusted_devices` with device UUID, human-readable name, OS badge, hardware type, and sync timestamps.
   - Added mutual device metadata exchange during 6-digit PIN handshake (`DeviceInfo`, `resolve_local_device_info`).
@@ -64,6 +70,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Normalized Argon2id lower resource bounds to 64 MB (`65_536 KB`) and 2 iterations across core validation logic, architecture specifications, and agent guidelines.
 
 ### Fixed
+- **Linux Key Wrapping Enum Variant**:
+  - Corrected wrap key failure mapping in `linux_get_or_create_wrap_key` (`crates/crypto/src/tpm.rs`), returning `VaultError::TpmError` instead of invalid enum variants.
+- **32-Bit Linux & Android Memory Limit Arithmetic**:
+  - Fixed integer overflow and type mismatch in `crates/crypto/src/mem.rs` by casting allocations to `libc::rlim_t` with saturating addition, ensuring compatibility with 32-bit Android architectures (`armv7-linux-androideabi`, `i686-linux-android`).
+- **Cross-Platform Window Handle Gating**:
+  - Gated Win32-specific window handle retrieval (`window.hwnd()`) behind `#[cfg(target_os = "windows")]` in `src-tauri/src/lib.rs`, `src-tauri/src/commands/tools.rs`, and `src-tauri/src/commands/auth.rs`, with safe non-Windows fallbacks.
+- **Desktop-Only Window Configuration Gating**:
+  - Gated `window.set_always_on_top()` behind `#[cfg(desktop)]` in `src-tauri/src/commands/auth.rs` to ensure clean compilation on Android and mobile targets.
 - **Host Device Authorization Fail-Closed Enforcement**:
   - Replaced silent error absorption (`if let Ok(...)`) during local vault read/decryption in P2P handshake with strict error propagation (`SyncError`), ensuring connections fail-closed if the trusted devices registry cannot be verified.
 - **Authoritative Trusted Devices Re-Sync**:
