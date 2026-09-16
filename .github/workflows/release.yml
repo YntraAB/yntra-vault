@@ -126,7 +126,7 @@ jobs:
             gen/android/app/build/outputs/apk/**/*.apk
 
   build-windows:
-    name: Build Windows (NSIS & MSI)
+    name: Build Windows (NSIS, MSI, Portable & CLI)
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -144,18 +144,43 @@ jobs:
         run: bun install
 
       - name: Build Windows Packages
-        run: bun run tauri build --bundles nsis,msi
+        shell: bash
+        run: |
+          bun run tauri build --bundles nsis,msi
+          cargo build --release -p yntra-cli
+          mkdir -p release-assets
+          TAG="${GITHUB_REF_NAME:-v0.1.7}"
+          VER="${TAG#v}"
+          cp target/release/yntra-vault-app.exe "release-assets/Yntra.Vault_${VER}_portable.exe"
+          cp target/release/yntra.exe "release-assets/Yntra.Vault_${VER}_cli.exe"
+
+      - name: Extract Release Notes from CHANGELOG
+        shell: bash
+        run: |
+          bun -e "
+            const fs = require('fs');
+            const cl = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const tag = process.env.GITHUB_REF_NAME || 'v0.1.7';
+            const ver = tag.replace(/^v/, '');
+            const m = cl.match(new RegExp('## \\\\[?' + ver.replace(/\./g, '\\\\.') + '[^\\n]*([\\s\\S]*?)(?=\\n## |$)'));
+            if (m) {
+              const content = '## Yntra Vault ' + tag + '\n\n' + m[1].trim();
+              fs.writeFileSync('RELEASE_NOTES.md', content);
+            }
+          "
 
       - name: Upload Windows Packages to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name || 'v0.1.7' }}
+          body_path: RELEASE_NOTES.md
           files: |
             target/release/bundle/nsis/*.exe
             target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
+            release-assets/*.exe
 
   build-macos:
     name: Build macOS (DMG)
