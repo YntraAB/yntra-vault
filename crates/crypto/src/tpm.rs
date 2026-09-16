@@ -378,14 +378,14 @@ fn linux_get_or_create_wrap_key() -> crate::Result<[u8; 32]> {
             std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
         })
         .map_err(|_| {
-            crate::error::VaultError::HardwareError(
+            crate::error::VaultError::TpmError(
                 "Neither XDG_CONFIG_HOME nor HOME environment variable is set".into(),
             )
         })?;
 
     let key_dir = base_dir.join("yntra-vault");
     std::fs::create_dir_all(&key_dir)
-        .map_err(|e| crate::error::VaultError::HardwareError(format!("Failed to create wrap key directory: {e}")))?;
+        .map_err(|e| crate::error::VaultError::TpmError(format!("Failed to create wrap key directory: {e}")))?;
 
     let dir_perms = std::fs::Permissions::from_mode(0o700);
     let _ = std::fs::set_permissions(&key_dir, dir_perms);
