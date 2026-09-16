@@ -202,7 +202,7 @@ pub fn run() {
         .setup(|app| {
             use tauri::{Manager, Emitter};
 
-            #[cfg(not(mobile))]
+            #[cfg(target_os = "windows")]
             {
                 // Enforce Window Capture Protection (WDA_EXCLUDEFROMCAPTURE) against screen scraping malware
                 if let Some(window) = app.get_webview_window("main") {
@@ -210,7 +210,10 @@ pub fn run() {
                         let _ = yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, true);
                     }
                 }
+            }
 
+            #[cfg(not(mobile))]
+            {
                 // Setup System Tray Menu & Icon on desktop platforms
                 if let Ok(quit_i) = MenuItem::with_id(app, "quit", "Close", true, None::<&str>) {
 

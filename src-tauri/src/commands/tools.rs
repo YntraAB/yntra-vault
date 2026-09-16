@@ -523,13 +523,13 @@ pub async fn set_window_capture_protection(
     window: tauri::WebviewWindow,
     enable: bool,
 ) -> Result<(), String> {
-    #[cfg(not(mobile))]
+    #[cfg(target_os = "windows")]
     {
         let hwnd = window.hwnd().map_err(|e| e.to_string())?;
         yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, enable)
             .map_err(|e| e.to_string())
     }
-    #[cfg(mobile)]
+    #[cfg(not(target_os = "windows"))]
     {
         let _ = (window, enable);
         Ok(())

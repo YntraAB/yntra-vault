@@ -72,6 +72,17 @@ pub async fn is_biometric_enabled(path: String, state: State<'_, AppState>) -> R
     Ok(false)
 }
 
+fn get_window_hwnd(_window: &tauri::Window) -> Option<isize> {
+    #[cfg(target_os = "windows")]
+    {
+        _window.hwnd().map(|h| h.0 as isize).ok()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 #[tauri::command]
 pub async fn unlock_vault_biometric(
     window: tauri::Window,
@@ -79,7 +90,7 @@ pub async fn unlock_vault_biometric(
     state: State<'_, AppState>,
 ) -> Result<VaultInfo, String> {
     let _ = window.set_focus();
-    let hwnd_raw = window.hwnd().map(|h| h.0 as isize).ok();
+    let hwnd_raw = get_window_hwnd(&window);
     let vault_path = PathBuf::from(&path);
     let manager = VaultManager::open_with_biometric_with_hwnd(&vault_path, hwnd_raw)
         .map_err(|e| e.to_string())?;
@@ -95,10 +106,12 @@ pub async fn verify_biometric_2fa(
     prompt: Option<String>,
 ) -> Result<(), String> {
     let _ = window.set_focus();
+    #[cfg(desktop)]
     let _ = window.set_always_on_top(true);
-    let hwnd_raw = window.hwnd().map(|h| h.0 as isize).ok();
+    let hwnd_raw = get_window_hwnd(&window);
     let msg = prompt.unwrap_or_else(|| "Unlock Yntra Vault".to_string());
     let res = yntra_vault_core::crypto::biometric::request_user_consent_with_hwnd(&msg, hwnd_raw);
+    #[cfg(desktop)]
     let _ = window.set_always_on_top(false);
     res.map_err(|e| e.to_string())
 }
@@ -109,7 +122,7 @@ pub async fn enable_biometric(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let _ = window.set_focus();
-    let hwnd_raw = window.hwnd().map(|h| h.0 as isize).ok();
+    let hwnd_raw = get_window_hwnd(&window);
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
     manager.enable_biometric_with_hwnd(hwnd_raw).map_err(|e| e.to_string())
