@@ -27,7 +27,11 @@ use yntra_vault_core::{
     },
     services::{
         autotype::run_smart_autotype,
-        sync::{webdav_upload, webdav_download, run_p2p_sync_listener, run_p2p_sync_client},
+        sync::{
+            webdav_upload, webdav_download, run_p2p_sync_listener, run_p2p_sync_client,
+            generate_pairing_code, run_p2p_pairing_host, run_p2p_pairing_client,
+            compute_pairing_beacon_id, listen_pairing_beacon,
+        },
     },
     totp::{generate_totp, parse_otpauth_uri, TotpConfig},
     generator::{generate_password, GeneratorOptions, GeneratorMode},
@@ -414,15 +418,33 @@ enum SyncAction {
     },
     /// Run P2P synchronization listener (server mode)
     P2pListen {
-        /// Address to listen on (e.g. 0.0.0.0:8443)
-        #[arg(short, long, default_value = "0.0.0.0:8443")]
+        /// Address to listen on (e.g. 0.0.0.0:5322)
+        #[arg(short, long, default_value = "0.0.0.0:5322")]
         listen: String,
     },
     /// Connect to remote P2P synchronization peer (client mode)
     P2pConnect {
-        /// Target server address (e.g. 192.168.1.10:8443)
+        /// Target server address (e.g. 192.168.1.10:5322)
         #[arg(short, long)]
         server: String,
+    },
+    /// Host Zero-Knowledge device pairing session (displays/accepts pairing PIN)
+    PairHost {
+        /// Address to listen on (e.g. 0.0.0.0:5322)
+        #[arg(short, long, default_value = "0.0.0.0:5322")]
+        listen: String,
+        /// 6-digit pairing PIN code (auto-generated if omitted)
+        #[arg(short, long)]
+        code: Option<String>,
+    },
+    /// Connect to remote device using pairing PIN (scans Wi-Fi or connects to server)
+    PairConnect {
+        /// 6-digit pairing PIN code
+        #[arg(short, long)]
+        code: String,
+        /// Explicit host server address (scans Wi-Fi beacon if omitted)
+        #[arg(short, long)]
+        server: Option<String>,
     },
 }
 
@@ -1280,6 +1302,43 @@ async fn handle_sync(
             let subkeys = manager.get_subkeys()?;
             let (stats, _) = run_p2p_sync_client(server, subkeys, vault_path)?;
             println!("{} P2P Sync Completed! Added: {}, Updated: {}, Retained: {}", "✓".green().bold(), stats.entries_added, stats.entries_updated, stats.entries_kept_local);
+        }
+        SyncAction::PairHost { listen, code } => {
+            let pass = acquire_password(password)?;
+            let pin = match code {
+                Some(c) => c.clone(),
+                None => {
+                    let generated_pin = generate_pairing_code();
+                    println!("{} Generated Pairing Code: {}", "🔑".yellow().bold(), generated_pin.bold().green());
+                    generated_pin
+                }
+            };
+            println!("{} Starting Zero-Knowledge Device Pairing Host on {}...", "→".blue().bold(), listen);
+            println!("{} Enter PIN '{}' on your other device to connect and merge vaults.", "ℹ".cyan().bold(), pin);
+            let (stats, _) = run_p2p_pairing_host(listen, &pass, &pin, vault_path, std::time::Duration::from_secs(60))?;
+            println!("{} Device Pairing Completed! Sent: {}, Received: {}, Merged: {}, Total: {}", "✓".green().bold(), stats.entries_sent, stats.entries_received, stats.entries_merged, stats.total_entries);
+        }
+        SyncAction::PairConnect { code, server } => {
+            let pass = acquire_password(password)?;
+            let server_addr = match server {
+                Some(s) => s.clone(),
+                None => {
+                    println!("{} Scanning local Wi-Fi for pairing host matching PIN '{}'...", "📡".cyan().bold(), code);
+                    let discovery_id = compute_pairing_beacon_id(&pass, code)?;
+                    match listen_pairing_beacon(&discovery_id, std::time::Duration::from_secs(5))? {
+                        Some(addr) => {
+                            println!("{} Found pairing host at {}!", "✓".green().bold(), addr);
+                            addr.to_string()
+                        }
+                        None => {
+                            return Err(VaultError::SyncError("No matching host device found on local Wi-Fi. Check that both devices are on the same network.".into()));
+                        }
+                    }
+                }
+            };
+            println!("{} Connecting to pairing host at {}...", "→".blue().bold(), server_addr);
+            let (stats, _) = run_p2p_pairing_client(&server_addr, &pass, code, vault_path)?;
+            println!("{} Device Pairing Completed! Sent: {}, Received: {}, Merged: {}, Total: {}", "✓".green().bold(), stats.entries_sent, stats.entries_received, stats.entries_merged, stats.total_entries);
         }
     }
     Ok(())

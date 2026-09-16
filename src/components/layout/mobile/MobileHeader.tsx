@@ -1,6 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Menu, Plus, Search, Lock, ShieldCheck, X } from 'lucide-react';
+import { Menu, Plus, Search, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '@/features/auth';
 import { useUi, useSearch } from '@/contexts/UiContext';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -19,8 +18,7 @@ export function MobileHeader({
   isSearchVisible,
 }: MobileHeaderProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { currentVault, lockVault } = useAuth();
+  const { currentVault } = useAuth();
   const { filterCategory } = useUi();
   const { searchTerm, setSearchTerm } = useSearch();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -38,15 +36,15 @@ export function MobileHeader({
   }, [isSearchVisible]);
 
   return (
-    <header className="sticky top-0 z-30 flex w-full shrink-0 flex-col border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] pt-[env(safe-area-inset-top,0px)] select-none">
+    <header className="sticky top-0 z-30 flex w-full shrink-0 flex-col border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] select-none">
       <div className="flex h-14 w-full items-center justify-between px-3">
         {/* Menu / Drawer Toggle */}
         <button
           onClick={onOpenDrawer}
           aria-label={t('mobile.open_drawer')}
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer shrink-0"
         >
-          <Menu size={22} />
+          <Menu size={20} />
         </button>
 
         {/* Header Title */}
@@ -60,36 +58,26 @@ export function MobileHeader({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={onToggleSearch}
             aria-label={t('mobile.search')}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors cursor-pointer ${
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors cursor-pointer ${
               isSearchVisible
                 ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                 : 'text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)]'
             }`}
           >
-            <Search size={20} />
+            <Search size={19} />
           </button>
 
+          {/* New Entry: Redesigned with elevated background and crisp border to blend harmoniously */}
           <button
             onClick={onNewEntry}
             aria-label={t('mobile.new_entry')}
-            className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--text-primary)] text-[var(--bg-base)] transition-opacity active:opacity-80 cursor-pointer"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] transition-all active:scale-95 active:bg-[var(--bg-active)] hover:border-[var(--border-focus)] shadow-xs cursor-pointer"
           >
-            <Plus size={20} />
-          </button>
-
-          <button
-            onClick={() => {
-              lockVault();
-              navigate('/login');
-            }}
-            aria-label={t('mobile.lock_vault')}
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
-          >
-            <Lock size={18} />
+            <Plus size={19} />
           </button>
         </div>
       </div>

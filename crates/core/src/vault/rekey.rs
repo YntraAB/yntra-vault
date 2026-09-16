@@ -3,7 +3,6 @@
 //! Handles re-encrypting all entries, attachments, and password histories under
 //! a newly derived master key, along with keyfile generation.
 
-use std::fs;
 use std::path::Path;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -21,7 +20,33 @@ impl VaultManager {
         use rand::Rng;
         let mut key_bytes = [0u8; 32];
         rand::rng().fill(&mut key_bytes);
-        fs::write(path, key_bytes)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(path)?;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            file.write_all(&key_bytes)?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)?;
+            file.write_all(&key_bytes)?;
+            file.sync_all()?;
+        }
+
         key_bytes.zeroize();
         Ok(())
     }

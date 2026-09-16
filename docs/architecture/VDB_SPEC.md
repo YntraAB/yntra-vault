@@ -180,7 +180,7 @@ pub struct EncryptedBlob {
 When implementing an independent parser or validator for `.vdb` files:
 1. ✅ **Validate Magic Bytes**: Ensure file starts with `YNTR`.
 2. ✅ **Check Format Version**: Reject files with version $> 4$.
-3. ✅ **Enforce KDF Bounds**: Reject parameters outside secure operational bounds (`8_192 <= memory_kb <= 1_048_576`, `1 <= iterations <= 64`, `1 <= parallelism <= 32`).
+3. ✅ **Enforce KDF Bounds**: Reject parameters outside secure operational bounds (`65_536 <= memory_kb <= 1_048_576`, `2 <= iterations <= 64`, `1 <= parallelism <= 32`).
 4. ✅ **Construct Header AAD**: Assemble canonical header bytes before invoking AEAD decrypt.
 5. ✅ **Zero Sensitive Memory**: Immediately clear derived subkeys and decrypted fields using volatile zeroing (`Zeroize`).
 

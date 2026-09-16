@@ -33,7 +33,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   webdavUrl: '',
   webdavUser: '',
   webdavAutoSync: false,
-  p2pAddr: '127.0.0.1:5322',
+  p2pAddr: '0.0.0.0:5322',
+  p2pAutoListen: false,
+  p2pAutoSyncWifi: false,
+  p2pAutoSyncIntervalMinutes: 5,
   externalFaviconsEnabled: true,
   operationMode: 'standard',
 };

@@ -532,12 +532,15 @@ pub fn hardware_unwrap_key(ciphertext: &[u8]) -> crate::Result<Vec<u8>> {
     }
 }
 
-fn get_session_token_path() -> std::path::PathBuf {
+pub fn get_session_token_path() -> std::path::PathBuf {
     #[cfg(target_os = "windows")]
     {
-        let mut path = std::env::temp_dir();
-        path.push("yntra-vault-session.token");
-        path
+        let base = std::env::var("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        let dir = base.join("Yntra Vault");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("session.token")
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -590,6 +593,15 @@ pub fn read_session_token() -> crate::Result<String> {
     String::from_utf8(decrypted).map_err(|e| crate::error::VaultError::DecryptionError(format!("Invalid session token UTF-8: {}", e)))
 }
 
+/// Clear and remove local handoff session token file.
+pub fn clear_session_token() -> crate::Result<()> {
+    let path = get_session_token_path();
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,9 +615,8 @@ mod tests {
         assert_eq!(original_token, read_token);
 
         // Cleanup
-        let mut path = std::env::temp_dir();
-        path.push("yntra-vault-session.token");
-        let _ = std::fs::remove_file(path);
+        clear_session_token().unwrap();
+        assert!(read_session_token().is_err());
     }
 
     #[test]

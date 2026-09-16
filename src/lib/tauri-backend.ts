@@ -26,6 +26,8 @@ import type {
   Tag,
   BreachStatus,
   MergeStats,
+  PairingStats,
+  TrustedDevice,
   ParsedImportEntry,
   ImportPreviewResult,
   BiometricInfo,
@@ -359,8 +361,40 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('run_p2p_sync_listener', { listenAddr, dbPath });
   }
 
-  async runP2pSyncClient(serverAddr: string, dbPath: string): Promise<MergeStats> {
-    return invoke('run_p2p_sync_client', { serverAddr, dbPath });
+  async runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string): Promise<MergeStats> {
+    return invoke('run_p2p_sync_client', { serverAddr, dbPath, deviceId });
+  }
+
+  async getLocalIp(): Promise<string | null> {
+    return invoke('get_local_ip', {});
+  }
+
+  async scanP2pDiscovery(timeoutMs?: number | null): Promise<string | null> {
+    return invoke('scan_p2p_discovery', { timeoutMs });
+  }
+
+  async generatePairingCode(): Promise<string> {
+    return invoke('generate_pairing_code');
+  }
+
+  async getTrustedDevices(): Promise<TrustedDevice[]> {
+    return invoke('get_trusted_devices');
+  }
+
+  async revokeTrustedDevice(deviceId: string): Promise<void> {
+    return invoke('revoke_trusted_device', { deviceId });
+  }
+
+  async startPairingHost(listenAddr: string, password: string, pairingCode: string, deviceName?: string): Promise<PairingStats> {
+    return invoke('start_pairing_host', { listenAddr, password, pairingCode, deviceName });
+  }
+
+  async startPairingClient(serverAddr: string, password: string, pairingCode: string, dbPath: string, deviceName?: string): Promise<PairingStats> {
+    return invoke('start_pairing_client', { serverAddr, password, pairingCode, dbPath, deviceName });
+  }
+
+  async scanPairingDiscovery(password: string, pairingCode: string, timeoutMs?: number | null): Promise<string | null> {
+    return invoke('scan_pairing_discovery', { password, pairingCode, timeoutMs });
   }
 
   async splitMasterPassword(password: string): Promise<string[]> {

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Database, Plus, Download, Clock, AlertTriangle, Trash2 } from 'lucide-react';
+import { Database, Plus, Download, Clock, AlertTriangle, Trash2, Wifi } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, CreateVaultModal } from '@/features/auth';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { isTauri, getBackend, openFileDialog } from '@/lib/backend';
+import { DevicePairingWizard } from '@/features/sync';
 import type { Vault } from '@/types';
 import { ActionTooltip } from '@/components/ui/tooltip';
 
@@ -16,6 +17,7 @@ export default function VaultSelect() {
   const [showCreate, setShowCreate] = useState(false);
   const [recentVaults, setRecentVaults] = useState<Vault[]>([]);
   const [missingVaults, setMissingVaults] = useState<Set<string>>(new Set());
+  const [showPairing, setShowPairing] = useState(false);
 
   const manualSelect = location.state?.manualSelect === true;
 
@@ -208,28 +210,63 @@ export default function VaultSelect() {
           </div>
         )}
 
+        {/* Empty State when no vaults are opened yet */}
+        {recentVaults.length === 0 && (
+          <div className="mt-8 mb-2 flex flex-col items-center justify-center rounded-[6px] border border-dashed border-[var(--border)] p-6 text-center bg-[var(--bg-elevated)]/30 select-none">
+            <Database size={26} className="text-[var(--text-tertiary)] mb-2 opacity-70" />
+            <p className="text-[13px] font-medium text-[var(--text-primary)]">
+              {t('vault_select.no_recent_title') || 'No Vault Open'}
+            </p>
+            <p className="text-[11px] text-[var(--text-secondary)] mt-1 max-w-[280px] leading-relaxed">
+              {t('vault_select.no_recent_desc') || 'Create a new local vault, open an existing .vdb file, or pair with your computer over Wi-Fi.'}
+            </p>
+          </div>
+        )}
+
         {/* Actions */}
-        <div className={`flex gap-2 ${recentVaults.length > 0 ? 'mt-4' : 'mt-8'}`}>
+        <div className={`flex gap-2.5 ${recentVaults.length > 0 ? 'mt-4' : 'mt-4'}`}>
           <ActionTooltip content={t('vault_select.create_tooltip')} side="top">
             <button
               onClick={() => setShowCreate(true)}
               disabled={!isTauri()}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)]"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)] cursor-pointer"
             >
               <Plus size={15} />
-              {t('vault_select.new_vault')}
+              <span>{t('vault_select.new_vault')}</span>
             </button>
           </ActionTooltip>
           <ActionTooltip content={t('vault_select.open_tooltip')} side="top">
             <button
               onClick={handleImport}
               disabled={!isTauri()}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)]"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)] cursor-pointer"
             >
               <Download size={15} />
-              {t('vault_select.open_file')}
+              <span>{t('vault_select.open_file')}</span>
             </button>
           </ActionTooltip>
+        </div>
+
+        {/* Divider with label */}
+        <div className="relative my-3.5 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-[var(--border)]" />
+          </div>
+          <span className="relative bg-[var(--bg-base)] px-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+            {t('common.or') || 'or'}
+          </span>
+        </div>
+
+        {/* Pairing / Quick Link Button */}
+        <div>
+          <button
+            onClick={() => setShowPairing(true)}
+            disabled={!isTauri()}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Wifi size={15} />
+            <span>{t('vault_select.pair_device')}</span>
+          </button>
         </div>
 
         {/* Version */}
@@ -242,6 +279,30 @@ export default function VaultSelect() {
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={handleVaultCreated}
+      />
+
+      <DevicePairingWizard
+        isOpen={showPairing}
+        onClose={() => setShowPairing(false)}
+        defaultRole="client"
+        onSuccess={(stats) => {
+          if (stats?.vault_path) {
+            const fileName = stats.vault_path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'Yntra Vault';
+            const newVault: Vault = {
+              id: `vault-${Date.now()}`,
+              name: fileName,
+              path: stats.vault_path,
+            };
+            const updated = [newVault, ...recentVaults.filter(v => v.path !== stats.vault_path)];
+            setRecentVaults(updated);
+            localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify(updated));
+            setCurrentVault(newVault);
+            setIsLocked(false);
+            navigate('/app');
+          } else {
+            window.location.reload();
+          }
+        }}
       />
     </motion.div>
   );

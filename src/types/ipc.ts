@@ -337,6 +337,24 @@ export interface MergeStats {
   trash_merged: number;
 }
 
+export interface PairingStats {
+  entries_sent: number;
+  entries_received: number;
+  entries_merged: number;
+  total_entries: number;
+  vault_path?: string | null;
+}
+
+export interface TrustedDevice {
+  id: string;
+  name: string;
+  device_type: 'desktop' | 'mobile' | 'tablet' | 'other' | string;
+  os: string;
+  paired_at: string;
+  last_sync_at?: string | null;
+  token_hash?: string;
+}
+
 export interface InstalledApp {
   name: string;
   path: string;
@@ -713,8 +731,40 @@ export interface IpcCommands {
     return: MergeStats;
   };
   run_p2p_sync_client: {
-    args: { serverAddr: string; dbPath: string };
+    args: { serverAddr: string; dbPath: string; deviceId?: string };
     return: MergeStats;
+  };
+  get_local_ip: {
+    args: Record<string, never>;
+    return: string | null;
+  };
+  scan_p2p_discovery: {
+    args: { timeoutMs?: number | null };
+    return: string | null;
+  };
+  generate_pairing_code: {
+    args?: Record<string, never>;
+    return: string;
+  };
+  get_trusted_devices: {
+    args?: Record<string, never>;
+    return: TrustedDevice[];
+  };
+  revoke_trusted_device: {
+    args: { deviceId: string };
+    return: void;
+  };
+  start_pairing_host: {
+    args: { listenAddr: string; password: string; pairingCode: string; deviceName?: string };
+    return: PairingStats;
+  };
+  start_pairing_client: {
+    args: { serverAddr: string; password: string; pairingCode: string; dbPath: string; deviceName?: string };
+    return: PairingStats;
+  };
+  scan_pairing_discovery: {
+    args: { password: string; pairingCode: string; timeoutMs?: number | null };
+    return: string | null;
   };
 
   // Shamir Secret Sharing

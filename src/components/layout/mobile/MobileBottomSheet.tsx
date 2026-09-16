@@ -15,11 +15,10 @@ export function MobileBottomSheet({
   title,
   children,
 }: MobileBottomSheetProps) {
-  if (!open) return null;
-
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex flex-col justify-end select-none">
+      {open && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end select-none">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -69,6 +68,7 @@ export function MobileBottomSheet({
           </div>
         </motion.div>
       </div>
+      )}
     </AnimatePresence>
   );
 }

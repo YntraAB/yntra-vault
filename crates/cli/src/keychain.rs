@@ -2,67 +2,26 @@
 
 use std::path::PathBuf;
 use yntra_vault_core::{Result, VaultError};
-use yntra_vault_core::crypto::tpm::{hardware_wrap_key, hardware_unwrap_key};
+use yntra_vault_core::crypto::tpm::{
+    write_session_token, read_session_token, clear_session_token as tpm_clear_session_token,
+    get_session_token_path,
+};
 
-fn get_keychain_storage_path() -> PathBuf {
-    let mut dir = if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-        PathBuf::from(appdata)
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".config")
-    } else {
-        std::env::temp_dir()
-    };
-    dir.push("YntraVault");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.push("session.token");
-    dir
+#[allow(dead_code)]
+pub fn get_keychain_storage_path() -> PathBuf {
+    get_session_token_path()
 }
 
 pub fn store_session_token(token: &str) -> Result<()> {
-    let path = get_keychain_storage_path();
-    let encrypted = hardware_wrap_key(token.as_bytes())
-        .map_err(|e| VaultError::InvalidFormat(format!("Failed to hardware-protect session token: {}", e)))?;
-    std::fs::write(&path, encrypted)
-        .map_err(|e| VaultError::InvalidFormat(format!("Failed to store session token in OS keychain: {}", e)))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    write_session_token(token).map_err(VaultError::from)
 }
 
 pub fn load_session_token() -> Option<String> {
-    let path = get_keychain_storage_path();
-    if path.exists() {
-        if let Ok(bytes) = std::fs::read(&path) {
-            // Attempt hardware-unwrapping first (App-Bound DPAPI / TPM / Keychain)
-            if let Ok(decrypted) = hardware_unwrap_key(&bytes) {
-                if let Ok(token_str) = String::from_utf8(decrypted) {
-                    let trimmed = token_str.trim().to_string();
-                    if !trimmed.is_empty() {
-                        return Some(trimmed);
-                    }
-                }
-            }
-            // Fallback for legacy plaintext token file
-            if let Ok(token_str) = String::from_utf8(bytes) {
-                let trimmed = token_str.trim().to_string();
-                if !trimmed.is_empty() {
-                    return Some(trimmed);
-                }
-            }
-        }
-    }
-    None
+    read_session_token().ok().filter(|s| !s.trim().is_empty())
 }
 
 pub fn clear_session_token() -> Result<()> {
-    let path = get_keychain_storage_path();
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
-    }
-    Ok(())
+    tpm_clear_session_token().map_err(VaultError::from)
 }
 
 #[cfg(test)]

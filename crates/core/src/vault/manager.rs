@@ -425,6 +425,29 @@ impl VaultManager {
             last_opened: Some(Utc::now()),
         }
     }
+
+    /// Returns the list of paired trusted devices.
+    pub fn get_trusted_devices(&self) -> Vec<TrustedDevice> {
+        self.data.settings.trusted_devices.clone()
+    }
+
+    /// Revokes authorization for a paired trusted device by ID and persists changes to disk.
+    pub fn revoke_trusted_device(&mut self, device_id: Uuid) -> crate::Result<()> {
+        let initial_len = self.data.settings.trusted_devices.len();
+        self.data.settings.trusted_devices.retain(|d| d.id != device_id);
+        if self.data.settings.trusted_devices.len() != initial_len {
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// Registers or updates a paired trusted device and persists changes to disk.
+    pub fn register_trusted_device(&mut self, device: TrustedDevice) -> crate::Result<()> {
+        self.data.settings.trusted_devices.retain(|d| d.id != device.id);
+        self.data.settings.trusted_devices.push(device);
+        self.save()?;
+        Ok(())
+    }
 }
 
 // ─── Legacy Migration Types ─────────────────────────────────────────────

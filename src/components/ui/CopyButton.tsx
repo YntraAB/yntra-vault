@@ -54,7 +54,7 @@ export function CopyButton({
       <button
         type="button"
         onClick={handleCopy}
-        className={`inline-flex items-center justify-center rounded-[3px] p-2 sm:p-1 min-h-[32px] min-w-[32px] sm:min-h-0 sm:min-w-0 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 select-none ${className}`}
+        className={`inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 select-none ${className}`}
       >
         {copied ? (
           <Check size={size} className="text-[var(--success)]" />

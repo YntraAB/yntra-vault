@@ -254,6 +254,7 @@ pub async fn run_p2p_sync_listener(
 pub async fn run_p2p_sync_client(
     server_addr: String,
     db_path: String,
+    device_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::MergeStats, String> {
     let (subkeys, path) = {
@@ -264,12 +265,14 @@ pub async fn run_p2p_sync_client(
     };
 
     let target_path = if db_path.is_empty() { path } else { std::path::PathBuf::from(db_path) };
+    let dev_uuid = device_id.and_then(|d| uuid::Uuid::parse_str(&d).ok());
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::sync::run_p2p_sync_client(
+        yntra_vault_core::services::sync::run_p2p_sync_client_with_device(
             &server_addr,
             &subkeys,
             &target_path,
+            dev_uuid,
         )
     })
     .await
@@ -286,3 +289,189 @@ pub async fn run_p2p_sync_client(
 
     Ok(stats)
 }
+
+#[tauri::command]
+pub fn get_local_ip() -> Result<Option<String>, String> {
+    Ok(yntra_vault_core::services::sync::get_local_lan_ip().map(|ip| ip.to_string()))
+}
+
+#[tauri::command]
+pub async fn scan_p2p_discovery(
+    timeout_ms: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let subkeys = {
+        let vault = state.vault.lock().map_err(|e| e.to_string())?;
+        let manager = vault.as_ref().ok_or("Vault is locked")?;
+        manager.get_subkeys().map_err(|e| e.to_string())?.clone()
+    };
+
+    let discovery_id = yntra_vault_core::services::sync::compute_p2p_discovery_id(&subkeys);
+    let dur = std::time::Duration::from_millis(timeout_ms.unwrap_or(3000));
+    let local_lan_ip = yntra_vault_core::services::sync::get_local_lan_ip();
+
+    let res = tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::listen_discovery_beacon(&discovery_id, dur)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    // Filter out self-echo if this device receives its own UDP beacon broadcast
+    if let Some(ref peer_addr) = res {
+        if peer_addr.ip().is_loopback() || local_lan_ip.map_or(false, |lip| lip == peer_addr.ip()) {
+            return Ok(None);
+        }
+    }
+
+    Ok(res.map(|addr| addr.to_string()))
+}
+
+#[tauri::command]
+pub fn generate_pairing_code() -> Result<String, String> {
+    Ok(yntra_vault_core::services::sync::pairing::generate_pairing_code())
+}
+
+#[tauri::command]
+pub async fn get_trusted_devices(
+    state: State<'_, AppState>,
+) -> Result<Vec<yntra_vault_core::vault::types::TrustedDevice>, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_ref().ok_or("Vault is locked")?;
+    Ok(manager.get_trusted_devices())
+}
+
+#[tauri::command]
+pub async fn revoke_trusted_device(
+    device_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let dev_uuid = uuid::Uuid::parse_str(&device_id).map_err(|e| e.to_string())?;
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let manager = vault.as_mut().ok_or("Vault is locked")?;
+    manager.revoke_trusted_device(dev_uuid).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_pairing_host(
+    listen_addr: String,
+    password: String,
+    pairing_code: String,
+    device_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    let host_db_path = {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        let manager = vault.as_mut().ok_or("Vault is locked")?;
+        manager.save().map_err(|e| e.to_string())?;
+        manager.path.clone()
+    };
+
+    let (stats, merged_data) = tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::pairing::run_p2p_pairing_host_with_device(
+            &listen_addr,
+            &password,
+            &pairing_code,
+            &host_db_path,
+            std::time::Duration::from_secs(180),
+            device_name,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if let Some(manager) = vault.as_mut() {
+            manager.data = merged_data;
+            manager.rebuild_search_index();
+        }
+    }
+
+    Ok(stats)
+}
+
+#[tauri::command]
+pub async fn start_pairing_client(
+    app: tauri::AppHandle,
+    server_addr: String,
+    password: String,
+    pairing_code: String,
+    db_path: String,
+    device_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    use tauri::Manager;
+    let target_path = if db_path.trim().is_empty() {
+        let vault_opt = state.vault.lock().map_err(|e| e.to_string())?.as_ref().map(|m| m.path.clone());
+        if let Some(p) = vault_opt {
+            p
+        } else {
+            let base_dir = app.path().document_dir()
+                .or_else(|_| app.path().app_data_dir())
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+            let vault_dir = base_dir.join("YntraVault");
+            let _ = std::fs::create_dir_all(&vault_dir);
+            vault_dir.join("yntra-vault.vdb")
+        }
+    } else {
+        std::path::PathBuf::from(db_path)
+    };
+
+    let pass_clone = password.clone();
+    let target_path_clone = target_path.clone();
+    let (mut stats, merged_data) = tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::pairing::run_p2p_pairing_client_with_device(
+            &server_addr,
+            &pass_clone,
+            &pairing_code,
+            &target_path_clone,
+            device_name,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    stats.vault_path = Some(target_path.to_string_lossy().to_string());
+
+    // Update active manager if present, or open newly created vault in AppState
+    {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if let Some(manager) = vault.as_mut() {
+            if manager.path == target_path {
+                let _ = manager.reload();
+            } else {
+                manager.data = merged_data;
+                manager.rebuild_search_index();
+            }
+        } else if let Ok(manager) = yntra_vault_core::vault::manager::VaultManager::open(&target_path, &password) {
+            *vault = Some(manager);
+        }
+    }
+
+    Ok(stats)
+}
+
+#[tauri::command]
+pub async fn scan_pairing_discovery(
+    password: String,
+    pairing_code: String,
+    timeout_ms: Option<u64>,
+) -> Result<Option<String>, String> {
+    let discovery_id = yntra_vault_core::services::sync::pairing::compute_pairing_beacon_id(&password, &pairing_code)
+        .map_err(|e| e.to_string())?;
+    let dur = std::time::Duration::from_millis(timeout_ms.unwrap_or(3000));
+
+    let res = tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::pairing::listen_pairing_beacon(&discovery_id, dur)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    Ok(res.map(|addr| addr.to_string()))
+}
+

@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.7] - 2026-09-15
+
+### Added
+- **Unified Trusted Devices Architecture**:
+  - Implemented persistent device pairing registry in `VaultSettings.trusted_devices` with device UUID, human-readable name, OS badge, hardware type, and sync timestamps.
+  - Added mutual device metadata exchange during 6-digit PIN handshake (`DeviceInfo`, `resolve_local_device_info`).
+  - Added host-side device session revocation (`revoke_trusted_device`), actively expelling unapproved devices from the encrypted `.vdb` settings payload.
+  - Added cryptographic revocation rejection signal (`P2P_REVOKED_SIG`), immediately closing connections from revoked devices and prompting the client to re-pair.
+  - Added continuous, code-free background auto-synchronization for paired devices on local Wi-Fi.
+- **Zero-Knowledge UDP Discovery Beacon (Port 5323)**:
+  - Added zero-knowledge discovery beacon exchange via BLAKE3 keyed hash tokens (`compute_pairing_beacon_id`, `compute_p2p_discovery_id`) for automatic LAN discovery without manual IP entry.
+- **Zero-Vault Adopt Flow on New Clients**:
+  - Added automatic standard vault file initialization (`Documents/YntraVault/yntra-vault.vdb`) when pairing from an uninitialized client instance, adopting remote salt and entries seamlessly.
+- **Trusted Devices Management UI**:
+  - Added trusted devices section in Settings > Backup (`BackupTab.tsx`) with device type icons, OS labels, pairing dates, last sync timestamps, and per-device disconnect ("Koppla från") action.
+  - Added single unified toggle for background Wi-Fi synchronization.
+
+### Changed
+- **6-Digit PIN Pairing Wizard UX**:
+  - Upgraded PIN input in `DevicePairingWizard.tsx` to 3+3 triplet layout with clipboard paste (Ctrl+V) distribution and Enter key submission.
+  - Replaced native browser checkboxes with standardized `<Toggle />` components across pairing and backup settings.
+  - Refined action button margins and text container padding to eliminate viewport clipping.
+
+### Security
+- **P2P Transit AEAD Encryption (Defense-in-Depth)**:
+  - Encrypted all database network payloads over TCP with XChaCha20-Poly1305 AEAD (`P2P_TRANSIT_AAD`) using `subkeys.vault_key`, maintaining transparent backward compatibility for unencrypted legacy payloads.
+- **Zero-Knowledge Salt Commitment (P2P Handshake)**:
+  - Replaced plaintext Argon2id root salt transmission over TCP with a 32-byte keyed BLAKE3 commitment (`compute_salt_commitment`), verifying vault compatibility early without disclosing the root salt.
+- **Argon2id-Hardened Pairing Discovery Beacon**:
+  - Replaced fast un-salted BLAKE3 PIN hashing with Argon2id-derived pairing subkeys (`compute_pairing_beacon_id_from_subkeys`, `compute_pairing_beacon_id`), preventing LAN eavesdroppers from conducting offline dictionary attacks against 6-digit PINs.
+- **Encrypted Host Root Salt in Pairing**:
+  - Encrypted the host pairing response payload (`PairingHostPayload`) using XChaCha20-Poly1305 AEAD (`PAIRING_AAD_HOST`) keyed with pairing subkeys, eliminating plaintext Argon2id salt transmission during initial device pairing.
+- **Device Revocation & Nil-UUID Rejection**:
+  - Enforced strict revocation checks rejecting `Uuid::nil()` or unlisted client devices with `P2P_REVOKED_SIG` when trusted devices are configured. Bound `client_device_uuid` directly into the client's mutual HMAC signature.
+- **Volatile Memory Zeroization in P2P & Pairing**:
+  - Wrapped all decrypted and merged database buffers in `zeroize::Zeroizing<Vec<u8>>` across `crates/core/src/services/sync/mod.rs` and `crates/core/src/services/sync/pairing.rs`.
+- **Frontend Ephemeral Password Zeroing**:
+  - Added unconditional state zeroization (`setPassword('')`, `setInputDigits(...)`) on modal close, completion, and unmount in `DevicePairingWizard.tsx`.
+- **LAN Discovery Self-Echo Suppression**:
+  - Added loopback and local LAN IP filtering in `scan_p2p_discovery` (`src-tauri/src/commands/sync.rs`), preventing desktop instances from discovering and attempting to sync with their own listeners.
+- **P2P Handshake Timing and Asymmetry Hardening**:
+  - Replaced dynamic length rejection responses with uniform 64-byte `P2P_AUTH_FAILED_SIG` and constant-time verification (`subtle::ConstantTimeEq`), preventing client panics and timing side-channels.
+- **Root Salt Mismatch Enforcement**:
+  - Enforced mutual root salt checks (`P2P_SALT_MISMATCH_MARKER`) early in the handshake phase before decrypting or processing remote payloads.
+- **Constant-Time Hardware 2FA Comparison**:
+  - Replaced non-constant-time byte comparison in `enable_hardware2fa_with_password()` with `subtle::ConstantTimeEq` (`ct_eq`), closing a timing side-channel during Hardware 2FA enrollment.
+- **Session Token Path & Storage Hardening**:
+  - Unified Windows session token location between CLI (`yntra-cli`) and core (`yntra-crypto`) to `%LOCALAPPDATA%/Yntra Vault/session.token`.
+  - Removed plaintext fallback to ensure session tokens are strictly encrypted via App-Bound DPAPI / BLAKE3.
+- **In-Memory Transit Secret Scrubbing**:
+  - Wired `clearSessionSecrets()` to the `vault-connection-lost` event in `AuthContext`, ensuring transit import and sync credentials in volatile memory are immediately wiped on disconnect.
+- **Key File POSIX Permission Hardening**:
+  - Enforced POSIX file mode `0o600` (`read/write` owner-only) and filesystem sync (`sync_all()`) on newly generated key files in `rekey.rs`.
+- **KDF Lower Bound Alignment**:
+  - Normalized Argon2id lower resource bounds to 64 MB (`65_536 KB`) and 2 iterations across core validation logic, architecture specifications, and agent guidelines.
+
+### Fixed
+- **Host Device Authorization Fail-Closed Enforcement**:
+  - Replaced silent error absorption (`if let Ok(...)`) during local vault read/decryption in P2P handshake with strict error propagation (`SyncError`), ensuring connections fail-closed if the trusted devices registry cannot be verified.
+- **Authoritative Trusted Devices Re-Sync**:
+  - Adopted host's authoritative `trusted_devices` list on the client during return synchronization, automatically propagating newly paired or revoked devices across all client vaults.
+- **P2P Socket Interface Binding**:
+  - Switched default sync listener binding from loopback (`127.0.0.1`) to all interfaces (`0.0.0.0:5322`), enabling cross-device mobile connections on local LANs.
+- **Listener and Client Connection Hangs**:
+  - Implemented non-blocking socket handling with bounded timeouts in `run_p2p_sync_listener` to prevent indefinite background thread lockups.
+  - Replaced unbounded `TcpStream::connect` with `connect_timeout` (2s) in `run_p2p_sync_client`.
+- **Sync Tag and State Desynchronization**:
+  - Synchronized `refreshTags()` alongside `refreshEntries()` upon all P2P and WebDAV merge operations.
+- **macOS Native Clipboard Argument Passing**:
+  - Replaced broken `cat /dev/stdin` AppleScript pipe with `on run argv` script arguments in `crates/crypto/src/clipboard.rs`, resolving empty string returns during clipboard operations on macOS.
+- **Mobile Safe Area & Notch Layout**:
+  - Added `viewport-fit=cover`, `maximum-scale=1.0`, and `user-scalable=no` to the viewport meta tag in `index.html` for proper edge-to-edge rendering and zoom prevention.
+  - Separated top safe-area padding (`env(safe-area-inset-top)`) from header height in the mobile detail view (`AppLayout.tsx`), preventing squashed headers on devices with Dynamic Island or notch.
+- **Mobile Bottom Navigation & Scroll Margins**:
+  - Dynamically sized the bottom navigation bar to `calc(4rem + env(safe-area-inset-bottom))` in `MobileBottomNav.tsx` to prevent icons and labels from compressing against the home bar.
+  - Added bottom padding offsets to entry list and detail view scroll containers to prevent content from being occluded beneath the fixed navigation bar.
+- **Mobile Drawer & Bottom Sheet Exit Animations**:
+  - Moved conditional rendering inside `<AnimatePresence>` in `MobileDrawer.tsx` and `MobileBottomSheet.tsx`, enabling smooth Framer Motion exit transitions on close.
+- **Mobile Onboarding Overflow**:
+  - Replaced fixed `w-[420px]` container with `w-full max-w-[420px]` and `min-h-dvh overflow-y-auto` in `Onboarding.tsx`, eliminating horizontal clipping on narrow mobile viewports.
+- **Mobile Localization Parity**:
+  - Extracted hardcoded English strings in mobile views to translation keys (`mobile.back_to_vault`, `mobile.switch_vault`, `mobile.zero_knowledge_vault`) with Swedish and English definitions.
+
+### Removed
+- **Legacy Dual Sync Controls**:
+  - Removed obsolete standalone "Sync Now via Wi-Fi" buttons and manual network listener toggles from Settings, unifying all local synchronization under Trusted Devices.
+
+---
+
 ## [0.1.6] - 2026-09-15
 
 ### Added

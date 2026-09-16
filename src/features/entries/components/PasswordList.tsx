@@ -322,7 +322,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
       {/* List */}
       <div
-        className="flex flex-1 flex-col overflow-y-auto"
+        className="flex flex-1 flex-col overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-0"
         onContextMenu={handleListAreaContextMenu}
       >
         <AnimatePresence mode="wait">

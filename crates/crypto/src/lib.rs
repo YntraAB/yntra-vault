@@ -27,7 +27,7 @@ pub use cipher::{
 };
 pub use mem::{LockedBuffer, ScrambledString, prevent_core_dumps, set_window_capture_protection, enforce_dll_preloading_guard, is_workstation_locked};
 pub use sharing::{split_secret, reconstruct_secret, parse_share, split_password, reconstruct_password, reconstruct_password_to_hex};
-pub use tpm::{hardware_wrap_key, hardware_unwrap_key, write_session_token, read_session_token};
+pub use tpm::{hardware_wrap_key, hardware_unwrap_key, write_session_token, read_session_token, clear_session_token, get_session_token_path};
 pub use passkey::{generate_passkey_pair, sign_assertion, verify_assertion};
 pub use clipboard::{copy_to_clipboard_defended, clear_clipboard, schedule_auto_clear};
 

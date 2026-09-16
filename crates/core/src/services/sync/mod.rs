@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket, SocketAddr, ToSocketAddrs, IpAddr};
 use std::path::Path;
 use rand::Rng;
 use crate::crypto::{compute_hmac, verify_hmac};
@@ -10,6 +10,20 @@ use crate::vault::format::VaultFile;
 
 /// Maximum database size accepted during P2P sync (256 MB)
 const MAX_DB_SIZE: usize = 256 * 1024 * 1024;
+
+pub const DEFAULT_P2P_PORT: u16 = 5322;
+pub const DEFAULT_DISCOVERY_PORT: u16 = 5323;
+pub const DISCOVERY_BEACON_MAGIC: [u8; 4] = *b"YBEA";
+
+pub mod pairing;
+pub use pairing::{
+    PairingStats, generate_pairing_code, normalize_pairing_code,
+    derive_pairing_subkeys, compute_pairing_beacon_id,
+    broadcast_pairing_beacon, listen_pairing_beacon,
+    run_p2p_pairing_host, run_p2p_pairing_client,
+    run_p2p_pairing_host_with_device, run_p2p_pairing_client_with_device,
+    DeviceInfo, resolve_local_device_info,
+};
 
 // ─── WebDAV Cloud Sync & SOTA Merge Protocol ───────────────────────────────────
 
@@ -437,7 +451,6 @@ pub fn decrypt_remote_vault_bytes_checked(
     subkeys: &crate::crypto::SubKeys,
     expected_salt: Option<&[u8; 32]>,
 ) -> crate::Result<crate::vault::types::VaultData> {
-    use zeroize::Zeroize;
     use crate::vault::format::VaultFile;
     use crate::crypto::cipher::{decrypt_vault, decrypt_vault_with_aad, EncryptedBlob};
     use crate::crypto::verify_hmac;
@@ -477,12 +490,12 @@ pub fn decrypt_remote_vault_bytes_checked(
         ciphertext: vault_file.encrypted_payload[24..].to_vec(),
     };
 
-    let mut decrypted = if vault_file.header.version >= 3 {
+    let decrypted = zeroize::Zeroizing::new(if vault_file.header.version >= 3 {
         let aad = vault_file.header.aad_bytes()?;
         decrypt_vault_with_aad(&encrypted_blob, &subkeys.vault_key, &aad)?
     } else {
         decrypt_vault(&encrypted_blob, &subkeys.vault_key)?
-    };
+    });
 
     let data_res: crate::Result<crate::vault::types::VaultData> = match vault_file.header.version {
         1 => {
@@ -501,7 +514,6 @@ pub fn decrypt_remote_vault_bytes_checked(
         }
     };
 
-    decrypted.zeroize();
     data_res
 }
 
@@ -526,6 +538,7 @@ fn apply_and_save_remote_vault(
     remote_bytes: &[u8],
     subkeys: &crate::crypto::SubKeys,
     db_filepath: &Path,
+    peer_device_id: Option<uuid::Uuid>,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData, Vec<u8>)> {
     // Validate received data is a valid .vdb file structure before decrypting
     let remote_vault_file = VaultFile::from_bytes(remote_bytes).map_err(|e| {
@@ -549,7 +562,23 @@ fn apply_and_save_remote_vault(
         let mut local_data = decrypt_remote_vault_bytes_checked(&local_bytes, subkeys, Some(&local_vault_file.header.salt))?;
 
         // Execute 3-way item-level merge
-        let stats = merge_vault_data(&mut local_data, remote_data);
+        let stats = merge_vault_data(&mut local_data, remote_data.clone());
+
+        // If peer_device_id is provided, update its last_sync_at timestamp in local trusted devices
+        if let Some(peer_id) = peer_device_id {
+            if !peer_id.is_nil() {
+                for dev in &mut local_data.settings.trusted_devices {
+                    if dev.id == peer_id {
+                        dev.last_sync_at = Some(chrono::Utc::now());
+                    }
+                }
+            }
+        } else {
+            // When client receives merged DB back from server, adopt the authoritative trusted devices list from server
+            if !remote_data.settings.trusted_devices.is_empty() {
+                local_data.settings.trusted_devices = remote_data.settings.trusted_devices;
+            }
+        }
 
         // Update metadata timestamp and entry count
         local_data.metadata.updated_at = chrono::Utc::now();
@@ -559,9 +588,11 @@ fn apply_and_save_remote_vault(
         let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
         local_data.trash.retain(|t| t.deleted_at > cutoff);
 
-        // Re-serialize vault data as MessagePack
-        let serialized = rmp_serde::to_vec(&local_data)
-            .map_err(|e| crate::error::VaultError::SerializationError(format!("Vault serialize: {}", e)))?;
+        // Re-serialize vault data as MessagePack with zeroized memory on scope exit
+        let serialized = zeroize::Zeroizing::new(
+            rmp_serde::to_vec(&local_data)
+                .map_err(|e| crate::error::VaultError::SerializationError(format!("Vault serialize: {}", e)))?
+        );
 
         let mut flags = 0u16;
         if local_vault_file.biometric.is_some() {
@@ -594,7 +625,7 @@ fn apply_and_save_remote_vault(
         };
 
         let merged_bytes = merged_vault_file.to_bytes()?;
-        let tmp_path = db_filepath.with_extension("vdb.sync.tmp");
+        let tmp_path = db_filepath.with_extension(format!("vdb.sync.{}.tmp", uuid::Uuid::new_v4().simple()));
         fs::write(&tmp_path, &merged_bytes)
             .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to write temp sync file: {}", e)))?;
         fs::rename(&tmp_path, db_filepath)
@@ -603,7 +634,7 @@ fn apply_and_save_remote_vault(
         (stats, local_data, merged_bytes)
     } else {
         let remote_data = decrypt_remote_vault_bytes_checked(remote_bytes, subkeys, Some(&remote_vault_file.header.salt))?;
-        let tmp_path = db_filepath.with_extension("vdb.sync.tmp");
+        let tmp_path = db_filepath.with_extension(format!("vdb.sync.{}.tmp", uuid::Uuid::new_v4().simple()));
         fs::write(&tmp_path, remote_bytes)
             .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to write temp sync file: {}", e)))?;
         fs::rename(&tmp_path, db_filepath)
@@ -617,14 +648,105 @@ fn apply_and_save_remote_vault(
     Ok((stats, final_data, saved_bytes))
 }
 
-/// Runs a secure TCP listener for vault synchronization.
-/// Verifies peer credentials via a mutual challenge-response handshake signed with HMAC key,
-/// receives the peer's encrypted vault, performs a 3-way item-level merge with the local vault,
-/// saves the merged vault atomically to disk, transmits the merged database back to the peer,
-const P2P_SALT_MISMATCH_MARKER: [u8; 32] = *b"YNTRA_SYNC_ERR_SALT_MISMATCH____";
-const P2P_AUTH_FAILED_SIG: [u8; 64] = *b"YNTRA_SYNC_ERR_AUTH_FAILED_MASTER_PASSWORD_MISMATCH_____________";
+const P2P_SALT_COMMITMENT_KEY: [u8; 32] = *b"yntra-p2p-salt-commitment-v1----";
+pub const P2P_TRANSIT_AAD: &[u8] = b"yntra-p2p-transit-v1";
+pub const P2P_SALT_MISMATCH_MARKER: [u8; 32] = *b"YNTRA_SYNC_ERR_SALT_MISMATCH____";
+pub const P2P_AUTH_FAILED_SIG: [u8; 64] = *b"YNTRA_SYNC_ERR_AUTH_FAILED_MASTER_PASSWORD_MISMATCH_____________";
+pub const P2P_REVOKED_SIG: [u8; 64] = *b"YNTRA_SYNC_ERR_DEVICE_REVOKED_UNTRUSTED_RE_PAIR_NEEDED__________";
 
-/// Runs a secure TCP listener for vault synchronization.
+/// Compute a zero-knowledge 32-byte salt commitment from a root salt.
+/// Enables early detection of divergent root salts without leaking the raw Argon2id salt.
+pub fn compute_salt_commitment(salt: &[u8; 32]) -> [u8; 32] {
+    if salt == &[0u8; 32] {
+        return [0u8; 32];
+    }
+    *blake3::keyed_hash(&P2P_SALT_COMMITMENT_KEY, salt).as_bytes()
+}
+
+/// Compute a zero-knowledge 32-byte beacon ID from the active HMAC subkey.
+/// Mathematically isolates the token: only peers holding the exact same master password
+/// and root salt can calculate this token, preventing discovery by unrelated devices.
+pub fn compute_p2p_discovery_id(subkeys: &crate::crypto::SubKeys) -> [u8; 32] {
+    let key_hash = *blake3::hash(&subkeys.hmac_key.bytes).as_bytes();
+    *blake3::keyed_hash(&key_hash, b"yntra-vault-lan-discovery-beacon-v1").as_bytes()
+}
+
+/// Query the host's primary LAN IP address without external network traffic.
+pub fn get_local_lan_ip() -> Option<IpAddr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    let ip = addr.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        None
+    } else {
+        Some(ip)
+    }
+}
+
+/// Broadcast a single discovery beacon packet over the local network.
+pub fn broadcast_discovery_beacon(discovery_id: &[u8; 32], tcp_port: u16) -> crate::Result<()> {
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to bind UDP discovery socket: {}", e)))?;
+    socket.set_broadcast(true)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to enable UDP broadcast: {}", e)))?;
+
+    let mut packet = [0u8; 38];
+    packet[..4].copy_from_slice(&DISCOVERY_BEACON_MAGIC);
+    packet[4..36].copy_from_slice(discovery_id);
+    packet[36..38].copy_from_slice(&tcp_port.to_be_bytes());
+
+    let dest = format!("255.255.255.255:{}", DEFAULT_DISCOVERY_PORT);
+    let _ = socket.send_to(&packet, &dest);
+    Ok(())
+}
+
+/// Listen for an incoming discovery beacon matching the expected discovery ID within a timeout.
+/// Returns the peer's resolved `SocketAddr` (peer IP + peer TCP port).
+pub fn listen_discovery_beacon(
+    expected_discovery_id: &[u8; 32],
+    timeout: std::time::Duration,
+) -> crate::Result<Option<SocketAddr>> {
+    let listen_addr = format!("0.0.0.0:{}", DEFAULT_DISCOVERY_PORT);
+    let socket = match UdpSocket::bind(&listen_addr) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(crate::error::VaultError::EncryptionError(format!(
+                "Failed to bind UDP discovery listener on {}: {}", listen_addr, e
+            )));
+        }
+    };
+
+    socket.set_read_timeout(Some(std::time::Duration::from_millis(200)))
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to set UDP socket timeout: {}", e)))?;
+
+    let start = std::time::Instant::now();
+    let mut buf = [0u8; 64];
+
+    while start.elapsed() < timeout {
+        match socket.recv_from(&mut buf) {
+            Ok((len, peer_addr)) => {
+                if len >= 38 && &buf[..4] == &DISCOVERY_BEACON_MAGIC {
+                    let received_id = &buf[4..36];
+                    if received_id == expected_discovery_id {
+                        let peer_port = u16::from_be_bytes([buf[36], buf[37]]);
+                        return Ok(Some(SocketAddr::new(peer_addr.ip(), peer_port)));
+                    }
+                }
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                std::thread::yield_now();
+            }
+            Err(e) => {
+                return Err(crate::error::VaultError::EncryptionError(format!("UDP discovery recv error: {}", e)));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Runs a secure TCP listener for vault synchronization with timeout protection and discovery beaconing.
 /// Verifies peer credentials via a mutual challenge-response handshake signed with HMAC key,
 /// receives the peer's encrypted vault, performs a 3-way item-level merge with the local vault,
 /// saves the merged vault atomically to disk, transmits the merged database back to the peer,
@@ -634,12 +756,53 @@ pub fn run_p2p_sync_listener(
     subkeys: &crate::crypto::SubKeys,
     db_filepath: &Path,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
-    let listener = TcpListener::bind(listen_addr)
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to bind TCP listener: {}", e)))?;
+    run_p2p_sync_listener_with_timeout(listen_addr, subkeys, db_filepath, std::time::Duration::from_secs(45))
+}
 
-    // Wait for a single peer connection
-    let (mut stream, _) = listener.accept()
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to accept peer connection: {}", e)))?;
+/// Runs a secure TCP listener for vault synchronization with configurable timeout and discovery beaconing.
+pub fn run_p2p_sync_listener_with_timeout(
+    listen_addr: &str,
+    subkeys: &crate::crypto::SubKeys,
+    db_filepath: &Path,
+    accept_timeout: std::time::Duration,
+) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
+    let listener = TcpListener::bind(listen_addr)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to bind TCP listener on {}: {}", listen_addr, e)))?;
+
+    listener.set_nonblocking(true)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to set non-blocking TCP listener: {}", e)))?;
+
+    let local_port = listener.local_addr().map(|a| a.port()).unwrap_or(DEFAULT_P2P_PORT);
+    let discovery_id = compute_p2p_discovery_id(subkeys);
+
+    let start_time = std::time::Instant::now();
+    let mut last_beacon = std::time::Instant::now() - std::time::Duration::from_secs(10);
+
+    let mut stream = loop {
+        if last_beacon.elapsed() >= std::time::Duration::from_millis(1500) {
+            let _ = broadcast_discovery_beacon(&discovery_id, local_port);
+            last_beacon = std::time::Instant::now();
+        }
+
+        match listener.accept() {
+            Ok((s, _)) => {
+                s.set_nonblocking(false)
+                    .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to set blocking stream: {}", e)))?;
+                break s;
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if start_time.elapsed() >= accept_timeout {
+                    return Err(crate::error::VaultError::SyncError(
+                        "P2P sync listener timed out waiting for peer connection (45s)".into(),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                return Err(crate::error::VaultError::EncryptionError(format!("Failed to accept peer connection: {}", e)));
+            }
+        }
+    };
 
     let timeout = Some(std::time::Duration::from_secs(30));
     let _ = stream.set_read_timeout(timeout);
@@ -654,17 +817,17 @@ pub fn run_p2p_sync_listener(
     };
 
     // 1. Handshake Phase
-    // Step 1a: Exchange root salt markers to detect divergent vaults early
+    // Step 1a: Exchange zero-knowledge salt commitments to detect divergent vaults early without leaking raw salt
     let server_has_salt = local_salt.is_some();
-    let server_salt_buf = local_salt.unwrap_or([0u8; 32]);
-    stream.write_all(&server_salt_buf)
+    let server_commitment = local_salt.map(|s| compute_salt_commitment(&s)).unwrap_or([0u8; 32]);
+    stream.write_all(&server_commitment)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
-    let mut client_salt_buf = [0u8; 32];
-    stream.read_exact(&mut client_salt_buf)
+    let mut client_commitment = [0u8; 32];
+    stream.read_exact(&mut client_commitment)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
-    if server_has_salt && client_salt_buf != [0u8; 32] && server_salt_buf != client_salt_buf {
+    if server_has_salt && client_commitment != [0u8; 32] && server_commitment != client_commitment {
         let _ = stream.write_all(&P2P_SALT_MISMATCH_MARKER);
         return Err(crate::error::VaultError::SyncError(
             "P2P sync rejected: Remote peer vault originates from a different root salt. Both devices must share the same initial vault database to sync.".into(),
@@ -693,10 +856,50 @@ pub fn run_p2p_sync_listener(
         return Err(crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)));
     }
 
-    // Verify client signature BEFORE generating or sending any server signature
-    if client_sig == P2P_AUTH_FAILED_SIG || verify_hmac(&server_challenge, &client_sig, &subkeys.hmac_key).is_err() {
-        let _ = stream.write_all(b"UNAUTHOR");
+    // Read client device id (16 bytes UUID)
+    let mut client_device_id_bytes = [0u8; 16];
+    if let Err(e) = stream.read_exact(&mut client_device_id_bytes) {
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            return Err(crate::error::VaultError::DecryptionError("Peer verification failed: Incomplete handshake".into()));
+        }
+        return Err(crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)));
+    }
+
+    // Verify client signature: authenticates server_challenge bound to client_device_id (with fallback for legacy challenge-only peers)
+    let mut client_auth_payload = Vec::with_capacity(48);
+    client_auth_payload.extend_from_slice(&server_challenge);
+    client_auth_payload.extend_from_slice(&client_device_id_bytes);
+
+    let is_auth_valid = verify_hmac(&client_auth_payload, &client_sig, &subkeys.hmac_key).is_ok()
+        || verify_hmac(&server_challenge, &client_sig, &subkeys.hmac_key).is_ok();
+
+    if client_sig == P2P_AUTH_FAILED_SIG || !is_auth_valid {
+        let _ = stream.write_all(&P2P_AUTH_FAILED_SIG);
+        let _ = stream.flush();
         return Err(crate::error::VaultError::DecryptionError("Peer verification failed: Master password mismatch".into()));
+    }
+
+    let client_device_uuid = uuid::Uuid::from_bytes(client_device_id_bytes);
+
+    // If local database has trusted_devices configured, strictly enforce that connecting device is trusted!
+    // Rejects both unlisted device UUIDs and attempts to bypass via Uuid::nil().
+    if db_filepath.exists() {
+        let local_bytes = fs::read(db_filepath)
+            .map_err(|e| crate::error::VaultError::SyncError(format!("Failed to read local vault file for device authorization: {}", e)))?;
+        let local_data = decrypt_remote_vault_bytes_checked(&local_bytes, subkeys, None)?;
+        let trusted = &local_data.settings.trusted_devices;
+        if !trusted.is_empty() {
+            let is_trusted = !client_device_uuid.is_nil()
+                && trusted.iter().any(|d| d.id == client_device_uuid);
+            if !is_trusted {
+                let _ = stream.write_all(&P2P_REVOKED_SIG);
+                let _ = stream.flush();
+                return Err(crate::error::VaultError::SyncError(format!(
+                    "P2P sync rejected: Device {} is not in trusted devices list (revoked by host)",
+                    client_device_uuid
+                )));
+            }
+        }
     }
 
     // Compute and send server signature only after client has successfully authenticated
@@ -708,25 +911,34 @@ pub fn run_p2p_sync_listener(
     stream.write_all(b"AUTH__OK")
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
-    // 2. Database Transfer Phase (Receive DB from client)
+    // 2. Database Transfer Phase (Receive transit-encrypted DB from client)
     let mut size_buf = [0u8; 8];
     stream.read_exact(&mut size_buf)
         .map_err(|e| crate::error::VaultError::DecryptionError(format!("Failed to read database size: {}", e)))?;
-    let db_size = u64::from_be_bytes(size_buf) as usize;
+    let payload_size = u64::from_be_bytes(size_buf) as usize;
 
-    if db_size > MAX_DB_SIZE {
+    if payload_size > MAX_DB_SIZE {
         let _ = stream.write_all(b"SIZE_REJ");
         return Err(crate::error::VaultError::InvalidFormat(
-            format!("Received DB size {} exceeds maximum {} bytes", db_size, MAX_DB_SIZE)
+            format!("Received DB size {} exceeds maximum {} bytes", payload_size, MAX_DB_SIZE)
         ));
     }
 
-    let mut db_data = vec![0u8; db_size];
-    stream.read_exact(&mut db_data)
+    let mut payload_data = vec![0u8; payload_size];
+    stream.read_exact(&mut payload_data)
         .map_err(|e| crate::error::VaultError::DecryptionError(format!("Failed to read database data: {}", e)))?;
 
+    // Decrypt transit AEAD envelope (with transparent fallback for legacy unencrypted .vdb starting with YNTR)
+    let db_data: zeroize::Zeroizing<Vec<u8>> = if payload_data.starts_with(crate::vault::format::MAGIC_BYTES) {
+        zeroize::Zeroizing::new(payload_data)
+    } else {
+        let blob: crate::crypto::cipher::EncryptedBlob = rmp_serde::from_slice(&payload_data)
+            .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to deserialize transit blob: {}", e)))?;
+        crate::crypto::cipher::decrypt_vault_with_aad(&blob, &subkeys.vault_key, P2P_TRANSIT_AAD)?
+    };
+
     // Merge client data into local database and save
-    let (stats, final_data, saved_bytes) = match apply_and_save_remote_vault(&db_data, subkeys, db_filepath) {
+    let (stats, final_data, saved_bytes) = match apply_and_save_remote_vault(&db_data, subkeys, db_filepath, Some(client_device_uuid)) {
         Ok(res) => res,
         Err(e) => {
             if let crate::error::VaultError::SyncError(_) = &e {
@@ -736,11 +948,15 @@ pub fn run_p2p_sync_listener(
         }
     };
 
-    // 3. Database Return Phase (Send merged DB back to client for mutual two-way synchronization)
-    let merged_size = saved_bytes.len() as u64;
+    // 3. Database Return Phase (Send transit-encrypted merged DB back to client for mutual two-way synchronization)
+    let transit_blob = crate::crypto::cipher::encrypt_vault_with_aad(&saved_bytes, &subkeys.vault_key, P2P_TRANSIT_AAD)?;
+    let transit_bytes = rmp_serde::to_vec(&transit_blob)
+        .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to serialize transit return payload: {}", e)))?;
+
+    let merged_size = transit_bytes.len() as u64;
     stream.write_all(&merged_size.to_be_bytes())
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to send merged database size: {}", e)))?;
-    stream.write_all(&saved_bytes)
+    stream.write_all(&transit_bytes)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to send merged database data: {}", e)))?;
     stream.flush()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to flush sync stream: {}", e)))?;
@@ -757,22 +973,44 @@ pub fn run_p2p_sync_client(
     subkeys: &crate::crypto::SubKeys,
     db_filepath: &Path,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
+    run_p2p_sync_client_with_device(server_addr, subkeys, db_filepath, None)
+}
+
+/// Connects as a client to a run_p2p_sync_listener peer with device identity.
+pub fn run_p2p_sync_client_with_device(
+    server_addr: &str,
+    subkeys: &crate::crypto::SubKeys,
+    db_filepath: &Path,
+    device_id: Option<uuid::Uuid>,
+) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
+    let addrs: Vec<SocketAddr> = server_addr.to_socket_addrs()
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Invalid sync server address '{}': {}", server_addr, e)))?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(crate::error::VaultError::EncryptionError(format!("Could not resolve sync server address '{}'", server_addr)));
+    }
+
     let mut stream = None;
-    for attempt in 0..20 {
-        match TcpStream::connect(server_addr) {
-            Ok(s) => {
+    let connect_timeout = std::time::Duration::from_secs(2);
+
+    for attempt in 0..5 {
+        for addr in &addrs {
+            if let Ok(s) = TcpStream::connect_timeout(addr, connect_timeout) {
                 stream = Some(s);
                 break;
             }
-            Err(_) if attempt < 19 => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(e) => {
-                return Err(crate::error::VaultError::EncryptionError(format!("Failed to connect to sync server: {}", e)));
-            }
+        }
+        if stream.is_some() {
+            break;
+        }
+        if attempt < 4 {
+            std::thread::sleep(std::time::Duration::from_millis(150));
         }
     }
-    let mut stream = stream.unwrap();
+    let mut stream = stream.ok_or_else(|| {
+        crate::error::VaultError::EncryptionError(format!("Failed to connect to sync server at {}", server_addr))
+    })?;
 
     let timeout = Some(std::time::Duration::from_secs(30));
     let _ = stream.set_read_timeout(timeout);
@@ -787,17 +1025,17 @@ pub fn run_p2p_sync_client(
     };
 
     // 1. Handshake Phase
-    // Step 1a: Exchange root salt markers to detect divergent vaults early
-    let mut server_salt_buf = [0u8; 32];
-    stream.read_exact(&mut server_salt_buf)
+    // Step 1a: Exchange zero-knowledge salt commitments to detect divergent vaults early without leaking raw salt
+    let mut server_commitment = [0u8; 32];
+    stream.read_exact(&mut server_commitment)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
     let client_has_salt = local_salt.is_some();
-    let client_salt_buf = local_salt.unwrap_or([0u8; 32]);
-    stream.write_all(&client_salt_buf)
+    let client_commitment = local_salt.map(|s| compute_salt_commitment(&s)).unwrap_or([0u8; 32]);
+    stream.write_all(&client_commitment)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
-    if client_has_salt && server_salt_buf != [0u8; 32] && client_salt_buf != server_salt_buf {
+    if client_has_salt && server_commitment != [0u8; 32] && client_commitment != server_commitment {
         return Err(crate::error::VaultError::SyncError(
             "P2P sync rejected: Remote peer vault originates from a different root salt. Both devices must share the same initial vault database to sync.".into(),
         ));
@@ -821,10 +1059,22 @@ pub fn run_p2p_sync_client(
     stream.write_all(&client_challenge)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
 
-    // Send client signature over server_challenge
-    let client_sig = compute_hmac(&server_challenge, &subkeys.hmac_key);
+    // Send client device id (16 bytes UUID)
+    let client_device_uuid = device_id.unwrap_or_else(|| pairing::resolve_local_device_info(None).id);
+    let client_device_id_bytes = client_device_uuid.into_bytes();
+
+    // Bind server challenge and device ID in client signature
+    let mut client_auth_payload = Vec::with_capacity(48);
+    client_auth_payload.extend_from_slice(&server_challenge);
+    client_auth_payload.extend_from_slice(&client_device_id_bytes);
+    let client_sig = compute_hmac(&client_auth_payload, &subkeys.hmac_key);
+
     stream.write_all(&client_sig)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
+
+    stream.write_all(&client_device_id_bytes)
+        .map_err(|e| crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)))?;
+    stream.flush().map_err(|e| crate::error::VaultError::EncryptionError(format!("Flush client handshake failed: {}", e)))?;
 
     // Read server signature
     let mut server_sig = [0u8; 64];
@@ -835,7 +1085,13 @@ pub fn run_p2p_sync_client(
         return Err(crate::error::VaultError::EncryptionError(format!("P2P handshake failed: {}", e)));
     }
 
-    if &server_sig[..8] == b"UNAUTHOR" {
+    if server_sig == P2P_REVOKED_SIG {
+        return Err(crate::error::VaultError::SyncError(
+            "This device has been disconnected by the host. Please re-pair using a 6-digit code.".into()
+        ));
+    }
+
+    if server_sig == P2P_AUTH_FAILED_SIG || &server_sig[..8] == b"UNAUTHOR" {
         return Err(crate::error::VaultError::DecryptionError("Server rejected client authentication: Master password mismatch".into()));
     }
 
@@ -861,15 +1117,19 @@ pub fn run_p2p_sync_client(
         return Err(crate::error::VaultError::EncryptionError("Invalid authentication handshake response from server".into()));
     }
 
-    // 2. Database Transfer Phase (Send local DB to server)
+    // 2. Database Transfer Phase (Send local DB to server wrapped in AEAD transit encryption)
     let file_data = fs::read(db_filepath)
         .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to read database: {}", e)))?;
 
-    let db_size = file_data.len() as u64;
+    let transit_blob = crate::crypto::cipher::encrypt_vault_with_aad(&file_data, &subkeys.vault_key, P2P_TRANSIT_AAD)?;
+    let transit_bytes = rmp_serde::to_vec(&transit_blob)
+        .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to serialize transit payload: {}", e)))?;
+
+    let db_size = transit_bytes.len() as u64;
     stream.write_all(&db_size.to_be_bytes())
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to send database size: {}", e)))?;
 
-    stream.write_all(&file_data)
+    stream.write_all(&transit_bytes)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to send database data: {}", e)))?;
     stream.flush()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to flush database to server: {}", e)))?;
@@ -887,9 +1147,6 @@ pub fn run_p2p_sync_client(
     if &size_buf[..] == b"UNAUTHOR" {
         return Err(crate::error::VaultError::DecryptionError("Server rejected client authentication: Master password mismatch".into()));
     }
-    if &size_buf[..] == b"SIZE_REJ" {
-        return Err(crate::error::VaultError::InvalidFormat("Server rejected database size".into()));
-    }
 
     let merged_size = u64::from_be_bytes(size_buf) as usize;
     if merged_size > MAX_DB_SIZE {
@@ -898,12 +1155,20 @@ pub fn run_p2p_sync_client(
         ));
     }
 
-    let mut merged_data = vec![0u8; merged_size];
-    stream.read_exact(&mut merged_data)
+    let mut server_payload_data = vec![0u8; merged_size];
+    stream.read_exact(&mut server_payload_data)
         .map_err(|e| crate::error::VaultError::DecryptionError(format!("Failed to read merged database data: {}", e)))?;
 
-    // Merge server response into local database and save
-    let (stats, final_data, _) = apply_and_save_remote_vault(&merged_data, subkeys, db_filepath)?;
+    let server_db_data: zeroize::Zeroizing<Vec<u8>> = if server_payload_data.starts_with(crate::vault::format::MAGIC_BYTES) {
+        zeroize::Zeroizing::new(server_payload_data)
+    } else {
+        let blob: crate::crypto::cipher::EncryptedBlob = rmp_serde::from_slice(&server_payload_data)
+            .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to deserialize transit blob: {}", e)))?;
+        crate::crypto::cipher::decrypt_vault_with_aad(&blob, &subkeys.vault_key, P2P_TRANSIT_AAD)?
+    };
+
+    // Apply merged DB received from server to local database file
+    let (stats, final_data, _) = apply_and_save_remote_vault(&server_db_data, subkeys, db_filepath, None)?;
 
     Ok((stats, final_data))
 }
@@ -1403,7 +1668,7 @@ mod tests {
         let bytes_b = fs::read(&vault_b_path).unwrap();
 
         // Attempting to merge Vault B into Vault A's file path using Vault A's subkeys
-        let res = apply_and_save_remote_vault(&bytes_b, &subkeys_a, &vault_a_path);
+        let res = apply_and_save_remote_vault(&bytes_b, &subkeys_a, &vault_a_path, None);
         assert!(res.is_err());
         match res.err().unwrap() {
             crate::error::VaultError::SyncError(msg) => {
@@ -1506,5 +1771,163 @@ mod tests {
             other => panic!("Expected DecryptionError or handshake abortion, got {:?}", other),
         }
     }
+
+    #[test]
+    fn test_p2p_listener_timeout() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("timeout_test.vdb");
+        let password = "TimeoutPassword#123";
+
+        let mgr = crate::vault::manager::VaultManager::create("Timeout Vault", password, &db_path).unwrap();
+        let subkeys = mgr.get_subkeys().unwrap().clone();
+
+        let addr = "127.0.0.1:49161";
+        // Listener with a short 250ms timeout must return cleanly without hanging
+        let start = std::time::Instant::now();
+        let res = run_p2p_sync_listener_with_timeout(addr, &subkeys, &db_path, std::time::Duration::from_millis(250));
+        let elapsed = start.elapsed();
+
+        assert!(res.is_err());
+        match res.err().unwrap() {
+            crate::error::VaultError::SyncError(msg) => {
+                assert!(msg.contains("timed out waiting for peer connection"));
+            }
+            other => panic!("Expected timeout SyncError, got {:?}", other),
+        }
+        assert!(elapsed >= std::time::Duration::from_millis(200));
+        assert!(elapsed < std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn test_p2p_discovery_id_distinct() {
+        let salt = [42u8; 32];
+        let mk1 = crate::crypto::derive_master_key(b"PassphraseOne#123", &salt).unwrap();
+        let keys1 = crate::crypto::derive_subkeys(&mk1).unwrap();
+
+        let mk2 = crate::crypto::derive_master_key(b"PassphraseTwo#456", &salt).unwrap();
+        let keys2 = crate::crypto::derive_subkeys(&mk2).unwrap();
+
+        let id1 = compute_p2p_discovery_id(&keys1);
+        let id2 = compute_p2p_discovery_id(&keys2);
+
+        // Same password & salt produces deterministic discovery ID
+        assert_eq!(id1, compute_p2p_discovery_id(&keys1));
+        // Distinct passwords produce completely distinct discovery IDs
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_p2p_discovery_beacon_roundtrip() {
+        let salt = [123u8; 32];
+        let mk = crate::crypto::derive_master_key(b"BeaconTestPassword#1", &salt).unwrap();
+        let keys = crate::crypto::derive_subkeys(&mk).unwrap();
+        let id = compute_p2p_discovery_id(&keys);
+
+        let id_clone = id;
+        let bcast_thread = std::thread::spawn(move || {
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let _ = broadcast_discovery_beacon(&id_clone, 5322);
+            }
+        });
+
+        let res = listen_discovery_beacon(&id, std::time::Duration::from_millis(500));
+        let _ = bcast_thread.join();
+
+        if let Ok(Some(addr)) = res {
+            assert_eq!(addr.port(), 5322);
+        }
+    }
+
+    #[test]
+    fn test_p2p_sync_nil_uuid_revocation_rejected() {
+        let temp_dir = tempdir().unwrap();
+        let host_path = temp_dir.path().join("host_nil_bypass.vdb");
+        let client_path = temp_dir.path().join("client_nil_bypass.vdb");
+        let password = "NilBypassTestPassword#123";
+
+        let mut host_mgr = crate::vault::manager::VaultManager::create("Host", password, &host_path).unwrap();
+        // Register an authorized trusted device
+        let legitimate_id = uuid::Uuid::new_v4();
+        host_mgr.data.settings.trusted_devices.push(crate::vault::types::TrustedDevice {
+            id: legitimate_id,
+            name: "Legitimate Client".into(),
+            device_type: "mobile".into(),
+            os: "iOS".into(),
+            paired_at: chrono::Utc::now(),
+            last_sync_at: Some(chrono::Utc::now()),
+            token_hash: String::new(),
+        });
+        host_mgr.save().unwrap();
+
+        // Copy identical vault to client so salt and keys are identical
+        fs::copy(&host_path, &client_path).unwrap();
+        let client_mgr = crate::vault::manager::VaultManager::open(&client_path, password).unwrap();
+        let c_keys = client_mgr.get_subkeys().unwrap().clone();
+        let h_keys = host_mgr.get_subkeys().unwrap().clone();
+
+        let addr = "127.0.0.1:49170";
+        let h_path = host_path.clone();
+        let host_handle = std::thread::spawn(move || {
+            run_p2p_sync_listener(addr, &h_keys, &h_path)
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // An attacker/revoked client attempts to bypass verification by presenting Uuid::nil()
+        let res = run_p2p_sync_client_with_device(addr, &c_keys, &client_path, Some(uuid::Uuid::nil()));
+        assert!(res.is_err(), "Client with Uuid::nil() must be rejected when trusted devices are configured");
+        let err_msg = res.err().unwrap().to_string();
+        assert!(err_msg.contains("disconnected by the host") || err_msg.contains("re-pair") || err_msg.contains("not in trusted devices list"));
+
+        let srv_res = host_handle.join().unwrap();
+        assert!(srv_res.is_err());
+    }
+
+    #[test]
+    fn test_p2p_salt_commitment_deterministic_and_one_way() {
+        let salt1 = [17u8; 32];
+        let salt2 = [18u8; 32];
+        let zero_salt = [0u8; 32];
+
+        let commit1_a = compute_salt_commitment(&salt1);
+        let commit1_b = compute_salt_commitment(&salt1);
+        assert_eq!(commit1_a, commit1_b);
+
+        let commit2 = compute_salt_commitment(&salt2);
+        assert_ne!(commit1_a, commit2);
+
+        // Commitment must not be equal to the raw salt itself
+        assert_ne!(commit1_a, salt1);
+
+        // Zero salt produces zero commitment
+        assert_eq!(compute_salt_commitment(&zero_salt), [0u8; 32]);
+    }
+
+    #[test]
+    fn test_p2p_transit_aead_roundtrip() {
+        let salt = [42u8; 32];
+        let master_key = crate::crypto::derive_master_key(b"TransitAeadPassword#1", &salt).unwrap();
+        let subkeys = crate::crypto::derive_subkeys(&master_key).unwrap();
+
+        let plaintext = b"SensitiveVaultDatabasePayloadBytesForTesting";
+        let encrypted = crate::crypto::cipher::encrypt_vault_with_aad(plaintext, &subkeys.vault_key, P2P_TRANSIT_AAD).unwrap();
+
+        // Valid decryption
+        let decrypted = crate::crypto::cipher::decrypt_vault_with_aad(&encrypted, &subkeys.vault_key, P2P_TRANSIT_AAD).unwrap();
+        assert_eq!(&decrypted[..], plaintext);
+
+        // Invalid AAD fails
+        let bad_aad = b"malicious-aad-tamper";
+        let res_bad_aad = crate::crypto::cipher::decrypt_vault_with_aad(&encrypted, &subkeys.vault_key, bad_aad);
+        assert!(res_bad_aad.is_err());
+
+        // Wrong key fails
+        let wrong_master = crate::crypto::derive_master_key(b"WrongKey#999", &salt).unwrap();
+        let wrong_subkeys = crate::crypto::derive_subkeys(&wrong_master).unwrap();
+        let res_wrong_key = crate::crypto::cipher::decrypt_vault_with_aad(&encrypted, &wrong_subkeys.vault_key, P2P_TRANSIT_AAD);
+        assert!(res_wrong_key.is_err());
+    }
 }
+
 

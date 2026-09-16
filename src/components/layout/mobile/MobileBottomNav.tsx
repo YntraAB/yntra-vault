@@ -45,7 +45,7 @@ export function MobileBottomNav({
   if (isKeyboardOpen) return null;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-16 w-full items-center justify-around border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 pb-[env(safe-area-inset-bottom,0px)] shadow-lg select-none">
+    <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] w-full items-center justify-around border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md px-2 pb-[env(safe-area-inset-bottom,0px)] select-none">
       <button
         onClick={() => {
           setFilterCategory('all');
@@ -58,7 +58,7 @@ export function MobileBottomNav({
         }`}
       >
         <Key size={20} className={activeTab === 'entries' ? 'stroke-[2.5]' : 'stroke-[1.75]'} />
-        <span className="text-[10px]">{t('mobile.nav_vault')}</span>
+        <span className="text-[11px] font-medium leading-none">{t('mobile.nav_vault')}</span>
       </button>
 
       <button
@@ -73,7 +73,7 @@ export function MobileBottomNav({
         }`}
       >
         <Star size={20} className={activeTab === 'favorites' ? 'fill-current stroke-none' : 'stroke-[1.75]'} />
-        <span className="text-[10px]">{t('mobile.nav_favorites')}</span>
+        <span className="text-[11px] font-medium leading-none">{t('mobile.nav_favorites')}</span>
       </button>
 
       <button
@@ -83,7 +83,7 @@ export function MobileBottomNav({
         className="flex flex-1 flex-col items-center justify-center gap-1 py-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer"
       >
         <Sliders size={20} className="stroke-[1.75]" />
-        <span className="text-[10px]">{t('mobile.nav_generator')}</span>
+        <span className="text-[11px] font-medium leading-none">{t('mobile.nav_generator')}</span>
       </button>
 
       <button
@@ -93,7 +93,7 @@ export function MobileBottomNav({
         className="flex flex-1 flex-col items-center justify-center gap-1 py-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer"
       >
         <Settings size={20} className="stroke-[1.75]" />
-        <span className="text-[10px]">{t('mobile.nav_settings')}</span>
+        <span className="text-[11px] font-medium leading-none">{t('mobile.nav_settings')}</span>
       </button>
     </nav>
   );

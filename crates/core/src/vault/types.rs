@@ -247,6 +247,30 @@ pub struct VaultData {
     pub settings: VaultSettings,
 }
 
+/// A paired and trusted device authorized for seamless background sync.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct TrustedDevice {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default = "default_device_type")]
+    pub device_type: String, // "desktop", "mobile", "tablet", "other"
+    #[serde(default = "default_device_os")]
+    pub os: String,          // "Windows", "iOS", "Android", "macOS", "Linux"
+    pub paired_at: DateTime<Utc>,
+    #[serde(default)]
+    pub last_sync_at: Option<DateTime<Utc>>,
+    /// BLAKE3 keyed hash of the persistent pairing token for verifying sync sessions
+    pub token_hash: String,
+}
+
+fn default_device_type() -> String {
+    "desktop".to_string()
+}
+
+fn default_device_os() -> String {
+    "Windows".to_string()
+}
+
 /// Vault settings stored securely inside the encrypted payload.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct VaultSettings {
@@ -254,6 +278,8 @@ pub struct VaultSettings {
     pub webdav: WebdavConfig,
     #[serde(default)]
     pub emergency_kit_audit: Option<EmergencyKitAudit>,
+    #[serde(default)]
+    pub trusted_devices: Vec<TrustedDevice>,
 }
 
 /// Audit trail and status of cryptographic emergency recovery kit generation.

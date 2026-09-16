@@ -128,6 +128,9 @@ export interface AppSettings {
   webdavUser?: string;
   webdavAutoSync?: boolean;
   p2pAddr?: string;
+  p2pAutoListen?: boolean;
+  p2pAutoSyncWifi?: boolean;
+  p2pAutoSyncIntervalMinutes?: number;
   externalFaviconsEnabled?: boolean;
   operationMode?: 'standard' | 'airgap';
 }

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Vault } from '@/types';
 import { isTauri, getBackend, type YntraVaultBackend } from '@/lib/backend';
-import { clearTransientWebdavPassword } from '@/lib/sessionSecrets';
+import { clearSessionSecrets } from '@/lib/sessionSecrets';
 import { useToast } from '@/contexts/ToastContext';
 
 export interface AuthContextType {
@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const { listen } = await import('@tauri-apps/api/event');
           unsubLost = await listen('vault-connection-lost', () => {
+            clearSessionSecrets();
             setIsLocked(true);
             setCurrentVault(null);
             addToast({
@@ -64,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
 
           unsubLocked = await listen('vault-locked', () => {
+            clearSessionSecrets();
             setIsLocked(true);
           });
         } catch (e) {
@@ -81,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const lockVault = useCallback(async () => {
     setIsLocked(true);
-    clearTransientWebdavPassword();
+    clearSessionSecrets();
     if (backend) {
       try {
         await backend.lockVault();

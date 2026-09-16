@@ -1,5 +1,5 @@
 export { SettingsPanel, default as SettingsPanelDefault } from './components/SettingsPanel';
-export { SettingSection, SettingRow } from './components/SettingSection';
+export { SettingSection, SettingRow, Toggle } from './components/SettingSection';
 export type { SettingSectionProps, SettingRowProps } from './components/SettingSection';
 export { LanguageCombobox } from './components/LanguageCombobox';
 export type { LanguageComboboxProps } from './components/LanguageCombobox';

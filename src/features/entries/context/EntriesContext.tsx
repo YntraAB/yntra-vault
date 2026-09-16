@@ -133,6 +133,9 @@ export interface EntriesContextType {
   reorderTags: (newTags: Tag[]) => Promise<void>;
   refreshEntries: () => Promise<void>;
   refreshTags: () => Promise<void>;
+  isP2pListening: boolean;
+  toggleP2pListener: (enable?: boolean) => void;
+  localLanIp: string | null;
 }
 
 const EntriesContext = createContext<EntriesContextType | undefined>(undefined);
@@ -143,6 +146,9 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToast();
 
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
+  const [isP2pListening, setIsP2pListening] = useState(false);
+  const [localLanIp, setLocalLanIp] = useState<string | null>(null);
+  const [listenerManualOverride, setListenerManualOverride] = useState<boolean | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [entries, setEntries] = useState<PasswordEntry[]>([]);
   const [rawTags, setRawTags] = useState<Tag[]>([]);
@@ -368,12 +374,119 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     autoSyncTimerRef.current = setTimeout(async () => {
       try {
         const pass = getTransientWebdavPassword();
-        await backend.webdavSync(settings.webdavUrl!, settings.webdavUser!, pass);
+        const stats = await backend.webdavSync(settings.webdavUrl!, settings.webdavUser!, pass);
+        if (stats && (stats.entries_added > 0 || stats.entries_updated > 0 || stats.tags_merged > 0 || stats.trash_merged > 0)) {
+          await Promise.all([refreshEntries(), refreshTags()]);
+        }
       } catch (err) {
         console.warn('Auto-sync on save failed:', err);
       }
     }, 2000);
-  }, [settings.webdavEnabled, settings.webdavAutoSync, settings.webdavUrl, settings.webdavUser, backend]);
+  }, [settings.webdavEnabled, settings.webdavAutoSync, settings.webdavUrl, settings.webdavUser, backend, refreshEntries, refreshTags]);
+
+  const toggleP2pListener = useCallback((enable?: boolean) => {
+    setListenerManualOverride((prev) => {
+      const current = prev !== null ? prev : Boolean(settings.p2pAutoListen);
+      return enable !== undefined ? enable : !current;
+    });
+  }, [settings.p2pAutoListen]);
+
+  // Fetch local LAN IP
+  useEffect(() => {
+    if (backend) {
+      backend.getLocalIp().then((ip) => setLocalLanIp(ip || null)).catch(() => {});
+    }
+  }, [backend]);
+
+  // Reset override when locked
+  useEffect(() => {
+    if (isLocked) {
+      setListenerManualOverride(null);
+      setIsP2pListening(false);
+    }
+  }, [isLocked]);
+
+  const shouldListen = (listenerManualOverride !== null ? listenerManualOverride : Boolean(settings.p2pAutoListen)) && !isLocked && Boolean(backend) && Boolean(currentVault);
+
+  // P2P Auto-Listener / Background loop
+  useEffect(() => {
+    if (!shouldListen || !backend || !currentVault || isLocked) {
+      setIsP2pListening(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsP2pListening(true);
+
+    const runListenerLoop = async () => {
+      while (!isCancelled && !isLockedRef.current) {
+        try {
+          const addr = settings.p2pAddr || '0.0.0.0:5322';
+          const stats = await backend.runP2pSyncListener(addr, currentVault.path);
+          if (!isCancelled && !isLockedRef.current) {
+            await Promise.all([refreshEntries(), refreshTags()]);
+            if (stats && (stats.entries_added > 0 || stats.entries_updated > 0 || stats.trash_merged > 0)) {
+              addToast({
+                message: `Wi-Fi Sync: ${stats.entries_added + stats.entries_updated} passwords synchronized from device`,
+                type: 'success',
+              });
+            }
+          }
+        } catch {
+          // Timeout or connection closed; wait 1.5s before listening again
+          if (isCancelled || isLockedRef.current) break;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+      if (!isCancelled) {
+        setIsP2pListening(false);
+      }
+    };
+
+    runListenerLoop();
+    return () => {
+      isCancelled = true;
+      setIsP2pListening(false);
+    };
+  }, [shouldListen, settings.p2pAddr, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
+
+  // P2P Auto-Sync on Wi-Fi (Periodically scans for beacons and syncs)
+  useEffect(() => {
+    if (!settings.p2pAutoSyncWifi || !backend || !currentVault || isLocked) {
+      return;
+    }
+
+    let isCancelled = false;
+    const intervalMs = (settings.p2pAutoSyncIntervalMinutes || 5) * 60 * 1000;
+
+    const runDiscoverySync = async () => {
+      try {
+        const peer = await backend.scanP2pDiscovery(2500);
+        if (peer && !isCancelled && !isLockedRef.current) {
+          await backend.runP2pSyncClient(peer, currentVault.path);
+          await Promise.all([refreshEntries(), refreshTags()]);
+        }
+      } catch (err: any) {
+        const errStr = String(err?.message || err || '');
+        if (errStr.includes('disconnected by the host') || errStr.includes('re-pair')) {
+          addToast({
+            message: getTranslation(settings.language || 'en', 'pairing.device_revoked_notice'),
+            type: 'error',
+          });
+        }
+      }
+    };
+
+    // Initial check shortly after unlock
+    const initTimer = setTimeout(runDiscoverySync, 3000);
+    const interval = setInterval(runDiscoverySync, intervalMs);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(initTimer);
+      clearInterval(interval);
+    };
+  }, [settings.p2pAutoSyncWifi, settings.p2pAutoSyncIntervalMinutes, backend, currentVault, isLocked, refreshEntries, refreshTags]);
 
   // CRUD Operations
   // CRUD Operations with SOTA Optimistic Local-First State & Background Persistence
@@ -1149,6 +1262,9 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       reorderTags,
       refreshEntries,
       refreshTags,
+      isP2pListening,
+      toggleP2pListener,
+      localLanIp,
     }),
     [
       entries,
@@ -1178,6 +1294,9 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       reorderTags,
       refreshEntries,
       refreshTags,
+      isP2pListening,
+      toggleP2pListener,
+      localLanIp,
     ]
   );
 

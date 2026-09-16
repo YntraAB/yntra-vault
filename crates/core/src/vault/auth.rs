@@ -10,6 +10,7 @@ use crate::crypto::derive_subkeys;
 use crate::error::VaultError;
 use crate::vault::format::{FileHeader, KdfParams, VaultFile, FORMAT_VERSION};
 use crate::vault::manager::{read_key_file_safely, VaultManager};
+use subtle::ConstantTimeEq;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Hardware2FaChallengeInfo {
@@ -182,7 +183,7 @@ impl VaultManager {
             &self.salt,
         )?;
         let derived = derive_subkeys(&master_key)?;
-        if derived.vault_key.bytes != keys.vault_key.bytes {
+        if !bool::from(derived.vault_key.ct_eq(&keys.vault_key)) {
             return Err(VaultError::InvalidPassword);
         }
 

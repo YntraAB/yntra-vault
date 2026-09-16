@@ -22,11 +22,10 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
   const allCount = entries.length;
   const favCount = entries.filter((e) => e.favorite).length;
 
-  if (!open) return null;
-
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex select-none">
+      {open && (
+        <div className="fixed inset-0 z-50 flex select-none">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -54,7 +53,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
                 <span className="truncate text-[14px] font-semibold">
                   {currentVault?.name || 'Yntra Vault'}
                 </span>
-                <span className="text-[11px] text-[var(--text-tertiary)]">Zero-Knowledge Vault</span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">{t('mobile.zero_knowledge_vault')}</span>
               </div>
             </div>
             <button
@@ -168,7 +167,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
               className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-[13px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
             >
               <Database size={18} />
-              <span>Switch Vault</span>
+              <span>{t('mobile.switch_vault')}</span>
             </button>
 
             <button
@@ -185,6 +184,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
           </div>
         </motion.aside>
       </div>
+      )}
     </AnimatePresence>
   );
 }

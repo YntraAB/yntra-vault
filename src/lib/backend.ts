@@ -11,8 +11,8 @@
  * - MockBackend (development) — uses in-memory data
  */
 
-import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry } from '@/types/ipc';
-export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry };
+import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats } from '@/types/ipc';
+export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats };
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -52,6 +52,16 @@ export interface Hardware2FaChallengeInfo {
   key_name: string;
   challenge_salt: number[];
   credential_id: number[];
+}
+
+export interface TrustedDevice {
+  id: string;
+  name: string;
+  device_type: 'desktop' | 'mobile' | 'tablet' | 'other' | string;
+  os: string;
+  paired_at: string;
+  last_sync_at?: string | null;
+  token_hash?: string;
 }
 
 export interface MergeStats {
@@ -445,7 +455,15 @@ export interface YntraVaultBackend {
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
   webdavSync(url: string, username: string, password: string | null): Promise<MergeStats>;
   runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats>;
-  runP2pSyncClient(serverAddr: string, dbPath: string): Promise<MergeStats>;
+  runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string): Promise<MergeStats>;
+  getLocalIp(): Promise<string | null>;
+  scanP2pDiscovery(timeoutMs?: number | null): Promise<string | null>;
+  generatePairingCode(): Promise<string>;
+  getTrustedDevices(): Promise<TrustedDevice[]>;
+  revokeTrustedDevice(deviceId: string): Promise<void>;
+  startPairingHost(listenAddr: string, password: string, pairingCode: string, deviceName?: string): Promise<PairingStats>;
+  startPairingClient(serverAddr: string, password: string, pairingCode: string, dbPath: string, deviceName?: string): Promise<PairingStats>;
+  scanPairingDiscovery(password: string, pairingCode: string, timeoutMs?: number | null): Promise<string | null>;
   splitMasterPassword(password: string): Promise<string[]>;
   reconstructMasterPassword(shareA: string, shareB: string): Promise<string>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
@@ -584,7 +602,7 @@ export async function getBackend(): Promise<YntraVaultBackend> {
     throw new Error('WASM backend not yet implemented. Run as Tauri desktop app.');
   }
 
-  return _backend;
+  return _backend!;
 }
 
 /**

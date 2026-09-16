@@ -220,7 +220,7 @@ export default function AppLayout() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -15 }}
               transition={{ duration: 0.15 }}
-              className="flex flex-1 flex-col overflow-hidden pb-16"
+              className="flex flex-1 flex-col overflow-hidden"
             >
               <MobileHeader
                 onOpenDrawer={() => setMobileDrawerOpen(true)}
@@ -243,16 +243,18 @@ export default function AppLayout() {
               className="flex flex-1 flex-col overflow-hidden"
             >
               {/* Mobile Back Header */}
-              <div className="sticky top-0 z-20 flex h-14 w-full shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-[env(safe-area-inset-top,0px)] select-none">
-                <button
-                  onClick={() => selectEntryById(null)}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[14px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)]"
-                >
-                  <ChevronLeft size={20} />
-                  <span>Back to Vault</span>
-                </button>
-              </div>
-              <main className="min-w-0 flex-1 overflow-y-auto pb-4">
+              <header className="sticky top-0 z-20 flex w-full shrink-0 flex-col border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] select-none">
+                <div className="flex h-13 w-full items-center justify-between px-3">
+                  <button
+                    onClick={() => selectEntryById(null)}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[14px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <ChevronLeft size={19} />
+                    <span>{t('mobile.back_to_vault')}</span>
+                  </button>
+                </div>
+              </header>
+              <main className="min-w-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))]">
                 <PasswordDetail />
               </main>
             </motion.div>

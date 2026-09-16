@@ -14,3 +14,7 @@ export function setTransientWebdavPassword(password: string | null): void {
 export function clearTransientWebdavPassword(): void {
   transientWebdavPassword = null;
 }
+
+export function clearSessionSecrets(): void {
+  clearTransientWebdavPassword();
+}

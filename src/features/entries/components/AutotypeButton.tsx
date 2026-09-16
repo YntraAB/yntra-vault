@@ -44,7 +44,7 @@ export function AutotypeButton({ value = '', entryId, className = '', size = 14 
         }
       })();
     },
-    [backend, autotyping, value, entryId, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs]
+    [backend, autotyping, value, entryId, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs, t]
   );
 
   return (
@@ -53,7 +53,7 @@ export function AutotypeButton({ value = '', entryId, className = '', size = 14 
         type="button"
         onClick={handleAutotype}
         disabled={autotyping}
-        className={`inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 disabled:opacity-50 disabled:scale-100 select-none ${className}`}
+        className={`inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 disabled:opacity-50 disabled:scale-100 select-none ${className}`}
       >
         <Keyboard size={size} className={autotyping ? 'animate-pulse text-[var(--text-primary)]' : ''} />
       </button>

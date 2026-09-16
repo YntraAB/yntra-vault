@@ -504,7 +504,7 @@ export function PasswordDetail() {
       ) : !data ? null : (
         <div className="flex flex-col">
             {/* Header */}
-            <div className="flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-4 select-none">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-3.5 sm:p-4 select-none">
               <div className="flex items-start gap-3 min-w-0 flex-1">
                 {/* Favicon with Tooltip */}
                 <ActionTooltip content={data.url ? t('detail.favicon_url_tooltip', { domain: data.url }) : t('detail.favicon_category_tooltip', { title: data.title })}>
@@ -525,14 +525,14 @@ export function PasswordDetail() {
                       type="text"
                       value={editData.title}
                       onChange={(e) => setEditData({ ...editData, title: e.target.value })}
-                      className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[20px] font-semibold outline-none focus:border-[var(--border-focus)]"
+                      className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[18px] sm:text-[20px] font-semibold outline-none focus:border-[var(--border-focus)]"
                     />
                   ) : (
                     <div className="min-w-0 max-w-full">
                       <ActionTooltip content={t('detail.copy_title_tooltip')}>
                         <h1
                           onClick={handleCopyTitle}
-                          className="text-[20px] font-semibold leading-tight tracking-tight text-[var(--text-primary)] truncate max-w-full cursor-pointer select-text hover:text-[var(--text-secondary)] transition-colors inline-block"
+                          className="text-[18px] sm:text-[20px] font-semibold leading-tight tracking-tight text-[var(--text-primary)] truncate max-w-full cursor-pointer select-text hover:text-[var(--text-secondary)] transition-colors inline-block"
                         >
                           {data.title}
                         </h1>
@@ -588,34 +588,34 @@ export function PasswordDetail() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center justify-end sm:justify-start gap-1.5 shrink-0 pt-2.5 sm:pt-0 border-t sm:border-t-0 border-[var(--border-subtle)]/40 w-full sm:w-auto">
                 {isEditing ? (
-                  <>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
                     <button
                       onClick={handleSave}
-                      className="h-8 rounded-[3px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)] shrink-0"
+                      className="flex-1 sm:flex-initial h-8.5 rounded-[3px] bg-[var(--text-primary)] px-4 text-[13px] font-medium text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)] cursor-pointer"
                     >
                       {t('common.save')}
                     </button>
                     <button
                       onClick={() => setIsEditing(false)}
-                      className="h-8 rounded-[3px] px-3 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
+                      className="flex-1 sm:flex-initial h-8.5 rounded-[3px] px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                     >
                       {t('common.cancel')}
                     </button>
-                  </>
+                  </div>
                 ) : (
                   <>
                     {/* Pin toggle */}
                     <ActionTooltip content={data.pinned ? t('menu.unpin') : t('menu.pin')}>
                       <button
                         onClick={() => togglePin(data.id)}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors shrink-0 ${data.pinned
+                        className={`inline-flex h-8.5 w-8.5 items-center justify-center rounded-[3px] transition-colors shrink-0 cursor-pointer ${data.pinned
                           ? 'text-yellow-500 hover:bg-yellow-500/10'
                           : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                           }`}
                       >
-                        <Pin size={15} className={data.pinned ? 'fill-current' : ''} />
+                        <Pin size={16} className={data.pinned ? 'fill-current' : ''} />
                       </button>
                     </ActionTooltip>
 
@@ -623,12 +623,12 @@ export function PasswordDetail() {
                     <ActionTooltip content={data.favorite ? t('detail.fav_remove') : t('detail.fav_add')}>
                       <button
                         onClick={() => toggleFavorite(data.id)}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-[3px] transition-colors shrink-0 ${data.favorite
+                        className={`inline-flex h-8.5 w-8.5 items-center justify-center rounded-[3px] transition-colors shrink-0 cursor-pointer ${data.favorite
                           ? 'text-orange-500 hover:bg-orange-500/10'
                           : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                           }`}
                       >
-                        <Star size={15} className={data.favorite ? 'fill-current' : ''} />
+                        <Star size={16} className={data.favorite ? 'fill-current' : ''} />
                       </button>
                     </ActionTooltip>
 
@@ -644,20 +644,20 @@ export function PasswordDetail() {
                     <ActionTooltip content={t('common.edit')}>
                       <button
                         onClick={() => selectedEntry && openEditModal(selectedEntry)}
-                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
+                        className="inline-flex h-8.5 items-center justify-center gap-1.5 rounded-[3px] px-3 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0 cursor-pointer"
                       >
-                        <Pencil size={14} className="shrink-0" />
-                        <span className="hidden lg:inline">{t('common.edit')}</span>
+                        <Pencil size={15} className="shrink-0" />
+                        <span className="hidden sm:inline">{t('common.edit')}</span>
                       </button>
                     </ActionTooltip>
 
                     <ActionTooltip content={t('common.delete')}>
                       <button
                         onClick={() => setShowDelConfirm(true)}
-                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] px-2.5 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8 shrink-0"
+                        className="inline-flex h-8.5 items-center justify-center gap-1.5 rounded-[3px] px-3 text-[13px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/8 shrink-0 cursor-pointer"
                       >
-                        <Trash2 size={14} className="shrink-0" />
-                        <span className="hidden lg:inline">{t('common.delete')}</span>
+                        <Trash2 size={15} className="shrink-0" />
+                        <span className="hidden sm:inline">{t('common.delete')}</span>
                       </button>
                     </ActionTooltip>
                   </>
@@ -743,7 +743,7 @@ export function PasswordDetail() {
                                 <button
                                   type="button"
                                   onClick={() => setShowPassword(!showPassword)}
-                                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                                  className="inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                                 >
                                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                                 </button>
@@ -807,7 +807,7 @@ export function PasswordDetail() {
                                     e.stopPropagation();
                                     openExternalUrl(data.url);
                                   }}
-                                  className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95"
+                                  className="inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 cursor-pointer"
                                 >
                                   {isAppPath ? <Play size={14} /> : <ExternalLink size={14} />}
                                 </button>
@@ -980,7 +980,7 @@ export function PasswordDetail() {
                               <button
                                 type="button"
                                 onClick={() => setShowCustomPasswords(prev => ({ ...prev, [cf.id]: !prev[cf.id] }))}
-                                className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95"
+                                className="inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 cursor-pointer"
                               >
                                 {showCustomPasswords[cf.id] ? <EyeOff size={14} /> : <Eye size={14} />}
                               </button>
@@ -994,7 +994,7 @@ export function PasswordDetail() {
                                   e.stopPropagation();
                                   openExternalUrl(cf.value);
                                 }}
-                                className="inline-flex items-center justify-center rounded-[3px] p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95"
+                                className="inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 cursor-pointer"
                               >
                                 <ExternalLink size={14} />
                               </button>
