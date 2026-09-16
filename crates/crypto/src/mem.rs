@@ -204,7 +204,7 @@ impl LockedBuffer {
             if libc::mlock(payload_ptr as *const std::ffi::c_void, payload_alloc_size) != 0 {
                 let mut rlim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
                 if libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut rlim) == 0 {
-                    let new_limit = (rlim.rlim_cur + payload_alloc_size as u64 + 65536).min(rlim.rlim_max);
+                    let new_limit = (rlim.rlim_cur.saturating_add(payload_alloc_size as libc::rlim_t).saturating_add(65536 as libc::rlim_t)).min(rlim.rlim_max);
                     rlim.rlim_cur = new_limit;
                     let _ = libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim);
                     let _ = libc::mlock(payload_ptr as *const std::ffi::c_void, payload_alloc_size);
