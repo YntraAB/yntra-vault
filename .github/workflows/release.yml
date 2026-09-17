@@ -123,15 +123,37 @@ jobs:
       - name: Sign & Prepare Android APK
         run: |
           mkdir -p release-assets
-          keytool -genkeypair -v -keystore release.jks -alias yntra -keyalg RSA -keysize 2048 -validity 10000 -storepass yntravault -keypass yntravault -dname "CN=YntraVault, OU=Mobile, O=YntraAB, L=Stockholm, S=Stockholm, C=SE"
-          APK_FILE=$(find . -name "*.apk" | head -n 1)
+          BUILD_TOOLS=$(find $ANDROID_HOME/build-tools -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          echo "Using Android build-tools: $BUILD_TOOLS"
+
+          keytool -genkeypair -v -keystore release.jks -alias yntra -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass yntravault -keypass yntravault \
+            -dname "CN=YntraVault, OU=Mobile, O=YntraAB, L=Stockholm, S=Stockholm, C=SE"
+
+          APK_FILE=$(find . -name "*unsigned.apk" -o -name "*universal*.apk" | head -n 1)
           echo "Found APK: $APK_FILE"
+
           TAG="${{ inputs.tag || github.ref_name }}"
           VER="${TAG#v}"
+          OUT_APK="release-assets/Yntra.Vault_${VER}_universal.apk"
+
           if [ -n "$APK_FILE" ]; then
-            jarsigner -keystore release.jks -storepass yntravault -keypass yntravault "$APK_FILE" yntra
-            cp "$APK_FILE" "release-assets/Yntra.Vault_${VER}_universal.apk"
-            echo "Signed APK copied to release-assets/Yntra.Vault_${VER}_universal.apk"
+            echo "Running zipalign 4-byte alignment..."
+            $BUILD_TOOLS/zipalign -v -p 4 "$APK_FILE" aligned.apk
+
+            echo "Signing with apksigner (Scheme v1, v2, v3)..."
+            $BUILD_TOOLS/apksigner sign --ks release.jks \
+              --ks-pass pass:yntravault \
+              --key-pass pass:yntravault \
+              --ks-key-alias yntra \
+              --out "$OUT_APK" \
+              aligned.apk
+
+            echo "Verifying APK signature scheme..."
+            $BUILD_TOOLS/apksigner verify --verbose "$OUT_APK"
+
+            echo "Signed and verified universal APK ready at $OUT_APK"
+            rm -f aligned.apk
             rm -f "$APK_FILE"
           fi
 
