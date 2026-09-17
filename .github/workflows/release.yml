@@ -114,8 +114,16 @@ jobs:
       - name: Install Node dependencies
         run: bun install
 
-      - name: Initialize Android project
-        run: bun run tauri android init --ci
+      - name: Initialize Android project & Apply App Icons
+        run: |
+          bun run tauri android init --ci
+          for res_dir in src-tauri/gen/android/app/src/main/res gen/android/app/src/main/res; do
+            if [ -d "$res_dir" ] && [ -d "src-tauri/icons/android" ]; then
+              echo "Applying Yntra Vault Android app icons to $res_dir..."
+              cp -rf src-tauri/icons/android/* "$res_dir/"
+              ls -la "$res_dir/mipmap-hdpi"
+            fi
+          done
 
       - name: Build Android APK
         run: bun run tauri android build --ci --apk
