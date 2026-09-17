@@ -285,6 +285,7 @@ export default function VaultSelect() {
         isOpen={showPairing}
         onClose={() => setShowPairing(false)}
         defaultRole="client"
+        isAdoptMode={true}
         onSuccess={(stats) => {
           if (stats?.vault_path) {
             const fileName = stats.vault_path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'Yntra Vault';

@@ -32,11 +32,11 @@ docs/
 ### Security & Governance
 * [**Changelog & Version History**](../CHANGELOG.md): Comprehensive version log documenting features, security updates, fixes, and architectural revisions.
 * [**Security Policy & Vulnerability Disclosure**](../SECURITY.md): Vulnerability reporting instructions, response SLAs, scope, and GitHub Security Advisory protocols.
-* [**Cryptographic Proofs & Security Model**](security/cryptographic-proofs.md): Formal Argon2id KDF hardness proofs, HKDF domain separation, XChaCha20-Poly1305 header AAD binding, hardware guard page invariants, and k-anonymity proofs.
+* [**Cryptographic Proofs & Security Model**](security/cryptographic-proofs.md): Formal Argon2id KDF hardness proofs, HKDF domain separation, XChaCha20-Poly1305 header AAD binding, zero-knowledge device pairing & adopt mode isolation, hardware guard page invariants, and k-anonymity proofs.
 * [**Emergency Recovery & Shamir Kit**](security/EMERGENCY_RECOVERY.md): 2-of-3 Shamir Secret Sharing recovery kit generation, verification, and printable recovery sheets.
 
 ### Architecture & Format Specifications
-* [**Technical Specification**](architecture/tech-spec.md): High-level system architecture, frontend/backend runtime dependencies, state management, WebDAV conflict resolution, animations, and theming.
+* [**Technical Specification**](architecture/tech-spec.md): High-level system architecture, zero-knowledge P2P synchronization and pairing protocols, runtime dependencies, state management, WebDAV conflict resolution, animations, and theming.
 * [**Storage Format Specification (.vdb)**](architecture/VDB_SPEC.md): Binary layout of `.vdb` files, version migration (v1 through v4), KDF parameter negotiation, and AEAD header authentication.
 * [**Storage Compaction & Trash Lifecycle**](architecture/STORAGE_LIFECYCLE.md): 30-day trash tombstone expiration, storage metrics breakdown, and atomic database compaction.
 

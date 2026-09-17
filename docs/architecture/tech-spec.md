@@ -80,10 +80,38 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 - **Transport Security**: Enforces HTTPS scheme for non-localhost endpoints via strict `url::Url` host validation (`http://` allowed strictly for loopback hosts: `localhost`, `127.0.0.1`, `[::1]`).
 - **Memory Protection**: Decrypted payload buffers zeroed using `Zeroize`. Remote credentials held strictly in volatile in-memory registry (`sessionSecrets.ts`), wiped upon vault lock.
 
-### Peer-to-Peer (P2P) Direct Sync
-- **Mutual Authentication**: Handshake uses client-first challenge-response verification via `P2pAuthKey` (derived from master password via HKDF-SHA512).
-- **Oracle Prevention**: The listening device requires the connecting client to prove identity via HMAC signature over `server_challenge` before transmitting any server signature or vault payload.
-- **Payload AEAD**: Transferred vault archives are encrypted end-to-end with XChaCha20-Poly1305.
+### Peer-to-Peer (P2P) Direct Sync & Zero-Knowledge Device Pairing
+
+#### 1. Background Wi-Fi Sync (Port 5322)
+- **Continuous LAN Synchronization**: Paired devices automatically synchronize encrypted vault payloads over local Wi-Fi without cloud reliance or manual trigger.
+- **Client-First Mutual Authentication**: Handshake enforces strict client-first verification. The connecting client must prove identity via HMAC-SHA512 over `server_challenge` bound to the client's UUID before the server returns any signature or payload, permanently preventing unauthenticated password oracles.
+- **End-to-End AEAD Encryption**: Transferred database archives are enveloped with ephemeral XChaCha20-Poly1305 using `P2P_TRANSIT_AAD`.
+- **Authoritative Revocation Signal (`P2P_REVOKED_SIG`)**: Connecting devices that have been removed from the host's `trusted_devices` list are rejected immediately with a revocation signal, prompting the client to re-pair.
+
+#### 2. Zero-Knowledge Device Pairing Protocol (Port 5324)
+- **Ephemeral Transit Tunnel**: Derives one-time pairing subkeys (`VaultKey`, `HmacKey`) from `MasterPassword` + `6-digit PIN` via BLAKE3 domain separation, Argon2id, and HKDF-SHA512.
+- **Port Collision Separation**: Pairing operates on dedicated port `5324` (`DEFAULT_PAIRING_PORT`), avoiding port contention with the continuous background sync listener on port `5322`. The background sync listener is automatically paused during active pairing wizards.
+- **Immediate Host Cancellation & Port Release**: Host TCP and UDP listeners poll an atomic cancellation flag (`pairing_cancel: Arc<AtomicBool>`) every 40ms via the command `cancel_pairing_host`. Listening sockets are released immediately upon user cancellation or modal dismissal, preventing port lockups on port 5324.
+- **Strict Adopt Mode (`ClientPairingMode::AdoptIntoDir`)**: When pairing from an unauthenticated client state (e.g. `VaultSelect`), the client reads zero disk files, transmits zero entries (`client_entries_count = 0`), and saves the adopted database into a dedicated, collision-free file (`<HostVaultName>.vdb`, `<HostVaultName> (1).vdb`).
+- **Windows DOS Device Name Neutralization**: Vault filenames are sanitized against reserved Windows DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) during client adopt mode database initialization.
+- **Session-Bound Adopt Path Preservation**: During an active pairing wizard session, the newly adopted vault path is preserved in volatile memory (`adoptedVaultPathRef`) so subsequent in-wizard re-synchronizations update the existing file without spawning duplicate `<Vault> (1).vdb` files.
+- **Mutual Device Metadata Exchange**: Devices securely exchange `DeviceInfo` (UUID, device name, hardware type, OS) and register them into `VaultSettings.trusted_devices` with strict deduplication by UUID and `(name, os)`.
+
+#### 3. Active UDP Query-Response Discovery (Port 5323)
+- **Active Query-Response Protocol**: Clients emit periodic `YQRY` query pulses (`[YQRY (4B) | pairing_beacon_id (32B)]`). Hosts respond with immediate direct unicast `YPAR` packets (`[YPAR (4B) | pairing_beacon_id (32B) | local_port (2B)]`), reducing discovery latency from 7 seconds to <50ms and penetrating AP isolation.
+- **In-Loop Self-Echo Isolation**: The receive loop in `listen_discovery_beacon` evaluates received packet source IP addresses against known local network adapters and loopback *inside* the receive loop. Self-echo packets are dropped immediately, allowing the listener to continue until remote peers respond or the timeout expires.
+- **Multi-Interface Local Network Enumeration & IPv4 Prioritization**: `get_local_lan_ips` probes all active network adapters (Ethernet, Wi-Fi, mobile hotspots, virtual adapters), excludes un-routable link-local IPv6 addresses (`fe80::/10`) and multicast, and sorts IPv4 addresses first to guarantee reachable network endpoints in the UI.
+- **Adapter Enumeration Caching**: Local network interface addresses are cached during the beacon loop (`broadcast_pairing_beacon_with_ips`) and refreshed at most every 10 seconds, eliminating redundant socket allocations and system calls.
+- **Subnet Directed Broadcast & Multicast**: Discovery beacons are broadcast simultaneously to `255.255.255.255`, RFC 2365 administratively scoped multicast (`239.255.53.23`), and directed subnet broadcasts (`x.y.z.255:5323`) across all detected interfaces.
+- **Timing-Safe Constant-Time Verification**: All UDP token comparisons enforce constant-time equality via `subtle::ConstantTimeEq`.
+- **Parallel Candidate Port Fallback**: Clients test candidate ports `[confirmed_host_port, 5324, 5322, 5325]` with a snappy 350ms LAN timeout and direct UDP pre-ping.
+- **Real-Time Auto-Dot & Hostname Formatting**: `formatIpv4Input` validates and formats IP addresses with automatic octet dot insertion, supports local hostnames (`localhost`, `*.local`), and sanitizes port segments.
+
+#### 4. Progressive Two-Step Wizard & Sync Notifications
+- **Progressive Two-Step Pairing Flow (`DevicePairingWizard.tsx`)**: Eliminates visual clutter by separating master password confirmation from 6-digit PIN input (`1. Password ➔ 2. Pairing PIN ➔ 3. Synchronize`).
+- **Monochrome Minimalist Aesthetic**: Uses clean design system tokens (`var(--text-primary)`, `var(--border)`, `var(--bg-elevated)`), eliminating colored badges and green success elements. Matches the exact aesthetic of the first-time setup window (`Onboarding.tsx`) with segmented horizontal progress bars (`h-1 rounded-full`).
+- **Comprehensive Desktop & In-App Sync Notifications**: Dispatches native desktop notifications (`sendDesktopNotification` via `@tauri-apps/plugin-notification`) and in-app toasts for both host listener sync and client auto-discovery sync, notifying users of synced credential counts or confirming up-to-date status.
+- **English In-Code Defaults & Full Localization**: All wizard and notification strings default to English in source code with complete localization keys in `en.ts` and `sv.ts`.
 
 ### Shared Components
 

@@ -11,8 +11,8 @@
  * - MockBackend (development) — uses in-memory data
  */
 
-import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats } from '@/types/ipc';
-export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats };
+import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo } from '@/types/ipc';
+export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo };
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -457,11 +457,14 @@ export interface YntraVaultBackend {
   runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats>;
   runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string): Promise<MergeStats>;
   getLocalIp(): Promise<string | null>;
+  getLocalIps(): Promise<string[]>;
   scanP2pDiscovery(timeoutMs?: number | null): Promise<string | null>;
   generatePairingCode(): Promise<string>;
+  getLocalDeviceInfo(): Promise<LocalDeviceInfo>;
   getTrustedDevices(): Promise<TrustedDevice[]>;
   revokeTrustedDevice(deviceId: string): Promise<void>;
   startPairingHost(listenAddr: string, password: string, pairingCode: string, deviceName?: string): Promise<PairingStats>;
+  cancelPairingHost(): Promise<void>;
   startPairingClient(serverAddr: string, password: string, pairingCode: string, dbPath: string, deviceName?: string): Promise<PairingStats>;
   scanPairingDiscovery(password: string, pairingCode: string, timeoutMs?: number | null): Promise<string | null>;
   splitMasterPassword(password: string): Promise<string[]>;

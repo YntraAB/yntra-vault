@@ -17,6 +17,7 @@ async fn test_app_state_and_atomic_settings() {
         lock_on_focus_loss: AtomicBool::new(false),
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
     };
 
     // Verify initial settings defaults
@@ -87,6 +88,7 @@ async fn test_app_state_vault_lifecycle() {
         lock_on_focus_loss: AtomicBool::new(false),
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
     };
 
     // 1. Create and mount vault into AppState
@@ -146,6 +148,7 @@ async fn test_app_state_vault_reload() {
         lock_on_focus_loss: AtomicBool::new(false),
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
     };
 
     // 1. Create vault with 1 entry
@@ -219,6 +222,7 @@ async fn test_autotype_lock_release_invariant() {
         lock_on_focus_loss: AtomicBool::new(true),
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
     };
 
     let mut manager = VaultManager::create("Tauri Autotype Vault", master_password, &vault_path).unwrap();

@@ -426,9 +426,18 @@ impl VaultManager {
         }
     }
 
-    /// Returns the list of paired trusted devices.
+    /// Returns the list of paired trusted devices, deduplicated by ID and identity.
     pub fn get_trusted_devices(&self) -> Vec<TrustedDevice> {
-        self.data.settings.trusted_devices.clone()
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_names = std::collections::HashSet::new();
+        let mut deduped = Vec::new();
+        for dev in &self.data.settings.trusted_devices {
+            let name_key = (dev.name.to_lowercase(), dev.os.to_lowercase());
+            if seen_ids.insert(dev.id) && seen_names.insert(name_key) {
+                deduped.push(dev.clone());
+            }
+        }
+        deduped
     }
 
     /// Revokes authorization for a paired trusted device by ID and persists changes to disk.
@@ -441,9 +450,11 @@ impl VaultManager {
         Ok(())
     }
 
-    /// Registers or updates a paired trusted device and persists changes to disk.
+    /// Registers or updates a paired trusted device and persists changes to disk, avoiding duplicates.
     pub fn register_trusted_device(&mut self, device: TrustedDevice) -> crate::Result<()> {
-        self.data.settings.trusted_devices.retain(|d| d.id != device.id);
+        self.data.settings.trusted_devices.retain(|d| {
+            d.id != device.id && !(d.name.eq_ignore_ascii_case(&device.name) && d.os == device.os)
+        });
         self.data.settings.trusted_devices.push(device);
         self.save()?;
         Ok(())

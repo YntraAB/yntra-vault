@@ -7,6 +7,7 @@ import { useSettings } from '@/features/settings';
 import { useToast } from '@/contexts/ToastContext';
 import { useUi, useSearch } from '@/contexts/UiContext';
 import { getTransientWebdavPassword } from '@/lib/sessionSecrets';
+import { sendDesktopNotification } from '@/lib/notifications';
 
 // ─── Conversion helpers (Rust types ↔ frontend types) ───────────────────
 
@@ -425,12 +426,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
           const stats = await backend.runP2pSyncListener(addr, currentVault.path);
           if (!isCancelled && !isLockedRef.current) {
             await Promise.all([refreshEntries(), refreshTags()]);
-            if (stats && (stats.entries_added > 0 || stats.entries_updated > 0 || stats.trash_merged > 0)) {
-              addToast({
-                message: `Wi-Fi Sync: ${stats.entries_added + stats.entries_updated} passwords synchronized from device`,
-                type: 'success',
-              });
-            }
+            const lang = settings.language || 'en';
+            const count = (stats?.entries_added || 0) + (stats?.entries_updated || 0);
+            const msg = count > 0
+              ? getTranslation(lang, 'sync.toast_peer_synced_changes', { count: String(count) })
+              : getTranslation(lang, 'sync.toast_peer_synced_clean');
+            addToast({ message: msg, type: 'success' });
+            sendDesktopNotification(getTranslation(lang, 'sync.desktop_title'), msg);
           }
         } catch {
           // Timeout or connection closed; wait 1.5s before listening again
@@ -448,7 +450,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       isCancelled = true;
       setIsP2pListening(false);
     };
-  }, [shouldListen, settings.p2pAddr, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
+  }, [shouldListen, settings.p2pAddr, settings.language, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
 
   // P2P Auto-Sync on Wi-Fi (Periodically scans for beacons and syncs)
   useEffect(() => {
@@ -463,8 +465,15 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       try {
         const peer = await backend.scanP2pDiscovery(2500);
         if (peer && !isCancelled && !isLockedRef.current) {
-          await backend.runP2pSyncClient(peer, currentVault.path);
+          const stats = await backend.runP2pSyncClient(peer, currentVault.path);
           await Promise.all([refreshEntries(), refreshTags()]);
+          const lang = settings.language || 'en';
+          const count = (stats?.entries_added || 0) + (stats?.entries_updated || 0);
+          const msg = count > 0
+            ? getTranslation(lang, 'sync.toast_auto_sync_changes', { count: String(count) })
+            : getTranslation(lang, 'sync.toast_auto_sync_clean');
+          addToast({ message: msg, type: 'success' });
+          sendDesktopNotification(getTranslation(lang, 'sync.desktop_title'), msg);
         }
       } catch (err: any) {
         const errStr = String(err?.message || err || '');
@@ -486,7 +495,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(initTimer);
       clearInterval(interval);
     };
-  }, [settings.p2pAutoSyncWifi, settings.p2pAutoSyncIntervalMinutes, backend, currentVault, isLocked, refreshEntries, refreshTags]);
+  }, [settings.p2pAutoSyncWifi, settings.p2pAutoSyncIntervalMinutes, settings.language, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
 
   // CRUD Operations
   // CRUD Operations with SOTA Optimistic Local-First State & Background Persistence

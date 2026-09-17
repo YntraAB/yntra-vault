@@ -27,4 +27,5 @@ pub struct AppState {
     pub lock_on_focus_loss: AtomicBool,
     pub lock_on_system_lock: AtomicBool,
     pub smart_login_cancel: Arc<AtomicBool>,
+    pub pairing_cancel: Arc<AtomicBool>,
 }

@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.8] - 2026-09-17
+
+### Added
+- **Dedicated Pairing Port (Port 5324) & Port Collision Separation**:
+  - Separated zero-knowledge device pairing onto dedicated port `5324` (`DEFAULT_PAIRING_PORT`), eliminating port collisions with continuous background Wi-Fi synchronization on port `5322`.
+  - Added resilient fallback port traversal (`5324` -> `5325` -> `5322`) during device pairing connections.
+  - Added automatic pause and resumption of the background Wi-Fi sync listener during device pairing sessions to prevent socket contention.
+- **Collision-Safe Adopt Flow on Unauthenticated Clients**:
+  - Implemented safe vault adoption (`ClientPairingMode::AdoptIntoDir`) when pairing from an unauthenticated client instance (`VaultSelect`), saving remote salt and entries into isolated non-colliding files without touching existing local vaults.
+- **Active UDP Query-Response P2P Discovery Protocol (`YQRY` / `YPAR`)**:
+  - Implemented active bidirectional query-response discovery for instant LAN peering (<50ms). Clients actively pulse `YQRY` queries; hosts respond with direct unicast `YPAR` beacons to the client's address, bypassing router broadcast suppressions and AP isolation.
+- **Multi-Interface Local Network Enumeration & Subnet Directed Broadcast**:
+  - Added `get_local_lan_ips` probing all active network adapters (Ethernet, Wi-Fi, virtual adapters) via host name resolution and gateway route tests. Discovery packets are broadcast simultaneously across `255.255.255.255`, RFC 2365 administratively scoped multicast (`239.255.53.23`), and directed subnet broadcasts (`x.y.z.255:5323`) for every active interface.
+- **Timing-Safe Constant-Time Network Beacon Verification**:
+  - Hardened discovery beacon and query verification with `subtle::ConstantTimeEq` across all UDP listener endpoints.
+- **Fast-Timeout Candidate Port Probing with Pre-UDP Ping**:
+  - Optimized TCP connection establishment in pairing and P2P sync clients with parallel fallback ports `[5324, 5322, 5325]` and a 350ms connect timeout, preceded by direct UDP reachability verification.
+- **Strict Trusted Device Deduplication**:
+  - Enforced dual-tier deduplication by UUID and case-insensitive `(name, os)` pairs during device registration, pairing, and CRDT synchronization.
+- **Pairing UI & Host IP Multi-Interface Ergonomics**:
+  - Added one-click IP copy buttons, alternate interface IP selector badges, one-click autofill for the last paired peer IP, and a seamless in-wizard re-synchronization action.
+- **Immediate Host Pairing Cancellation (`cancel_pairing_host`)**:
+  - Added atomic cancellation support (`pairing_cancel: Arc<AtomicBool>`) and exposed Tauri command `cancel_pairing_host`, immediately unbinding TCP port 5324 and UDP discovery sockets within 40ms when the user cancels or closes the pairing wizard.
+- **Real-Time IPv4 Auto-Dot & Local Hostname Formatter**:
+  - Implemented automatic octet dot insertion, boundary clamping, local hostname support (`localhost`, `*.local`), and port sanitization (`formatIpv4Input`) with unit test coverage.
+- **Host Network Adapter Enumeration Caching**:
+  - Implemented adapter IP caching in `broadcast_pairing_beacon_with_ips`, throttling adapter enumeration to every 10 seconds and eliminating UDP socket churn during pairing.
+- **Repeat Adoption Collision Guard**:
+  - Preserved newly adopted vault paths in `adoptedVaultPathRef` during active pairing wizard sessions, preventing duplicate `<Vault> (1).vdb` creation on subsequent in-wizard syncs ("Sync Again").
+- **Comprehensive Wi-Fi & Auto-Sync Notifications**:
+  - Added in-app toasts and native desktop notifications (`sendDesktopNotification` via `@tauri-apps/plugin-notification`) for both client discovery auto-sync and incoming peer connections as host, informing users when sync completes, passwords update, or vaults are already in sync.
+- **Minimalist Monochrome Pairing Wizard & Stepper Redesign**:
+  - Redesigned the Device Pairing Wizard (`DevicePairingWizard.tsx`) to match the exact aesthetic of the first-time setup window (`Onboarding.tsx`), utilizing segmented horizontal progress bars (`h-1 rounded-full`), clean `rounded-[3px]` elevated borders, and a minimal 420px width.
+  - Replaced colored accents and green status elements with consistent monochrome palette variables (`var(--text-primary)`, `var(--border)`, `var(--bg-elevated)`).
+  - Standardized English defaults across in-code strings and added complete localization keys in `en.ts` and `sv.ts` for pairing steps, role descriptions, hints, and sync notices.
+
+### Changed
+- **Progressive Multi-Step Pairing Wizard**:
+  - Redesigned `DevicePairingWizard.tsx` into a calm, focused multi-step workflow with visual stepper progress breadcrumbs (`1. Password` ➔ `2. Pairing PIN` ➔ `3. Synchronize`), separating master password verification from 6-digit PIN entry and eliminating visual clutter.
+  - Added auto-focus and Enter key progression on the password step, and auto-focus with clipboard paste distribution on the 6-digit PIN inputs.
+  - Displayed resolved host pairing IP and dedicated port (`<ip>:5324`) on the host screen.
+
+### Security
+- **Unauthenticated Client Adopt Mode Isolation**:
+  - Enforced strict session authentication checks in `start_pairing_client`: clients pairing from the `VaultSelect` screen or locked states operate exclusively in `ClientPairingMode::AdoptIntoDir`.
+  - Prohibited unauthenticated background decryption or transmission of local `.vdb` files on disk when pairing from logged-out states.
+  - Adopted vaults are written to dedicated, collision-resistant filenames derived from the host vault's metadata name (`<HostVaultName>.vdb`, `<HostVaultName> (1).vdb`), completely eliminating silent overwriting of unrelated local vaults.
+- **P2P Discovery In-Loop Self-Echo Filtering**:
+  - Relocated local LAN IP and loopback filtering directly inside the packet receive loop of `listen_discovery_beacon`, ensuring discovery listeners do not short-circuit on their own UDP broadcast reflections and allowing remote LAN peers to be discovered reliably.
+- **IPv4 LAN Prioritization & IPv6 Link-Local Isolation**:
+  - Excluded un-routable IPv6 link-local (`fe80::/10`) and multicast addresses from `is_valid_lan_ip`, ensuring `get_local_lan_ips()` and `get_local_lan_ip()` prioritize valid, reachable IPv4 addresses on multi-homed interfaces.
+- **Windows DOS Reserved Filename Sanitization**:
+  - Hardened `sanitize_vault_filename` against reserved Windows device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) during client adopt mode database initialization.
+
+### Fixed
+- **P2P LAN Discovery Blind Spot (Self-Echo)**:
+  - Fixed a critical issue where `listen_discovery_beacon` received its own beacon and terminated the discovery process before remote devices could reply.
+- **Host Pairing TCP/UDP Port Hang**:
+  - Fixed an issue where closing or cancelling the pairing wizard left TCP port 5324 and UDP port 5323 bound for up to 180 seconds, blocking subsequent pairing attempts.
+- **IPv6 Link-Local Address Presentation**:
+  - Fixed an issue on Windows where link-local `fe80::` addresses were displayed as the host's primary pairing IP, causing connection failures when entered into clients.
+- **Duplicate Vault Accumulation on Re-Sync**:
+  - Fixed an issue where clicking "Sync Again" after adopting a vault created duplicate incremental database files on disk (`<Name> (1).vdb`).
+
+---
+
 ## [0.1.7] - 2026-09-15
 
 ### Added

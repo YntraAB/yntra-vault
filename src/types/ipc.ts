@@ -343,6 +343,14 @@ export interface PairingStats {
   entries_merged: number;
   total_entries: number;
   vault_path?: string | null;
+  peer_addr?: string | null;
+}
+
+export interface LocalDeviceInfo {
+  id: string;
+  name: string;
+  device_type: string;
+  os: string;
 }
 
 export interface TrustedDevice {
@@ -738,6 +746,10 @@ export interface IpcCommands {
     args: Record<string, never>;
     return: string | null;
   };
+  get_local_ips: {
+    args?: Record<string, never>;
+    return: string[];
+  };
   scan_p2p_discovery: {
     args: { timeoutMs?: number | null };
     return: string | null;
@@ -745,6 +757,10 @@ export interface IpcCommands {
   generate_pairing_code: {
     args?: Record<string, never>;
     return: string;
+  };
+  get_local_device_info: {
+    args?: Record<string, never>;
+    return: LocalDeviceInfo;
   };
   get_trusted_devices: {
     args?: Record<string, never>;
@@ -757,6 +773,10 @@ export interface IpcCommands {
   start_pairing_host: {
     args: { listenAddr: string; password: string; pairingCode: string; deviceName?: string };
     return: PairingStats;
+  };
+  cancel_pairing_host: {
+    args?: Record<string, never>;
+    return: void;
   };
   start_pairing_client: {
     args: { serverAddr: string; password: string; pairingCode: string; dbPath: string; deviceName?: string };

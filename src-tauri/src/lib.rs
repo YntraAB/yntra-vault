@@ -25,6 +25,7 @@ pub fn run() {
             lock_on_focus_loss: std::sync::atomic::AtomicBool::new(false),
             lock_on_system_lock: std::sync::atomic::AtomicBool::new(true),
             smart_login_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pairing_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
     #[cfg(not(mobile))]
@@ -154,11 +155,14 @@ pub fn run() {
             commands::run_p2p_sync_listener,
             commands::run_p2p_sync_client,
             commands::get_local_ip,
+            commands::get_local_ips,
             commands::scan_p2p_discovery,
             commands::generate_pairing_code,
+            commands::get_local_device_info,
             commands::get_trusted_devices,
             commands::revoke_trusted_device,
             commands::start_pairing_host,
+            commands::cancel_pairing_host,
             commands::start_pairing_client,
             commands::scan_pairing_discovery,
             commands::split_master_password,

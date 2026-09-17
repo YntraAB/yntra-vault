@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import { FolderInput, AlertTriangle, FileSpreadsheet, FileCode, Smartphone, Laptop, Plus, Unlink, Loader2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { FolderInput, AlertTriangle, FileSpreadsheet, FileCode, Smartphone, Laptop, Plus, Unlink, Loader2, RefreshCw, X } from 'lucide-react';
 import { useAuth } from '@/features/auth';
 import { useEntries } from '@/features/entries';
 import { useSettings } from '../context/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
-import { saveFileDialog, type TrustedDevice } from '@/lib/backend';
+import { saveFileDialog, type TrustedDevice, type LocalDeviceInfo } from '@/lib/backend';
 import { getTransientWebdavPassword, setTransientWebdavPassword } from '@/lib/sessionSecrets';
-import { DevicePairingWizard } from '@/features/sync';
+import { DevicePairingWizard, formatIpv4Input } from '@/features/sync';
 import { SettingSection, Toggle } from './SettingSection';
 
 export interface BackupTabProps {
@@ -57,6 +57,99 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   useEffect(() => {
     loadTrustedDevices();
   }, [loadTrustedDevices]);
+
+  const [localDevice, setLocalDevice] = useState<LocalDeviceInfo | null>(null);
+  const [syncingDeviceId, setSyncingDeviceId] = useState<string | null>(null);
+  const [ipPromptDevice, setIpPromptDevice] = useState<TrustedDevice | null>(null);
+  const [promptIpValue, setPromptIpValue] = useState<string>('');
+  const [isPromptSubmitting, setIsPromptSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (backend) {
+      backend.getLocalDeviceInfo().then(setLocalDevice).catch(() => {});
+    }
+  }, [backend]);
+
+  const uniqueDevices = useMemo(() => {
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+    const list: TrustedDevice[] = [];
+    for (const dev of trustedDevices) {
+      const nameKey = `${(dev.name || '').toLowerCase()}:${(dev.os || '').toLowerCase()}`;
+      if (!seenIds.has(dev.id) && !seenNames.has(nameKey)) {
+        seenIds.add(dev.id);
+        seenNames.add(nameKey);
+        list.push(dev);
+      }
+    }
+    return list;
+  }, [trustedDevices]);
+
+  const handleSyncDevice = async (device: TrustedDevice, targetIpOverride?: string) => {
+    if (!backend || !currentVault) return;
+
+    let targetAddr = targetIpOverride?.trim() || '';
+
+    if (!targetAddr) {
+      const cached = localStorage.getItem(`yntra_peer_addr_${device.id}`) || localStorage.getItem('yntra_last_peer_addr');
+      if (cached) {
+        targetAddr = cached.trim();
+      }
+    }
+
+    if (!targetAddr) {
+      setSyncingDeviceId(device.id);
+      try {
+        const discovered = await backend.scanP2pDiscovery(1500);
+        if (discovered) {
+          targetAddr = discovered;
+        }
+      } catch {
+        // ignore discovery error
+      }
+    }
+
+    if (!targetAddr) {
+      setSyncingDeviceId(null);
+      setPromptIpValue(localStorage.getItem('yntra_last_peer_addr') || '');
+      setIpPromptDevice(device);
+      return;
+    }
+
+    setSyncingDeviceId(device.id);
+    try {
+      const hostPart = targetAddr.split(':')[0].trim();
+      const cleanAddr = `${hostPart}:5322`;
+      const stats = await backend.runP2pSyncClient(cleanAddr, currentVault.path, device.id);
+
+      localStorage.setItem(`yntra_peer_addr_${device.id}`, hostPart);
+      localStorage.setItem('yntra_last_peer_addr', hostPart);
+
+      await Promise.all([refreshEntries(), refreshTags(), loadTrustedDevices()]);
+
+      const updatedCount = stats.entries_added + stats.entries_updated;
+      addToast({
+        message: updatedCount > 0
+          ? t('settings.sync_success_count', { count: updatedCount })
+          : t('settings.sync_success'),
+        type: 'success',
+      });
+      setIpPromptDevice(null);
+    } catch (err: any) {
+      const errMsg = typeof err === 'string' ? err : err?.message || String(err);
+      if (!targetIpOverride) {
+        setPromptIpValue(targetAddr.split(':')[0].trim() || '');
+        setIpPromptDevice(device);
+      } else {
+        addToast({
+          message: t('settings.sync_failed', { name: device.name || 'Enhet', err: errMsg }),
+          type: 'error',
+        });
+      }
+    } finally {
+      setSyncingDeviceId(null);
+    }
+  };
 
   const handleRevokeDevice = async (device: TrustedDevice) => {
     if (!backend) return;
@@ -280,7 +373,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
 
         {/* Devices List or Empty State */}
         <div className="space-y-2">
-          {trustedDevices.length === 0 ? (
+          {uniqueDevices.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-elevated)] p-6 text-center">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-tertiary)] mb-2.5">
                 <Smartphone size={20} />
@@ -293,12 +386,20 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               </p>
             </div>
           ) : (
-            trustedDevices.map((device) => {
+            uniqueDevices.map((device) => {
               const isMobile = device.device_type?.toLowerCase().includes('mobile') ||
                 device.os?.toLowerCase().includes('android') ||
                 device.os?.toLowerCase().includes('ios');
               const pairedDate = device.paired_at ? new Date(device.paired_at).toLocaleDateString() : '';
               const lastSync = device.last_sync_at ? new Date(device.last_sync_at).toLocaleString() : null;
+              const isCurrentDevice = Boolean(
+                localDevice && (
+                  device.id === localDevice.id || (
+                    device.name.toLowerCase() === localDevice.name.toLowerCase() &&
+                    device.os.toLowerCase() === localDevice.os.toLowerCase()
+                  )
+                )
+              );
 
               return (
                 <div
@@ -319,6 +420,11 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                             {device.os}
                           </span>
                         )}
+                        {isCurrentDevice && (
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-tertiary)]">
+                            {t('settings.this_device')}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[var(--text-secondary)]">
                         {pairedDate && <span>{t('settings.device_paired_on', { date: pairedDate })}</span>}
@@ -330,16 +436,31 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={revokingDeviceId === device.id}
-                    onClick={() => handleRevokeDevice(device)}
-                    className="flex h-7.5 items-center gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-2.5 text-[11px] font-medium text-rose-500 hover:bg-rose-500/20 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                    title={t('settings.revoke_device_btn')}
-                  >
-                    <Unlink size={12} />
-                    <span>{t('settings.revoke_device_btn')}</span>
-                  </button>
+                  {!isCurrentDevice && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={syncingDeviceId === device.id}
+                        onClick={() => handleSyncDevice(device)}
+                        className="flex h-7.5 items-center gap-1.5 rounded-md bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                        title={t('settings.sync_now_btn')}
+                      >
+                        <RefreshCw size={12} className={syncingDeviceId === device.id ? 'animate-spin' : ''} />
+                        <span>{syncingDeviceId === device.id ? t('settings.syncing') : t('settings.sync_now_btn')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={revokingDeviceId === device.id}
+                        onClick={() => handleRevokeDevice(device)}
+                        className="flex h-7.5 items-center gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-2.5 text-[11px] font-medium text-rose-500 hover:bg-rose-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                        title={t('settings.revoke_device_btn')}
+                      >
+                        <Unlink size={12} />
+                        <span>{t('settings.revoke_device_btn')}</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -456,6 +577,72 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
           loadTrustedDevices();
         }}
       />
+
+      {/* Manual IP Prompt Modal for 1-Click Sync */}
+      {ipPromptDevice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none p-4"
+          onClick={() => setIpPromptDevice(null)}
+        >
+          <div
+            className="w-full max-w-[400px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl overflow-hidden flex flex-col p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3 mb-3">
+              <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                {t('settings.prompt_device_ip_title', { name: ipPromptDevice.name || 'Device' })}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIpPromptDevice(null)}
+                className="rounded-md p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-[12px] text-[var(--text-secondary)] mb-3 leading-relaxed">
+              {t('settings.prompt_device_ip_desc')}
+            </p>
+            <div className="flex flex-col gap-1.5 mb-4">
+              <input
+                type="text"
+                autoFocus
+                value={promptIpValue}
+                onChange={(e) => setPromptIpValue(formatIpv4Input(e.target.value, promptIpValue))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && promptIpValue.trim()) {
+                    handleSyncDevice(ipPromptDevice, promptIpValue);
+                  }
+                }}
+                placeholder={t('settings.prompt_device_ip_ph')}
+                className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 font-mono text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIpPromptDevice(null)}
+                className="h-8 rounded-md px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+              >
+                {t('common.cancel') || 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={!promptIpValue.trim() || isPromptSubmitting}
+                onClick={async () => {
+                  setIsPromptSubmitting(true);
+                  await handleSyncDevice(ipPromptDevice, promptIpValue);
+                  setIsPromptSubmitting(false);
+                }}
+                className="flex h-8 items-center gap-1.5 rounded-md bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              >
+                {isPromptSubmitting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                <span>{t('settings.connect_btn')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

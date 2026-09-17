@@ -2,9 +2,10 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream, UdpSocket, SocketAddr, ToSocketAddrs, IpAddr};
+use std::net::{TcpListener, TcpStream, UdpSocket, SocketAddr, ToSocketAddrs, IpAddr, Ipv4Addr};
 use std::path::Path;
 use rand::Rng;
+use subtle::ConstantTimeEq;
 use crate::crypto::{compute_hmac, verify_hmac};
 use crate::vault::format::VaultFile;
 
@@ -13,7 +14,10 @@ const MAX_DB_SIZE: usize = 256 * 1024 * 1024;
 
 pub const DEFAULT_P2P_PORT: u16 = 5322;
 pub const DEFAULT_DISCOVERY_PORT: u16 = 5323;
+pub const DEFAULT_PAIRING_PORT: u16 = 5324;
 pub const DISCOVERY_BEACON_MAGIC: [u8; 4] = *b"YBEA";
+pub const PAIRING_QUERY_MAGIC: [u8; 4] = *b"YQRY";
+pub const DISCOVERY_MULTICAST_ADDR: &str = "239.255.53.23";
 
 pub mod pairing;
 pub use pairing::{
@@ -21,8 +25,9 @@ pub use pairing::{
     derive_pairing_subkeys, compute_pairing_beacon_id,
     broadcast_pairing_beacon, listen_pairing_beacon,
     run_p2p_pairing_host, run_p2p_pairing_client,
-    run_p2p_pairing_host_with_device, run_p2p_pairing_client_with_device,
-    DeviceInfo, resolve_local_device_info,
+    run_p2p_pairing_host_with_device, run_p2p_pairing_host_with_device_and_cancel,
+    run_p2p_pairing_client_with_device,
+    DeviceInfo, resolve_local_device_info, ClientPairingMode, sanitize_vault_filename,
 };
 
 // ─── WebDAV Cloud Sync & SOTA Merge Protocol ───────────────────────────────────
@@ -580,6 +585,18 @@ fn apply_and_save_remote_vault(
             }
         }
 
+        // Deduplicate local trusted devices to guarantee clean device list
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_names = std::collections::HashSet::new();
+        let mut deduped = Vec::new();
+        for dev in local_data.settings.trusted_devices.drain(..) {
+            let name_key = (dev.name.to_lowercase(), dev.os.to_lowercase());
+            if seen_ids.insert(dev.id) && seen_names.insert(name_key) {
+                deduped.push(dev);
+            }
+        }
+        local_data.settings.trusted_devices = deduped;
+
         // Update metadata timestamp and entry count
         local_data.metadata.updated_at = chrono::Utc::now();
         local_data.metadata.entry_count = local_data.entries.len();
@@ -671,17 +688,84 @@ pub fn compute_p2p_discovery_id(subkeys: &crate::crypto::SubKeys) -> [u8; 32] {
     *blake3::keyed_hash(&key_hash, b"yntra-vault-lan-discovery-beacon-v1").as_bytes()
 }
 
-/// Query the host's primary LAN IP address without external network traffic.
-pub fn get_local_lan_ip() -> Option<IpAddr> {
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    let addr = socket.local_addr().ok()?;
-    let ip = addr.ip();
-    if ip.is_loopback() || ip.is_unspecified() {
-        None
-    } else {
-        Some(ip)
+fn is_valid_lan_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            !ipv4.is_loopback()
+                && !ipv4.is_unspecified()
+                && !ipv4.is_link_local()
+                && !ipv4.is_broadcast()
+        }
+        IpAddr::V6(ipv6) => {
+            !ipv6.is_loopback()
+                && !ipv6.is_unspecified()
+                && !ipv6.is_unicast_link_local()
+                && !ipv6.is_multicast()
+        }
     }
+}
+
+/// Enumerate all active non-loopback, non-link-local IPv4 and IPv6 addresses across all network adapters.
+/// IPv4 addresses are ordered first to ensure reliable LAN discovery and display.
+pub fn get_local_lan_ips() -> Vec<IpAddr> {
+    let mut v4_ips = Vec::new();
+    let mut v6_ips = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. Hostname DNS resolution (resolves adapters configured on local host via OS)
+    if let Ok(hostname) = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")) {
+        if let Ok(addrs) = format!("{}:0", hostname).to_socket_addrs() {
+            for addr in addrs {
+                let ip = addr.ip();
+                if is_valid_lan_ip(&ip) && seen.insert(ip) {
+                    if ip.is_ipv4() {
+                        v4_ips.push(ip);
+                    } else {
+                        v6_ips.push(ip);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Gateway and route socket probes across standard subnets
+    let probes = [
+        "8.8.8.8:80",
+        "1.1.1.1:80",
+        "192.168.1.1:80",
+        "192.168.0.1:80",
+        "192.168.2.1:80",
+        "192.168.137.1:80",
+        "10.0.0.1:80",
+        "10.0.1.1:80",
+        "172.16.0.1:80",
+    ];
+
+    for probe in probes {
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+            if socket.connect(probe).is_ok() {
+                if let Ok(local_addr) = socket.local_addr() {
+                    let ip = local_addr.ip();
+                    if is_valid_lan_ip(&ip) && seen.insert(ip) {
+                        if ip.is_ipv4() {
+                            v4_ips.push(ip);
+                        } else {
+                            v6_ips.push(ip);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    v4_ips.extend(v6_ips);
+    v4_ips
+}
+
+/// Query the host's primary LAN IP address without external network traffic.
+/// Guarantees an active IPv4 address when available.
+pub fn get_local_lan_ip() -> Option<IpAddr> {
+    get_local_lan_ips().into_iter().find(|ip| ip.is_ipv4())
 }
 
 /// Broadcast a single discovery beacon packet over the local network.
@@ -696,8 +780,23 @@ pub fn broadcast_discovery_beacon(discovery_id: &[u8; 32], tcp_port: u16) -> cra
     packet[4..36].copy_from_slice(discovery_id);
     packet[36..38].copy_from_slice(&tcp_port.to_be_bytes());
 
+    // 1. Global broadcast
     let dest = format!("255.255.255.255:{}", DEFAULT_DISCOVERY_PORT);
     let _ = socket.send_to(&packet, &dest);
+
+    // 2. Multicast group (RFC 2365 local administrative scope)
+    let multi_dest = format!("{}:{}", DISCOVERY_MULTICAST_ADDR, DEFAULT_DISCOVERY_PORT);
+    let _ = socket.send_to(&packet, &multi_dest);
+
+    // 3. Directed subnet broadcasts for all detected local IPv4 adapters
+    for ip in get_local_lan_ips() {
+        if let IpAddr::V4(ipv4) = ip {
+            let octets = ipv4.octets();
+            let directed_dest = format!("{}.{}.{}.255:{}", octets[0], octets[1], octets[2], DEFAULT_DISCOVERY_PORT);
+            let _ = socket.send_to(&packet, &directed_dest);
+        }
+    }
+
     Ok(())
 }
 
@@ -710,16 +809,21 @@ pub fn listen_discovery_beacon(
     let listen_addr = format!("0.0.0.0:{}", DEFAULT_DISCOVERY_PORT);
     let socket = match UdpSocket::bind(&listen_addr) {
         Ok(s) => s,
-        Err(e) => {
-            return Err(crate::error::VaultError::EncryptionError(format!(
-                "Failed to bind UDP discovery listener on {}: {}", listen_addr, e
-            )));
+        Err(_) => {
+            UdpSocket::bind("0.0.0.0:0")
+                .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to bind UDP discovery listener: {}", e)))?
         }
     };
+
+    let _ = socket.set_broadcast(true);
+    if let Ok(multi_ip) = DISCOVERY_MULTICAST_ADDR.parse::<Ipv4Addr>() {
+        let _ = socket.join_multicast_v4(&multi_ip, &Ipv4Addr::UNSPECIFIED);
+    }
 
     socket.set_read_timeout(Some(std::time::Duration::from_millis(200)))
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to set UDP socket timeout: {}", e)))?;
 
+    let local_ips = get_local_lan_ips();
     let start = std::time::Instant::now();
     let mut buf = [0u8; 64];
 
@@ -728,7 +832,11 @@ pub fn listen_discovery_beacon(
             Ok((len, peer_addr)) => {
                 if len >= 38 && &buf[..4] == &DISCOVERY_BEACON_MAGIC {
                     let received_id = &buf[4..36];
-                    if received_id == expected_discovery_id {
+                    if received_id.ct_eq(expected_discovery_id).into() {
+                        // Skip self-echo from our own local network adapters and loopback
+                        if peer_addr.ip().is_loopback() || local_ips.iter().any(|lip| *lip == peer_addr.ip()) {
+                            continue;
+                        }
                         let peer_port = u16::from_be_bytes([buf[36], buf[37]]);
                         return Ok(Some(SocketAddr::new(peer_addr.ip(), peer_port)));
                     }
@@ -983,7 +1091,13 @@ pub fn run_p2p_sync_client_with_device(
     db_filepath: &Path,
     device_id: Option<uuid::Uuid>,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
-    let addrs: Vec<SocketAddr> = server_addr.to_socket_addrs()
+    let target_str = if !server_addr.contains(':') {
+        format!("{}:{}", server_addr, DEFAULT_P2P_PORT)
+    } else {
+        server_addr.to_string()
+    };
+
+    let addrs: Vec<SocketAddr> = target_str.to_socket_addrs()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Invalid sync server address '{}': {}", server_addr, e)))?
         .collect();
 
@@ -992,20 +1106,28 @@ pub fn run_p2p_sync_client_with_device(
     }
 
     let mut stream = None;
-    let connect_timeout = std::time::Duration::from_secs(2);
+    let connect_timeout = std::time::Duration::from_millis(400);
 
-    for attempt in 0..5 {
+    for attempt in 0..10 {
         for addr in &addrs {
-            if let Ok(s) = TcpStream::connect_timeout(addr, connect_timeout) {
-                stream = Some(s);
+            let candidate_ports = [addr.port(), DEFAULT_P2P_PORT, DEFAULT_PAIRING_PORT, 5325];
+            for p in candidate_ports {
+                let mut alt_addr = *addr;
+                alt_addr.set_port(p);
+                if let Ok(s) = TcpStream::connect_timeout(&alt_addr, connect_timeout) {
+                    stream = Some(s);
+                    break;
+                }
+            }
+            if stream.is_some() {
                 break;
             }
         }
         if stream.is_some() {
             break;
         }
-        if attempt < 4 {
-            std::thread::sleep(std::time::Duration::from_millis(150));
+        if attempt < 9 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
         }
     }
     let mut stream = stream.ok_or_else(|| {

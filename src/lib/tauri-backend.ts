@@ -27,6 +27,7 @@ import type {
   BreachStatus,
   MergeStats,
   PairingStats,
+  LocalDeviceInfo,
   TrustedDevice,
   ParsedImportEntry,
   ImportPreviewResult,
@@ -369,12 +370,20 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('get_local_ip', {});
   }
 
+  async getLocalIps(): Promise<string[]> {
+    return invoke('get_local_ips', {});
+  }
+
   async scanP2pDiscovery(timeoutMs?: number | null): Promise<string | null> {
     return invoke('scan_p2p_discovery', { timeoutMs });
   }
 
   async generatePairingCode(): Promise<string> {
     return invoke('generate_pairing_code');
+  }
+
+  async getLocalDeviceInfo(): Promise<LocalDeviceInfo> {
+    return invoke('get_local_device_info');
   }
 
   async getTrustedDevices(): Promise<TrustedDevice[]> {
@@ -387,6 +396,10 @@ export class TauriBackend implements YntraVaultBackend {
 
   async startPairingHost(listenAddr: string, password: string, pairingCode: string, deviceName?: string): Promise<PairingStats> {
     return invoke('start_pairing_host', { listenAddr, password, pairingCode, deviceName });
+  }
+
+  async cancelPairingHost(): Promise<void> {
+    return invoke('cancel_pairing_host');
   }
 
   async startPairingClient(serverAddr: string, password: string, pairingCode: string, dbPath: string, deviceName?: string): Promise<PairingStats> {

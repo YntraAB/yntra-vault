@@ -12,12 +12,13 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket, Ipv4Addr};
 use std::path::Path;
 use std::time::Duration;
 use chrono::Utc;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use yntra_crypto::{
@@ -32,8 +33,9 @@ use crate::vault::{
     manager::VaultManager,
 };
 use crate::services::sync::{
-    merge_vault_data, DEFAULT_DISCOVERY_PORT, DEFAULT_P2P_PORT,
-    P2P_AUTH_FAILED_SIG, MAX_DB_SIZE,
+    merge_vault_data, DEFAULT_DISCOVERY_PORT, DEFAULT_P2P_PORT, DEFAULT_PAIRING_PORT,
+    P2P_AUTH_FAILED_SIG, MAX_DB_SIZE, DISCOVERY_MULTICAST_ADDR, PAIRING_QUERY_MAGIC,
+    get_local_lan_ips,
 };
 
 pub const PAIRING_BEACON_MAGIC: [u8; 4] = *b"YPAR";
@@ -49,6 +51,8 @@ pub struct PairingStats {
     pub total_entries: usize,
     #[serde(default)]
     pub vault_path: Option<String>,
+    #[serde(default)]
+    pub peer_addr: Option<String>,
 }
 
 /// Encrypted container payload returned by Host to Client during device pairing.
@@ -56,7 +60,49 @@ pub struct PairingStats {
 pub struct PairingHostPayload {
     pub salt: [u8; 32],
     pub data: VaultData,
+    #[serde(default)]
+    pub error_msg: Option<String>,
 }
+
+/// Execution mode for device pairing client.
+#[derive(Clone, Debug)]
+pub enum ClientPairingMode {
+    /// Adopts a remote vault into the given directory, generating a collision-free filename
+    /// from the host vault's name. In this mode, no existing local vault is ever read or opened,
+    /// and no existing file on disk is ever overwritten.
+    AdoptIntoDir { target_dir: std::path::PathBuf },
+    /// Adopts a remote vault directly into a specified file path.
+    AdoptIntoFile { target_file: std::path::PathBuf },
+    /// Synchronizes with an existing, authenticated local vault at the specified path.
+    ExistingVault { path: std::path::PathBuf },
+}
+
+/// Sanitizes a vault name into a safe, valid filesystem filename without invalid characters.
+pub fn sanitize_vault_filename(name: &str) -> String {
+    let forbidden = ['\\', '/', ':', '*', '?', '"', '<', '>', '|', '\0', '\n', '\r', '\t'];
+    let cleaned: String = name
+        .chars()
+        .map(|c| if forbidden.contains(&c) { '_' } else { c })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.').trim();
+    if trimmed.is_empty() {
+        return "Adopted Vault".to_string();
+    }
+
+    let upper = trimmed.to_ascii_uppercase();
+    let is_dos_device = matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    );
+    if is_dos_device {
+        format!("Adopted_{}", trimmed)
+    } else {
+        trimmed.to_string()
+    }
+}
+
 
 /// Normalizes a user-entered pairing PIN or code by removing spaces, hyphens, and whitespace.
 pub fn normalize_pairing_code(code: &str) -> String {
@@ -98,8 +144,8 @@ pub fn compute_pairing_beacon_id(master_password: &str, pairing_code: &str) -> c
     Ok(compute_pairing_beacon_id_from_subkeys(&subkeys))
 }
 
-/// Broadcasts an ephemeral UDP discovery beacon for the active pairing session.
-pub fn broadcast_pairing_beacon(pairing_id: &[u8; 32], tcp_port: u16) -> crate::Result<()> {
+/// Broadcasts an ephemeral UDP discovery beacon for the active pairing session using provided LAN adapter IPs.
+pub fn broadcast_pairing_beacon_with_ips(pairing_id: &[u8; 32], tcp_port: u16, local_ips: &[std::net::IpAddr]) -> crate::Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:0")
         .map_err(|e| VaultError::EncryptionError(format!("Failed to bind pairing UDP socket: {}", e)))?;
     let _ = socket.set_broadcast(true);
@@ -109,12 +155,33 @@ pub fn broadcast_pairing_beacon(pairing_id: &[u8; 32], tcp_port: u16) -> crate::
     packet[4..36].copy_from_slice(pairing_id);
     packet[36..38].copy_from_slice(&tcp_port.to_be_bytes());
 
+    // 1. Global broadcast
     let dest = format!("255.255.255.255:{}", DEFAULT_DISCOVERY_PORT);
     let _ = socket.send_to(&packet, &dest);
+
+    // 2. Multicast group (RFC 2365 local administrative scope)
+    let multi_dest = format!("{}:{}", DISCOVERY_MULTICAST_ADDR, DEFAULT_DISCOVERY_PORT);
+    let _ = socket.send_to(&packet, &multi_dest);
+
+    // 3. Directed subnet broadcasts for all detected local IPv4 adapters
+    for ip in local_ips {
+        if let std::net::IpAddr::V4(ipv4) = ip {
+            let octets = ipv4.octets();
+            let directed_dest = format!("{}.{}.{}.255:{}", octets[0], octets[1], octets[2], DEFAULT_DISCOVERY_PORT);
+            let _ = socket.send_to(&packet, &directed_dest);
+        }
+    }
+
     Ok(())
 }
 
+/// Broadcasts an ephemeral UDP discovery beacon for the active pairing session.
+pub fn broadcast_pairing_beacon(pairing_id: &[u8; 32], tcp_port: u16) -> crate::Result<()> {
+    broadcast_pairing_beacon_with_ips(pairing_id, tcp_port, &get_local_lan_ips())
+}
+
 /// Listens for a pairing discovery beacon matching the expected pairing token within a timeout.
+/// Employs active UDP query-response: sends periodic query pulses to solicit immediate host unicast responses.
 pub fn listen_pairing_beacon(
     expected_pairing_id: &[u8; 32],
     timeout: Duration,
@@ -122,25 +189,57 @@ pub fn listen_pairing_beacon(
     let listen_addr = format!("0.0.0.0:{}", DEFAULT_DISCOVERY_PORT);
     let socket = match UdpSocket::bind(&listen_addr) {
         Ok(s) => s,
-        Err(e) => {
-            return Err(VaultError::EncryptionError(format!(
-                "Failed to bind UDP pairing discovery on {}: {}", listen_addr, e
-            )));
+        Err(_) => {
+            // Fallback to ephemeral port if 5323 is busy (e.g. host on same machine)
+            UdpSocket::bind("0.0.0.0:0")
+                .map_err(|e| VaultError::EncryptionError(format!("Failed to bind UDP pairing listener: {}", e)))?
         }
     };
 
-    socket.set_read_timeout(Some(Duration::from_millis(200)))
+    let _ = socket.set_broadcast(true);
+    if let Ok(multi_ip) = DISCOVERY_MULTICAST_ADDR.parse::<Ipv4Addr>() {
+        let _ = socket.join_multicast_v4(&multi_ip, &Ipv4Addr::UNSPECIFIED);
+    }
+
+    socket.set_read_timeout(Some(Duration::from_millis(150)))
         .map_err(|e| VaultError::EncryptionError(format!("Failed to set UDP socket timeout: {}", e)))?;
 
+    // Prepare active query packet: [YQRY (4B) | expected_pairing_id (32B)]
+    let mut query_packet = [0u8; 36];
+    query_packet[..4].copy_from_slice(&PAIRING_QUERY_MAGIC);
+    query_packet[4..36].copy_from_slice(expected_pairing_id);
+
+    let send_query = |sock: &UdpSocket| {
+        let _ = sock.send_to(&query_packet, format!("255.255.255.255:{}", DEFAULT_DISCOVERY_PORT));
+        let _ = sock.send_to(&query_packet, format!("{}:{}", DISCOVERY_MULTICAST_ADDR, DEFAULT_DISCOVERY_PORT));
+        for ip in get_local_lan_ips() {
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                let octets = ipv4.octets();
+                let directed = format!("{}.{}.{}.255:{}", octets[0], octets[1], octets[2], DEFAULT_DISCOVERY_PORT);
+                let _ = sock.send_to(&query_packet, &directed);
+            }
+        }
+    };
+
+    // Initial query pulse immediately
+    send_query(&socket);
+
     let start = std::time::Instant::now();
+    let mut last_query = std::time::Instant::now();
     let mut buf = [0u8; 64];
 
     while start.elapsed() < timeout {
+        // Send query pulse every 350ms for snappy discovery
+        if last_query.elapsed() >= Duration::from_millis(350) {
+            send_query(&socket);
+            last_query = std::time::Instant::now();
+        }
+
         match socket.recv_from(&mut buf) {
             Ok((len, peer_addr)) => {
                 if len >= 38 && &buf[..4] == &PAIRING_BEACON_MAGIC {
                     let received_id = &buf[4..36];
-                    if received_id == expected_pairing_id {
+                    if received_id.ct_eq(expected_pairing_id).into() {
                         let peer_port = u16::from_be_bytes([buf[36], buf[37]]);
                         return Ok(Some(SocketAddr::new(peer_addr.ip(), peer_port)));
                     }
@@ -243,34 +342,141 @@ pub fn run_p2p_pairing_host_with_device(
     accept_timeout: Duration,
     host_device_name: Option<String>,
 ) -> crate::Result<(PairingStats, VaultData)> {
+    run_p2p_pairing_host_with_device_and_cancel(
+        listen_addr,
+        master_password,
+        pairing_code,
+        host_db_path,
+        accept_timeout,
+        host_device_name,
+        None,
+    )
+}
+
+/// Runs the Pairing Host with custom device name identification and cancellation flag support.
+pub fn run_p2p_pairing_host_with_device_and_cancel(
+    listen_addr: &str,
+    master_password: &str,
+    pairing_code: &str,
+    host_db_path: &Path,
+    accept_timeout: Duration,
+    host_device_name: Option<String>,
+    cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> crate::Result<(PairingStats, VaultData)> {
     let pairing_subkeys = derive_pairing_subkeys(master_password, pairing_code)?;
     let pairing_beacon_id = compute_pairing_beacon_id_from_subkeys(&pairing_subkeys);
 
-    let listener = TcpListener::bind(listen_addr)
-        .map_err(|e| VaultError::EncryptionError(format!("Failed to bind pairing listener on {}: {}", listen_addr, e)))?;
-    listener.set_nonblocking(true)
-        .map_err(|e| VaultError::EncryptionError(format!("Failed to set non-blocking TCP listener: {}", e)))?;
+    let mut listeners: Vec<TcpListener> = Vec::new();
 
-    let local_port = listener.local_addr().map(|a| a.port()).unwrap_or(DEFAULT_P2P_PORT);
+    // Bind primary pairing port (5324)
+    if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", DEFAULT_PAIRING_PORT)) {
+        let _ = l.set_nonblocking(true);
+        listeners.push(l);
+    }
+
+    // Bind legacy pairing / P2P port (5322) so older clients or connections without port succeed
+    if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", DEFAULT_P2P_PORT)) {
+        let _ = l.set_nonblocking(true);
+        listeners.push(l);
+    }
+
+    // Also bind explicit listen_addr if specified and not already bound
+    if !listen_addr.is_empty() && !listen_addr.ends_with(":5324") && !listen_addr.ends_with(":5322") {
+        if let Ok(l) = TcpListener::bind(listen_addr) {
+            let _ = l.set_nonblocking(true);
+            listeners.push(l);
+        }
+    }
+
+    // Fallback if none could be bound
+    if listeners.is_empty() {
+        let l = TcpListener::bind("0.0.0.0:5325")
+            .or_else(|_| TcpListener::bind("0.0.0.0:0"))
+            .map_err(|e| VaultError::EncryptionError(format!("Failed to bind pairing listener on {}: {}", listen_addr, e)))?;
+        let _ = l.set_nonblocking(true);
+        listeners.push(l);
+    }
+
+    let local_port = listeners.first().and_then(|l| l.local_addr().ok().map(|a| a.port())).unwrap_or(DEFAULT_PAIRING_PORT);
     let start_time = std::time::Instant::now();
     let mut last_beacon = std::time::Instant::now() - Duration::from_secs(10);
+    let mut local_ips = get_local_lan_ips();
+    let mut last_ips_refresh = std::time::Instant::now();
 
-    let (mut stream, _) = loop {
-        if last_beacon.elapsed() >= Duration::from_millis(1500) {
-            let _ = broadcast_pairing_beacon(&pairing_beacon_id, local_port);
+    // Bind non-blocking UDP socket for active query-response pairing
+    let udp_socket = match UdpSocket::bind(format!("0.0.0.0:{}", DEFAULT_DISCOVERY_PORT)) {
+        Ok(s) => {
+            let _ = s.set_nonblocking(true);
+            let _ = s.set_broadcast(true);
+            if let Ok(multi_ip) = DISCOVERY_MULTICAST_ADDR.parse::<Ipv4Addr>() {
+                let _ = s.join_multicast_v4(&multi_ip, &Ipv4Addr::UNSPECIFIED);
+            }
+            Some(s)
+        }
+        Err(_) => None,
+    };
+
+    let (mut stream, peer_sock_addr) = loop {
+        if let Some(ref cancel) = cancel_flag {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(VaultError::SyncError("Pairing host listening was cancelled by user".into()));
+            }
+        }
+
+        // Periodically refresh adapter IPs (at most every 10s) to avoid excessive socket probing
+        if last_ips_refresh.elapsed() >= Duration::from_secs(10) {
+            local_ips = get_local_lan_ips();
+            last_ips_refresh = std::time::Instant::now();
+        }
+
+        // Fast warm-up beacon interval (500ms for first 10s, then 1500ms)
+        let beacon_interval = if start_time.elapsed() < Duration::from_secs(10) {
+            Duration::from_millis(500)
+        } else {
+            Duration::from_millis(1500)
+        };
+
+        if last_beacon.elapsed() >= beacon_interval {
+            let _ = broadcast_pairing_beacon_with_ips(&pairing_beacon_id, local_port, &local_ips);
             last_beacon = std::time::Instant::now();
         }
 
-        match listener.accept() {
-            Ok(res) => break res,
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if start_time.elapsed() >= accept_timeout {
-                    return Err(VaultError::SyncError("Pairing listener timed out waiting for device connection".into()));
+        // Active query processing: handle incoming client UDP queries with immediate unicast responses
+        if let Some(ref sock) = udp_socket {
+            let mut qbuf = [0u8; 64];
+            while let Ok((qlen, client_addr)) = sock.recv_from(&mut qbuf) {
+                if qlen >= 36 && &qbuf[..4] == &PAIRING_QUERY_MAGIC {
+                    if qbuf[4..36].ct_eq(&pairing_beacon_id).into() {
+                        let mut reply = [0u8; 38];
+                        reply[..4].copy_from_slice(&PAIRING_BEACON_MAGIC);
+                        reply[4..36].copy_from_slice(&pairing_beacon_id);
+                        reply[36..38].copy_from_slice(&local_port.to_be_bytes());
+                        let _ = sock.send_to(&reply, client_addr);
+                    }
                 }
-                std::thread::sleep(Duration::from_millis(50));
             }
-            Err(e) => return Err(VaultError::EncryptionError(format!("Failed to accept pairing connection: {}", e))),
         }
+
+        let mut accepted = None;
+        for listener in &listeners {
+            match listener.accept() {
+                Ok(res) => {
+                    accepted = Some(res);
+                    break;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+        }
+
+        if let Some(res) = accepted {
+            break res;
+        }
+
+        if start_time.elapsed() >= accept_timeout {
+            return Err(VaultError::SyncError("Pairing listener timed out waiting for device connection".into()));
+        }
+        std::thread::sleep(Duration::from_millis(40));
     };
 
     stream.set_nonblocking(false)
@@ -371,21 +577,36 @@ pub fn run_p2p_pairing_host_with_device(
         last_sync_at: Some(Utc::now()),
         token_hash: String::new(),
     };
-    host_manager.data.settings.trusted_devices.retain(|d| d.id != trusted_client.id);
+    host_manager.data.settings.trusted_devices.retain(|d| {
+        d.id != trusted_client.id && !(d.name.eq_ignore_ascii_case(&trusted_client.name) && d.os == trusted_client.os)
+    });
     host_manager.data.settings.trusted_devices.push(trusted_client);
 
     // Ensure host itself is registered as a trusted device if not already present
-    if !host_manager.data.settings.trusted_devices.iter().any(|d| d.id == host_info.id) {
-        host_manager.data.settings.trusted_devices.push(crate::vault::types::TrustedDevice {
-            id: host_info.id,
-            name: host_info.name,
-            device_type: host_info.device_type,
-            os: host_info.os,
-            paired_at: Utc::now(),
-            last_sync_at: Some(Utc::now()),
-            token_hash: String::new(),
-        });
+    host_manager.data.settings.trusted_devices.retain(|d| {
+        d.id != host_info.id && !(d.name.eq_ignore_ascii_case(&host_info.name) && d.os == host_info.os)
+    });
+    host_manager.data.settings.trusted_devices.push(crate::vault::types::TrustedDevice {
+        id: host_info.id,
+        name: host_info.name,
+        device_type: host_info.device_type,
+        os: host_info.os,
+        paired_at: Utc::now(),
+        last_sync_at: Some(Utc::now()),
+        token_hash: String::new(),
+    });
+
+    // Run deduplication pass to ensure absolute integrity
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut seen_names = std::collections::HashSet::new();
+    let mut deduped = Vec::new();
+    for dev in host_manager.data.settings.trusted_devices.drain(..) {
+        let name_key = (dev.name.to_lowercase(), dev.os.to_lowercase());
+        if seen_ids.insert(dev.id) && seen_names.insert(name_key) {
+            deduped.push(dev);
+        }
     }
+    host_manager.data.settings.trusted_devices = deduped;
 
     host_manager.data.metadata.updated_at = Utc::now();
     host_manager.data.metadata.entry_count = host_manager.data.entries.len();
@@ -395,6 +616,7 @@ pub fn run_p2p_pairing_host_with_device(
     let host_payload = PairingHostPayload {
         salt: host_manager.salt,
         data: host_manager.data.clone(),
+        error_msg: None,
     };
     let serialized_merged = Zeroizing::new(
         rmp_serde::to_vec(&host_payload)
@@ -417,6 +639,7 @@ pub fn run_p2p_pairing_host_with_device(
         entries_merged: merge_stats.entries_added + merge_stats.entries_updated,
         total_entries: host_manager.data.entries.len(),
         vault_path: None,
+        peer_addr: Some(peer_sock_addr.ip().to_string()),
     };
 
     Ok((stats, host_manager.data))
@@ -431,7 +654,12 @@ pub fn run_p2p_pairing_client(
     pairing_code: &str,
     client_db_path: &Path,
 ) -> crate::Result<(PairingStats, VaultData)> {
-    run_p2p_pairing_client_with_device(server_addr, master_password, pairing_code, client_db_path, None)
+    let mode = if client_db_path.exists() && fs::metadata(client_db_path).map(|m| m.len() > 0).unwrap_or(false) {
+        ClientPairingMode::ExistingVault { path: client_db_path.to_path_buf() }
+    } else {
+        ClientPairingMode::AdoptIntoFile { target_file: client_db_path.to_path_buf() }
+    };
+    run_p2p_pairing_client_with_device(server_addr, master_password, pairing_code, mode, None)
 }
 
 /// Runs the Pairing Client with custom device name identification.
@@ -439,12 +667,18 @@ pub fn run_p2p_pairing_client_with_device(
     server_addr: &str,
     master_password: &str,
     pairing_code: &str,
-    client_db_path: &Path,
+    client_mode: ClientPairingMode,
     client_device_name: Option<String>,
 ) -> crate::Result<(PairingStats, VaultData)> {
     let pairing_subkeys = derive_pairing_subkeys(master_password, pairing_code)?;
 
-    let addrs: Vec<SocketAddr> = server_addr.to_socket_addrs()
+    let target_str = if !server_addr.contains(':') {
+        format!("{}:{}", server_addr, DEFAULT_PAIRING_PORT)
+    } else {
+        server_addr.to_string()
+    };
+
+    let addrs: Vec<SocketAddr> = target_str.to_socket_addrs()
         .map_err(|e| VaultError::EncryptionError(format!("Invalid pairing host address '{}': {}", server_addr, e)))?
         .collect();
 
@@ -453,25 +687,81 @@ pub fn run_p2p_pairing_client_with_device(
     }
 
     let mut stream = None;
-    let connect_timeout = Duration::from_secs(2);
+    let mut last_io_err: Option<std::io::Error> = None;
+    let connect_timeout = Duration::from_millis(350);
 
-    for attempt in 0..5 {
+    // Active direct unicast UDP query probe: queries target IP directly to confirm reachability and discover listening port
+    let mut confirmed_host_port: Option<u16> = None;
+    if let Some(target_addr) = addrs.first() {
+        let probe_dest = SocketAddr::new(target_addr.ip(), DEFAULT_DISCOVERY_PORT);
+        if let Ok(probe_sock) = UdpSocket::bind("0.0.0.0:0") {
+            let _ = probe_sock.set_read_timeout(Some(Duration::from_millis(150)));
+            let mut q_packet = [0u8; 36];
+            q_packet[..4].copy_from_slice(&PAIRING_QUERY_MAGIC);
+            let beacon_id = compute_pairing_beacon_id_from_subkeys(&pairing_subkeys);
+            q_packet[4..36].copy_from_slice(&beacon_id);
+            let _ = probe_sock.send_to(&q_packet, probe_dest);
+
+            let mut resp_buf = [0u8; 64];
+            if let Ok((rlen, _)) = probe_sock.recv_from(&mut resp_buf) {
+                if rlen >= 38 && &resp_buf[..4] == &PAIRING_BEACON_MAGIC && resp_buf[4..36].ct_eq(&beacon_id).into() {
+                    confirmed_host_port = Some(u16::from_be_bytes([resp_buf[36], resp_buf[37]]));
+                }
+            }
+        }
+    }
+
+    for attempt in 0..15 {
         for addr in &addrs {
-            if let Ok(s) = TcpStream::connect_timeout(addr, connect_timeout) {
-                stream = Some(s);
+            let mut candidate_ports = Vec::with_capacity(4);
+            if let Some(port) = confirmed_host_port {
+                candidate_ports.push(port);
+            }
+            if server_addr.contains(':') && !candidate_ports.contains(&addr.port()) {
+                candidate_ports.push(addr.port());
+            }
+            for fallback in [DEFAULT_PAIRING_PORT, DEFAULT_P2P_PORT, 5325] {
+                if !candidate_ports.contains(&fallback) {
+                    candidate_ports.push(fallback);
+                }
+            }
+
+            for p in candidate_ports {
+                let mut candidate_addr = *addr;
+                candidate_addr.set_port(p);
+                match TcpStream::connect_timeout(&candidate_addr, connect_timeout) {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(e) => {
+                        last_io_err = Some(e);
+                    }
+                }
+            }
+            if stream.is_some() {
                 break;
             }
         }
         if stream.is_some() {
             break;
         }
-        if attempt < 4 {
-            std::thread::sleep(Duration::from_millis(150));
+        if attempt < 14 {
+            std::thread::sleep(Duration::from_millis(400));
         }
     }
 
     let mut stream = stream.ok_or_else(|| {
-        VaultError::EncryptionError(format!("Failed to connect to pairing host at {}", server_addr))
+        let diagnostic = match last_io_err.as_ref().map(|e| e.kind()) {
+            Some(std::io::ErrorKind::ConnectionRefused) => {
+                "Anslutning nekad: Värddatorn lyssnar inte på denna port. Kontrollera att värden klickat på 'Börja lyssna & vänta' först."
+            }
+            Some(std::io::ErrorKind::TimedOut) => {
+                "Tidsgräns överskreds: Värddatorn svarar inte. Detta beror oftast på att Windows Brandvägg på värddatorn blockerar inkommande anslutningar, eller att nätverket är inställt som Publikt istället för Privat."
+            }
+            _ => "Kunde inte ansluta till värddatorn. Kontrollera IP-adress och nätverk.",
+        };
+        VaultError::EncryptionError(format!("Failed to connect to pairing host at {}: {}", server_addr, diagnostic))
     })?;
 
     let sock_timeout = Some(Duration::from_secs(30));
@@ -540,26 +830,38 @@ pub fn run_p2p_pairing_client_with_device(
         .map_err(|e| VaultError::SerializationError(format!("Deserialize host device info: {}", e)))?;
 
     // 3. Transmit Client's local data
-    let (client_data, client_entries_count) = if client_db_path.exists() && fs::metadata(client_db_path).map(|m| m.len() > 0).unwrap_or(false) {
-        let mgr = VaultManager::open(client_db_path, master_password)?;
-        let count = mgr.data.entries.len();
-        (mgr.data, count)
-    } else {
-        let empty = VaultData {
-            metadata: VaultMetadata {
-                id: uuid::Uuid::new_v4(),
-                name: "Adopted Vault".into(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                entry_count: 0,
-                version: FORMAT_VERSION,
-            },
-            entries: Vec::new(),
-            tags: Vec::new(),
-            trash: Vec::new(),
-            settings: VaultSettings::default(),
-        };
-        (empty, 0)
+    // INVARIANT: When in Adopt mode (e.g. from logged-out VaultSelect screen),
+    // we NEVER open or read any local vault file from disk! Transmit empty vault data.
+    let (client_data, client_entries_count) = match &client_mode {
+        ClientPairingMode::ExistingVault { path } => {
+            if path.exists() && fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false) {
+                let mgr = VaultManager::open(path, master_password)?;
+                let count = mgr.data.entries.len();
+                (mgr.data, count)
+            } else {
+                return Err(VaultError::InvalidFormat(format!(
+                    "Valvfilen '{}' existerar inte eller är tom.",
+                    path.display()
+                )));
+            }
+        }
+        ClientPairingMode::AdoptIntoDir { .. } | ClientPairingMode::AdoptIntoFile { .. } => {
+            let empty = VaultData {
+                metadata: VaultMetadata {
+                    id: uuid::Uuid::new_v4(),
+                    name: "Adopted Vault".into(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    entry_count: 0,
+                    version: FORMAT_VERSION,
+                },
+                entries: Vec::new(),
+                tags: Vec::new(),
+                trash: Vec::new(),
+                settings: VaultSettings::default(),
+            };
+            (empty, 0)
+        }
     };
 
     let serialized_client = Zeroizing::new(
@@ -577,7 +879,7 @@ pub fn run_p2p_pairing_client_with_device(
         .map_err(|e| VaultError::EncryptionError(format!("Write client payload data failed: {}", e)))?;
     stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush client payload failed: {}", e)))?;
 
-    // 3. Receive Host's adopted root salt & merged database (transit-encrypted inside AEAD blob)
+    // 4. Receive Host's adopted root salt & merged database (transit-encrypted inside AEAD blob)
     let mut size_buf = [0u8; 8];
     stream.read_exact(&mut size_buf)
         .map_err(|e| VaultError::DecryptionError(format!("Read host merged payload size failed: {}", e)))?;
@@ -598,17 +900,39 @@ pub fn run_p2p_pairing_client_with_device(
     );
     let host_payload: PairingHostPayload = rmp_serde::from_slice(&host_decrypted)
         .map_err(|e| VaultError::SerializationError(format!("Deserialize merged vault data: {}", e)))?;
+
+    if let Some(err_msg) = host_payload.error_msg {
+        return Err(VaultError::InvalidFormat(err_msg));
+    }
+
     let host_salt = host_payload.salt;
     let merged_data = host_payload.data;
 
-    // 4. Adopt Host's root salt & save newly adopted vault to client disk
-    if let Some(parent) = client_db_path.parent() {
+    // 5. Determine destination path with strict collision isolation
+    let (final_dest_path, should_backup) = match &client_mode {
+        ClientPairingMode::ExistingVault { path } => (path.clone(), true),
+        ClientPairingMode::AdoptIntoFile { target_file } => (target_file.clone(), false),
+        ClientPairingMode::AdoptIntoDir { target_dir } => {
+            let safe_name = sanitize_vault_filename(&merged_data.metadata.name);
+            let mut dest = target_dir.join(format!("{}.vdb", safe_name));
+            if dest.exists() {
+                let mut counter = 1;
+                while dest.exists() {
+                    dest = target_dir.join(format!("{} ({}).vdb", safe_name, counter));
+                    counter += 1;
+                }
+            }
+            (dest, false)
+        }
+    };
+
+    if let Some(parent) = final_dest_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
 
-    if client_db_path.exists() {
-        let backup_path = client_db_path.with_extension("vdb.bak");
-        let _ = fs::copy(client_db_path, &backup_path);
+    if should_backup && final_dest_path.exists() {
+        let backup_path = final_dest_path.with_extension("vdb.bak");
+        let _ = fs::copy(&final_dest_path, &backup_path);
     }
 
     let master_key = derive_master_key(master_password.as_bytes(), &host_salt)?;
@@ -640,16 +964,17 @@ pub fn run_p2p_pairing_client_with_device(
     };
 
     let file_bytes = vault_file.to_bytes()?;
-    let temp_path = client_db_path.with_extension(format!("vdb.pairing.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let temp_path = final_dest_path.with_extension(format!("vdb.pairing.{}.tmp", uuid::Uuid::new_v4().simple()));
     fs::write(&temp_path, &file_bytes)?;
-    fs::rename(&temp_path, client_db_path)?;
+    fs::rename(&temp_path, &final_dest_path)?;
 
     let stats = PairingStats {
         entries_sent: client_entries_count,
         entries_received: merged_data.entries.len(),
-        entries_merged: merged_data.entries.len(),
+        entries_merged: if client_entries_count == 0 { 0 } else { merged_data.entries.len() },
         total_entries: merged_data.entries.len(),
-        vault_path: Some(client_db_path.to_string_lossy().to_string()),
+        vault_path: Some(final_dest_path.to_string_lossy().to_string()),
+        peer_addr: Some(server_addr.to_string()),
     };
 
     Ok((stats, merged_data))
@@ -824,7 +1149,7 @@ mod tests {
             addr,
             password,
             pin,
-            &client_path,
+            ClientPairingMode::ExistingVault { path: client_path.clone() },
             Some("Client Phone".into()),
         ).unwrap();
         let (_, host_data) = host_handle.join().unwrap().unwrap();
@@ -909,5 +1234,209 @@ mod tests {
         let res = run_p2p_pairing_client(addr, password, "999 888", &client_path);
         assert!(res.is_err());
         let _ = host_handle.join();
+    }
+
+    #[test]
+    fn test_pairing_adopt_mode_does_not_touch_existing_vault() {
+        let temp_dir = tempdir().unwrap();
+        let host_path = temp_dir.path().join("host_adopt.vdb");
+        let client_existing_vault = temp_dir.path().join("yntra-vault.vdb");
+        let password = "AdoptPassword#123";
+
+        // Create a host vault with 2 entries
+        let mut host_mgr = VaultManager::create("Host Vault", password, &host_path).unwrap();
+        host_mgr.add_entry(crate::vault::manager::NewEntry {
+            title: "Host Item 1".into(),
+            username: "huser1".into(),
+            password: "hpw".into(),
+            url: "".into(),
+            email: "".into(),
+            notes: "".into(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: None,
+            generate_passkey: None,
+            attachments: None,
+        }).unwrap();
+        host_mgr.add_entry(crate::vault::manager::NewEntry {
+            title: "Host Item 2".into(),
+            username: "huser2".into(),
+            password: "hpw".into(),
+            url: "".into(),
+            email: "".into(),
+            notes: "".into(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: None,
+            generate_passkey: None,
+            attachments: None,
+        }).unwrap();
+
+        // Create an existing unauthenticated client vault on disk with 5 private entries
+        let mut client_local_mgr = VaultManager::create("My Local Vault", password, &client_existing_vault).unwrap();
+        for i in 1..=5 {
+            client_local_mgr.add_entry(crate::vault::manager::NewEntry {
+                title: format!("Private Item {}", i),
+                username: "localuser".into(),
+                password: "secretpassword".into(),
+                url: "".into(),
+                email: "".into(),
+                notes: "".into(),
+                tags: vec![],
+                totp_secret: None,
+                custom_fields: vec![],
+                entry_type: None,
+                generate_passkey: None,
+                attachments: None,
+            }).unwrap();
+        }
+        let original_client_len = fs::metadata(&client_existing_vault).unwrap().len();
+
+        let addr = "127.0.0.1:49168";
+        let pin = "123 456";
+
+        let h_path = host_path.clone();
+        let host_handle = std::thread::spawn(move || {
+            run_p2p_pairing_host(addr, password, pin, &h_path, Duration::from_secs(5))
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Connect as client in AdoptIntoDir mode pointing to temp_dir
+        let (c_stats, c_data) = run_p2p_pairing_client_with_device(
+            addr,
+            password,
+            pin,
+            ClientPairingMode::AdoptIntoDir { target_dir: temp_dir.path().to_path_buf() },
+            Some("New Client Device".into()),
+        ).unwrap();
+
+        let (h_stats, h_data) = host_handle.join().unwrap().unwrap();
+
+        // 1. Client transmitted 0 entries in Adopt mode
+        assert_eq!(c_stats.entries_sent, 0);
+
+        // 2. Host received 0 entries and its entries count remained exactly 2
+        assert_eq!(h_stats.entries_received, 0);
+        assert_eq!(h_data.entries.len(), 2);
+
+        // 3. Client received 2 entries and adopted vault was saved to "Host Vault.vdb"
+        assert_eq!(c_data.entries.len(), 2);
+        let adopted_path = temp_dir.path().join("Host Vault.vdb");
+        assert!(adopted_path.exists());
+        assert_eq!(c_stats.vault_path, Some(adopted_path.to_string_lossy().to_string()));
+
+        // 4. CRITICAL INVARIANT: The unauthenticated existing local vault "yntra-vault.vdb" was NEVER touched or altered!
+        let current_client_len = fs::metadata(&client_existing_vault).unwrap().len();
+        assert_eq!(original_client_len, current_client_len);
+        let reopened_local = VaultManager::open(&client_existing_vault, password).unwrap();
+        assert_eq!(reopened_local.data.entries.len(), 5);
+        assert_eq!(reopened_local.data.metadata.name, "My Local Vault");
+    }
+
+    #[test]
+    fn test_pairing_adopt_mode_collision_avoidance() {
+        let temp_dir = tempdir().unwrap();
+        let host_path = temp_dir.path().join("host_collision.vdb");
+        let existing_colliding_path = temp_dir.path().join("Colliding.vdb");
+        let password = "CollisionPassword#123";
+
+        // Pre-create an unrelated file named "Colliding.vdb" in target directory
+        let mut pre_existing = VaultManager::create("Colliding", password, &existing_colliding_path).unwrap();
+        pre_existing.add_entry(crate::vault::manager::NewEntry {
+            title: "Original Existing".into(),
+            username: "u1".into(),
+            password: "p1".into(),
+            url: "".into(),
+            email: "".into(),
+            notes: "".into(),
+            tags: vec![],
+            totp_secret: None,
+            custom_fields: vec![],
+            entry_type: None,
+            generate_passkey: None,
+            attachments: None,
+        }).unwrap();
+
+        // Host vault is also named "Colliding"
+        let host_mgr = VaultManager::create("Colliding", password, &host_path).unwrap();
+        assert_ne!(host_mgr.data.metadata.id, pre_existing.data.metadata.id);
+
+        let addr = "127.0.0.1:49169";
+        let pin = "321 654";
+
+        let h_path = host_path.clone();
+        let host_handle = std::thread::spawn(move || {
+            run_p2p_pairing_host(addr, password, pin, &h_path, Duration::from_secs(5))
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        let (c_stats, _) = run_p2p_pairing_client_with_device(
+            addr,
+            password,
+            pin,
+            ClientPairingMode::AdoptIntoDir { target_dir: temp_dir.path().to_path_buf() },
+            None,
+        ).unwrap();
+
+        let _ = host_handle.join().unwrap().unwrap();
+
+        // Adopted vault should have avoided collision by saving to "Colliding (1).vdb"
+        let collision_path = temp_dir.path().join("Colliding (1).vdb");
+        assert!(collision_path.exists());
+        assert_eq!(c_stats.vault_path, Some(collision_path.to_string_lossy().to_string()));
+
+        // Verify original "Colliding.vdb" remains untouched with its original 1 entry
+        let reopened_orig = VaultManager::open(&existing_colliding_path, password).unwrap();
+        assert_eq!(reopened_orig.data.entries.len(), 1);
+        assert_eq!(reopened_orig.data.entries[0].title, "Original Existing");
+    }
+
+    #[test]
+    fn test_pairing_active_query_response_roundtrip() {
+        let password = "ActiveQueryTestPassword#999";
+        let pin = "987 654";
+        let subkeys = derive_pairing_subkeys(password, pin).unwrap();
+        let beacon_id = compute_pairing_beacon_id_from_subkeys(&subkeys);
+
+        // Host responder socket on 5323 (or random port for test)
+        let responder_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let responder_port = responder_sock.local_addr().unwrap().port();
+        let b_id_clone = beacon_id;
+
+        let host_thread = std::thread::spawn(move || {
+            let _ = responder_sock.set_read_timeout(Some(Duration::from_millis(1500)));
+            let mut qbuf = [0u8; 64];
+            if let Ok((qlen, client_addr)) = responder_sock.recv_from(&mut qbuf) {
+                if qlen >= 36 && &qbuf[..4] == &PAIRING_QUERY_MAGIC && qbuf[4..36] == b_id_clone {
+                    let mut reply = [0u8; 38];
+                    reply[..4].copy_from_slice(&PAIRING_BEACON_MAGIC);
+                    reply[4..36].copy_from_slice(&b_id_clone);
+                    reply[36..38].copy_from_slice(&5324u16.to_be_bytes());
+                    let _ = responder_sock.send_to(&reply, client_addr);
+                }
+            }
+        });
+
+        // Client sends query directly to responder
+        let client_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut query = [0u8; 36];
+        query[..4].copy_from_slice(&PAIRING_QUERY_MAGIC);
+        query[4..36].copy_from_slice(&beacon_id);
+        client_sock.send_to(&query, format!("127.0.0.1:{}", responder_port)).unwrap();
+
+        let mut resp = [0u8; 64];
+        client_sock.set_read_timeout(Some(Duration::from_millis(1000))).unwrap();
+        let (rlen, _) = client_sock.recv_from(&mut resp).unwrap();
+        assert_eq!(rlen, 38);
+        assert_eq!(&resp[..4], &PAIRING_BEACON_MAGIC);
+        assert_eq!(&resp[4..36], &beacon_id);
+        let discovered_port = u16::from_be_bytes([resp[36], resp[37]]);
+        assert_eq!(discovered_port, 5324);
+
+        host_thread.join().unwrap();
     }
 }

@@ -206,6 +206,36 @@ Keyfiles represent a distinct "something you have" authentication factor. To pre
 ### 5.9 Atomic Key-Wrap File Creation
 Linux fallback key wrapping (`linux_get_or_create_wrap_key`) requires valid `XDG_CONFIG_HOME` or `HOME` directories, enforces `0o700` directory permissions, and creates the wrap key file atomically with mode `0o600` via `OpenOptionsExt::mode`, eliminating umask permission race conditions and rejecting insecure `/tmp` fallback paths.
 
+### 5.10 Zero-Knowledge Device Pairing Protocol & Ephemeral Transit Keys
+Device pairing permits instant, secure cross-device database synchronization using an ephemeral 6-digit numeric PIN without requiring USB file transfers:
+1. **Pairing Secret Derivation**: Both devices derive an ephemeral pairing key via BLAKE3 domain separation and Argon2id:
+   $$\text{Salt}_{\text{pair}} = \text{BLAKE3}\left(\text{"yntra-pairing-salt-v1:"} \mathbin{\Vert} \text{Normalize}(\text{PIN})\right)$$
+   $$K_{\text{master}} = \text{Argon2id}(\text{MasterPassword}, \text{Salt}_{\text{pair}}, m=256\text{MB}, t=4, p=4)$$
+   $$\text{SubKeys} = \text{HKDF-SHA512}(K_{\text{master}})$$
+2. **Ephemeral UDP Discovery Beacon Token**:
+   $$\text{BeaconID} = \text{BLAKE3}_{\text{keyed}}\left(\text{BLAKE3}(K_{\text{hmac}}), \text{"yntra-pairing-beacon-v2"}\right)$$
+   Because $\text{BeaconID}$ is keyed with the Argon2id-derived HMAC subkey, eavesdroppers on the local network cannot crack the 6-digit PIN offline without expending 256MB RAM per candidate attempt.
+3. **Active UDP Query-Response Reflection & Amplification Resistance**:
+   Clients emit query pulses $\text{Packet}_{\text{query}} = [\text{"YQRY"} \mathbin{\Vert} \text{BeaconID}]$ (36 bytes). Hosts verify the token in constant time (`ConstantTimeEq`) and respond with $\text{Packet}_{\text{reply}} = [\text{"YPAR"} \mathbin{\Vert} \text{BeaconID} \mathbin{\Vert} \text{Port}_{\text{tcp}}]$ (38 bytes). The response-to-request byte ratio is $38/36 \approx 1.05$, providing mathematical proof of zero traffic amplification. Unauthenticated reflection is impossible without knowledge of the Argon2id-derived $\text{BeaconID}$.
+
+### 5.11 Unauthenticated Client Isolation & Adopt Mode (`ClientPairingMode::AdoptIntoDir`)
+When a client pairs while unauthenticated (e.g. from the `VaultSelect` start screen, where `state.vault = None`), the client is constrained to strict Adopt Mode:
+- **Zero Local Read Invariant**: The client opens zero files from the filesystem and decrypts zero local storage blocks.
+- **Zero Data Transmission**: The client transmits zero entries (`client_entries_count = 0`), preventing any leakage of unauthenticated or local credentials.
+- **Filesystem Anti-Collision Invariant**: The adopted database is written to a dedicated non-colliding file (`<HostVaultName>.vdb`, `<HostVaultName> (1).vdb`), ensuring that existing local databases on disk are never modified or overwritten.
+
+### 5.12 Multi-Interface Broadcast & Administrative Multicast Isolation
+LAN discovery packets are simultaneously routed across:
+1. Global broadcast (`255.255.255.255:5323`)
+2. Administratively scoped local multicast (`239.255.53.23:5323` under RFC 2365 / `239.255.0.0/16`)
+3. Subnet directed broadcasts (`x.y.z.255:5323`) for every network adapter detected by `get_local_lan_ips`.
+All discovery traffic is strictly restricted to local administrative boundaries and will not route beyond the local autonomous system or private network gateway.
+
+### 5.13 P2P Discovery Self-Echo Loop Isolation, Immediate Socket Release & Filesystem Neutralization
+1. **In-Loop Self-Echo Isolation**: When devices actively listen for UDP discovery beacons on port 5323 while concurrently broadcasting their own presence, naive implementations risk terminating the discovery scan upon processing their own broadcast packet. `listen_discovery_beacon` matches received packet source IP addresses against the node's known local network interfaces and loopback *inside* the receive loop. Self-echo packets are dropped immediately and the loop continues, guaranteeing that discovery persists until external peers respond or the timeout expires.
+2. **Atomic Pairing Socket Release & Instant Cancellation**: Host pairing listeners on port 5324 poll an atomic cancellation flag (`pairing_cancel: Arc<AtomicBool>`) every 40ms via the Tauri IPC command `cancel_pairing_host`. Listening sockets are released immediately upon user cancellation or modal dismissal, preventing port lockups on TCP 5324 and UDP 5323 and eliminating dangling connection acceptances after session termination.
+3. **Windows DOS Reserved Device Name Sanitization**: Filenames derived during vault adoption (`ClientPairingMode::AdoptIntoDir`) are sanitized against reserved Windows DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) in `sanitize_vault_filename`, preventing filesystem namespace collisions and denial-of-service conditions during initial pairing.
+
 ---
 
 ## 6. Audit Verification & Compliance Checklist
@@ -222,6 +252,13 @@ Linux fallback key wrapping (`linux_get_or_create_wrap_key`) requires valid `XDG
 | Atomic File Writes | Temp file `write()` + atomic `rename()` | `crates/core/src/vault/manager.rs` |
 | k-Anonymity Query | 5-char SHA-1 prefix over HTTPS | `crates/core/src/services/hibp.rs` |
 | P2P Mutual Auth | Client-first challenge-response HMAC verification | `crates/core/src/services/sync/mod.rs` |
+| Zero-Knowledge Pairing | Ephemeral Argon2id transit subkeys + 6-digit PIN | `crates/core/src/services/sync/pairing.rs` |
+| Timing-Safe Discovery | `subtle::ConstantTimeEq` across all UDP beacons | `crates/core/src/services/sync/mod.rs` & `pairing.rs` |
+| Adopt Mode Isolation | Zero local reads and collision avoidance on unauthenticated clients | `crates/core/src/services/sync/pairing.rs` |
+| UDP Amplification Defense | 1:1 request/reply ratio with Argon2id token gating | `crates/core/src/services/sync/pairing.rs` |
+| Self-Echo Isolation | In-loop local IP dropping and continuation | `crates/core/src/services/sync/mod.rs` |
+| Pairing Socket Release | 40ms `AtomicBool` polling + `cancel_pairing_host` | `crates/core/src/services/sync/pairing.rs` & `src-tauri/src/commands/sync.rs` |
+| DOS Device Sanitization | Windows reserved name neutralization on adopt | `crates/core/src/services/sync/pairing.rs` |
 | Hardware 2FA KEK | Argon2id 256MB key stretching | `crates/crypto/src/hardware2fa.rs` |
 | Constant-Time Verification | `subtle::ConstantTimeEq` comparisons | `crates/core/src/totp/mod.rs` & `crates/cli/src/ipc.rs` |
 | Emergency Kit PRF Checksum | Keyed HMAC over session $K_{\text{hmac}}$ | `crates/core/src/vault/emergency.rs` |
