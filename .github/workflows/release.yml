@@ -5,6 +5,21 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target job to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - android
+          - windows
+          - linux
+      tag:
+        description: 'Release tag (e.g. v0.1.8)'
+        required: false
+        default: 'v0.1.8'
 
 permissions:
   contents: write
@@ -12,6 +27,7 @@ permissions:
 jobs:
   build-linux:
     name: Build Linux (AppImage & Deb)
+    if: github.event_name == 'push' || inputs.target == 'all' || inputs.target == 'linux'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -32,7 +48,6 @@ jobs:
             libwebkit2gtk-4.1-dev \
             build-essential \
             curl \
-            wget \
             file \
             libssl-dev \
             libayatana-appindicator3-dev \
@@ -50,8 +65,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: Yntra Vault ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Yntra Vault ${{ inputs.tag || github.ref_name }}
           files: |
             target/release/bundle/appimage/*.AppImage
             target/release/bundle/deb/*.deb
@@ -60,6 +75,7 @@ jobs:
 
   build-android:
     name: Build Android APK
+    if: github.event_name == 'push' || inputs.target == 'all' || inputs.target == 'android'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -110,27 +126,27 @@ jobs:
           keytool -genkeypair -v -keystore release.jks -alias yntra -keyalg RSA -keysize 2048 -validity 10000 -storepass yntravault -keypass yntravault -dname "CN=YntraVault, OU=Mobile, O=YntraAB, L=Stockholm, S=Stockholm, C=SE"
           APK_FILE=$(find . -name "*.apk" | head -n 1)
           echo "Found APK: $APK_FILE"
-          TAG="${GITHUB_REF_NAME:-v0.1.8}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           VER="${TAG#v}"
           if [ -n "$APK_FILE" ]; then
             jarsigner -keystore release.jks -storepass yntravault -keypass yntravault "$APK_FILE" yntra
             cp "$APK_FILE" "release-assets/Yntra.Vault_${VER}_universal.apk"
             echo "Signed APK copied to release-assets/Yntra.Vault_${VER}_universal.apk"
+            rm -f "$APK_FILE"
           fi
 
       - name: Upload Android APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: Yntra Vault ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Yntra Vault ${{ inputs.tag || github.ref_name }}
           files: |
             release-assets/*.apk
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-            gen/android/app/build/outputs/apk/**/*.apk
 
   build-windows:
     name: Build Windows (NSIS, MSI, Portable & CLI)
+    if: github.event_name == 'push' || inputs.target == 'all' || inputs.target == 'windows'
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -153,7 +169,7 @@ jobs:
           bun run tauri build --bundles nsis,msi
           cargo build --release -p yntra-cli
           mkdir -p release-assets
-          TAG="${GITHUB_REF_NAME:-v0.1.8}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           VER="${TAG#v}"
           cp target/release/yntra-vault-app.exe "release-assets/Yntra.Vault_${VER}_portable.exe"
           cp target/release/yntra.exe "release-assets/Yntra.Vault_${VER}_cli.exe"
@@ -178,8 +194,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: Yntra Vault ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Yntra Vault ${{ inputs.tag || github.ref_name }}
           body_path: RELEASE_NOTES.md
           files: |
             target/release/bundle/nsis/*.exe
@@ -190,6 +206,7 @@ jobs:
 
   build-macos:
     name: Build macOS (DMG)
+    if: github.event_name == 'push' || inputs.target == 'all'
     runs-on: macos-latest
     continue-on-error: true
     steps:
@@ -214,8 +231,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: Yntra Vault ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Yntra Vault ${{ inputs.tag || github.ref_name }}
           files: |
             target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/dmg/*.dmg
