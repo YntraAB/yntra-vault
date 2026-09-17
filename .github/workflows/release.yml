@@ -141,8 +141,12 @@ jobs:
             echo "Running zipalign 4-byte alignment..."
             $BUILD_TOOLS/zipalign -v -p 4 "$APK_FILE" aligned.apk
 
-            echo "Signing with apksigner (Scheme v1, v2, v3)..."
-            $BUILD_TOOLS/apksigner sign --ks release.jks \
+            echo "Signing with apksigner (Scheme v1, v2, v3 enabled)..."
+            $BUILD_TOOLS/apksigner sign \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --ks release.jks \
               --ks-pass pass:yntravault \
               --key-pass pass:yntravault \
               --ks-key-alias yntra \
@@ -158,13 +162,22 @@ jobs:
           fi
 
       - name: Upload Android APK to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          name: Yntra Vault ${{ inputs.tag || github.ref_name }}
-          files: |
-            release-assets/*.apk
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "Uploading universal APK to release $TAG with GitHub CLI..."
+          for i in 1 2 3; do
+            echo "Upload attempt $i..."
+            if gh release upload "$TAG" release-assets/*.apk --clobber; then
+              echo "Upload successful!"
+              exit 0
+            fi
+            echo "Upload attempt $i failed, waiting 10s before retry..."
+            sleep 10
+          done
+          echo "Failed to upload APK after 3 attempts."
+          exit 1
 
   build-windows:
     name: Build Windows (NSIS, MSI, Portable & CLI)
