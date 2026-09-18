@@ -55,7 +55,7 @@ export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps)
     <AnimatePresence>
       {tag && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-xs select-none"
+          className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-xs select-none p-3 sm:p-4 touch-pan-y"
           onClick={onClose}
         >
           <motion.div
@@ -63,7 +63,7 @@ export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps)
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.97, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="w-full max-w-[380px] mx-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
+            className="w-full max-w-[380px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

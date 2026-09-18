@@ -86,9 +86,9 @@ export default function Onboarding() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex min-h-dvh w-full items-center justify-center bg-[var(--bg-base)] p-4 select-none overflow-y-auto"
+      className="flex min-h-dvh w-full justify-center bg-[var(--bg-base)] p-4 select-none overflow-y-auto touch-pan-y"
     >
-      <div className="w-full max-w-[420px] py-4">
+      <div className="w-full max-w-[420px] py-4 my-auto">
         {/* Top Header Row with App Logo & Skip */}
         <div className="relative flex flex-col items-center text-center">
           <div className="absolute right-0 top-0">

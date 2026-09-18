@@ -66,6 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed hardcoded unit suffix (`" st"`) in `TrashTab` storage footprint display in favor of clean universal count notation.
 
 ### Fixed
+- **Mobile Touch Scrolling & Momentum Gestures**:
+  - Resolved missing, clipped, and unresponsive touch scrolling across mobile and Android release builds.
+  - Replaced global `* { touch-action: manipulation; }` with targeted interactive element selectors, enabling unhindered touch gesture panning throughout the application.
+  - Added `-webkit-overflow-scrolling: touch`, `overscroll-behavior: contain`, and `touch-action: pan-y / pan-x` across all scrollable views (`PasswordList`, `PasswordDetail`, `SettingsPanel`, `Login`, `VaultSelect`, `Onboarding`).
+  - Added flex-column `min-h-0` constraints and eliminated double-nested scroll collisions on mobile detail views.
+  - Standardized all 13 application modals with responsive overlay scrolling, viewport height clamping (`max-h-[calc(100dvh-1.5rem)]`), and safe-area insets to prevent clipping on mobile screens and when virtual keyboards open.
+  - Decoupled `MobileBottomSheet` drag gestures using `useDragControls` activated exclusively from the drag handle, allowing sheet inner content to scroll freely without accidental sheet dismissals.
+- **Mobile & Desktop Launcher Icon Ergonomics & Android Adaptive Sizing**:
+  - Fixed an issue where the application icon appeared massively oversized and clipped on Android home screens and desktop shortcuts.
+  - Regenerated all Android adaptive icon foregrounds (`ic_launcher_foreground.png` across all mipmap densities: mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi) with 100% transparent backgrounds and balanced ~51% safe-zone scaling (inner 54dp within 108dp canvas), eliminating squircle/circle mask edge clipping.
+  - Regenerated desktop and legacy icons (`icon.ico`, `icon.png`, `Square...Logo.png`) with a refined white squircle (~22% corner radius), balanced ~56% logo scaling, and transparent outer padding, delivering brand consistency across Android, Windows, macOS, and Linux.
+  - Corrected legacy Android `mipmap-hdpi` icon resolution from non-standard 49x49 to standard 72x72 px.
 - **Universal Navigation Translation Keys & Raw Key String Display**:
   - Resolved an issue where buttons in `DevicePairingWizard` and `ChangeMasterPasswordModal` rendered raw translation key strings (`"common.back"`, `"common.next"`) instead of localized text.
   - Added `'common.back'`, `'common.next'`, `'common.hide'`, `'common.show'`, and `'pairing.sync_again'` to `en.ts`, `sv.ts`, and propagated definitions across all 24 supported language dictionaries.

@@ -137,7 +137,31 @@
 
   * {
     @apply border-border-shadcn;
+  }
+
+  /* Prevent double-tap zoom delay on interactive elements without blocking gesture panning */
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role="button"] {
     touch-action: manipulation;
+  }
+
+  /* Smooth momentum touch scrolling & overscroll containment for mobile containers */
+  .overflow-y-auto,
+  [class*="overflow-y-auto"] {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+
+  .overflow-x-auto,
+  [class*="overflow-x-auto"] {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
   }
 
   html {

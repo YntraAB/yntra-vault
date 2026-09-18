@@ -96,7 +96,7 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 select-none p-3 sm:p-4 touch-pan-y"
           onClick={onClose}
         >
           <motion.div
@@ -104,7 +104,7 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.97, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="w-full max-w-[380px] mx-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
+            className="w-full max-w-[380px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

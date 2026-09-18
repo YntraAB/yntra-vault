@@ -590,7 +590,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
+            className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 select-none p-3 sm:p-4 touch-pan-y"
             onClick={onClose}
           >
             <motion.div
@@ -598,7 +598,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.97, opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="flex max-h-[90vh] w-full max-w-[520px] mx-3 flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
+              className="flex max-h-[calc(100dvh-1.5rem)] sm:max-h-[90vh] my-auto w-full max-w-[520px] flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -619,7 +619,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                 </button>
               </div>
               {/* Form */}
-              <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0">
+              <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0 touch-pan-y">
                 <input
                   ref={fileInputRef}
                   type="file"

@@ -367,7 +367,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 select-none p-4"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 select-none p-3 sm:p-4 touch-pan-y"
           onClick={handleClose}
         >
         <motion.div
@@ -375,7 +375,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.97, opacity: 0, y: 6 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
-          className="w-full max-w-[420px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col"
+          className="w-full max-w-[420px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -412,11 +412,11 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
             </button>
           </div>
 
-          {/* Stepper Progress Bar (Identical in style to Onboarding) */}
+          {/* Stepper Progress Bar (Only during active pairing steps) */}
           {step !== 'role' && (
-            <div className="flex items-center justify-between gap-1.5 px-5 pt-4 pb-1">
-              {stepTitles.map((title, idx) => (
-                <div key={idx} className="flex flex-1 flex-col items-center gap-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-2 px-5 pt-3 pb-2 border-b border-[var(--border-subtle)] bg-[var(--bg-base)]/40">
+              {['password', 'code', 'connecting', 'success'].map((s, idx) => (
+                <div key={s} className="flex flex-1 flex-col items-center gap-1.5 min-w-0">
                   <div
                     className={`h-1 w-full rounded-full transition-colors ${
                       idx <= currentStepIdx ? 'bg-[var(--text-primary)]' : 'bg-[var(--border-subtle)]'
@@ -427,7 +427,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                       idx === currentStepIdx ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'
                     }`}
                   >
-                    {title}
+                    {stepTitles[idx] || ''}
                   </span>
                 </div>
               ))}
@@ -435,7 +435,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           )}
 
           {/* Body Content */}
-          <div className="flex flex-col gap-4 p-5">
+          <div className="flex flex-col gap-4 p-5 flex-1 min-h-0 overflow-y-auto touch-pan-y">
             {/* Step 0: Role Selection */}
             {step === 'role' && (
               <div className="flex flex-col gap-3">

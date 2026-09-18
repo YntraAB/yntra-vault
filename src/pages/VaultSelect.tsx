@@ -117,9 +117,9 @@ export default function VaultSelect() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="flex h-dvh w-dvw items-center justify-center bg-[var(--bg-base)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] overflow-y-auto select-none"
+      className="flex min-h-dvh w-full justify-center bg-[var(--bg-base)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] overflow-y-auto select-none touch-pan-y"
     >
-      <div className="w-full max-w-[420px] py-6">
+      <div className="w-full max-w-[420px] py-6 my-auto">
         {/* Logo and App Title */}
         <div className="flex flex-col items-center select-none">
           <img

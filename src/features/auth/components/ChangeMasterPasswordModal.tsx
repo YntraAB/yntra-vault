@@ -279,7 +279,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none p-4"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 select-none p-3 sm:p-4 touch-pan-y"
           onClick={onClose}
         >
           <motion.div
@@ -287,7 +287,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.97, opacity: 0, y: 6 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="w-full max-w-[420px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col"
+            className="w-full max-w-[420px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Window Header */}
@@ -343,7 +343,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
             </div>
 
             {/* Form Body with Animated Steps */}
-            <div className="p-5 flex flex-col max-h-[80vh] overflow-y-auto">
+            <div className="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto touch-pan-y">
               <AnimatePresence mode="wait">
                 {/* STEP 0: CURRENT PASSWORD & CURRENT KEYFILE */}
                 {step === 0 && (

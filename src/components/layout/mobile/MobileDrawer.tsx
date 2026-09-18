@@ -104,7 +104,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
           </div>
 
           {/* Tags List */}
-          <div className="mt-6 flex flex-1 flex-col overflow-hidden">
+          <div className="mt-6 flex flex-1 min-h-0 flex-col overflow-hidden">
             <div className="flex items-center justify-between px-2 pb-2">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
                 {t('sidebar.tags')}
@@ -117,7 +117,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
               </button>
             </div>
 
-            <div className="flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
+            <div className="flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto pr-1 touch-pan-y">
               {tags.map((tag) => (
                 <button
                   key={tag.id}

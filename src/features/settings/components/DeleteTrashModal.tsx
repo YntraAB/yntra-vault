@@ -72,7 +72,7 @@ export function DeleteTrashModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 select-none p-4"
+          className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 select-none p-3 sm:p-4 touch-pan-y"
           onClick={onClose}
         >
           <motion.div
@@ -80,11 +80,11 @@ export function DeleteTrashModal({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.97, opacity: 0, y: 6 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="w-full max-w-[400px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col"
+            className="w-full max-w-[400px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5 bg-[var(--bg-base)]">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5 bg-[var(--bg-base)] shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
                   <AlertTriangle size={14} />
@@ -110,7 +110,7 @@ export function DeleteTrashModal({
             </div>
 
             {/* Body */}
-            <div className="p-5 flex flex-col gap-3">
+            <div className="p-5 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto touch-pan-y">
               {isSingle ? (
                 <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
                   {t('delete.confirm_before')}{' '}

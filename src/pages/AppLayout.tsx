@@ -220,7 +220,7 @@ export default function AppLayout() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -15 }}
               transition={{ duration: 0.15 }}
-              className="flex flex-1 flex-col overflow-hidden"
+              className="flex flex-1 min-h-0 flex-col overflow-hidden"
             >
               <MobileHeader
                 onOpenDrawer={() => setMobileDrawerOpen(true)}
@@ -228,7 +228,7 @@ export default function AppLayout() {
                 onToggleSearch={() => setMobileSearchVisible(!mobileSearchVisible)}
                 isSearchVisible={mobileSearchVisible}
               />
-              <div className="flex-1 overflow-hidden w-full [&>div]:!w-full [&>div]:!border-r-0">
+              <div className="flex-1 min-h-0 overflow-hidden w-full [&>div]:!w-full [&>div]:!border-r-0">
                 <PasswordList onResizeStart={() => {}} />
               </div>
             </motion.div>
@@ -240,7 +240,7 @@ export default function AppLayout() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.15 }}
-              className="flex flex-1 flex-col overflow-hidden"
+              className="flex flex-1 min-h-0 flex-col overflow-hidden"
             >
               {/* Mobile Back Header */}
               <header className="sticky top-0 z-20 flex w-full shrink-0 flex-col border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] select-none">
@@ -254,7 +254,7 @@ export default function AppLayout() {
                   </button>
                 </div>
               </header>
-              <main className="min-w-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))]">
+              <main className="min-w-0 flex-1 min-h-0 overflow-hidden">
                 <PasswordDetail />
               </main>
             </motion.div>

@@ -179,7 +179,7 @@ export function SettingsPanel() {
             <div
               ref={tabsRef}
               onWheel={handleTabsWheel}
-              className="flex h-10 shrink-0 items-center gap-0 border-b border-[var(--border-subtle)] px-4 overflow-x-auto no-scrollbar"
+              className="flex h-10 shrink-0 items-center gap-0 border-b border-[var(--border-subtle)] px-4 overflow-x-auto no-scrollbar touch-pan-x"
             >
               {TABS.map((tab) => (
                 <button
@@ -203,7 +203,7 @@ export function SettingsPanel() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.15, delay: 0.1 }}
-              className="flex-1 overflow-y-auto p-4"
+              className="flex-1 min-h-0 overflow-y-auto p-4 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] touch-pan-y"
             >
               {activeTab === 'general' && (
                 <GeneralTab

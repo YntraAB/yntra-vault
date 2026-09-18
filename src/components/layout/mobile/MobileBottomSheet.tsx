@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 import { X } from 'lucide-react';
 
 export interface MobileBottomSheetProps {
@@ -15,6 +15,8 @@ export function MobileBottomSheet({
   title,
   children,
 }: MobileBottomSheetProps) {
+  const dragControls = useDragControls();
+
   return (
     <AnimatePresence>
       {open && (
@@ -35,6 +37,8 @@ export function MobileBottomSheet({
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
           drag="y"
+          dragListener={false}
+          dragControls={dragControls}
           dragConstraints={{ top: 0 }}
           dragElastic={0.2}
           onDragEnd={(_, info) => {
@@ -45,13 +49,16 @@ export function MobileBottomSheet({
           className="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-[20px] border-t border-[var(--border)] bg-[var(--bg-elevated)] pb-[calc(env(safe-area-inset-bottom,0px)+16px)] text-[var(--text-primary)] shadow-2xl select-none"
         >
           {/* Drag Handle Indicator */}
-          <div className="flex w-full items-center justify-center pt-3 pb-1">
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            className="flex w-full items-center justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none"
+          >
             <div className="h-1.5 w-12 rounded-full bg-[var(--border-focus)]/50" />
           </div>
 
           {/* Sheet Header */}
           {title && (
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3 shrink-0">
               <h3 className="text-[16px] font-semibold tracking-tight">{title}</h3>
               <button
                 onClick={onClose}
@@ -63,7 +70,7 @@ export function MobileBottomSheet({
           )}
 
           {/* Sheet Body */}
-          <div className="flex-1 overflow-y-auto px-4 pt-3">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 touch-pan-y">
             {children}
           </div>
         </motion.div>

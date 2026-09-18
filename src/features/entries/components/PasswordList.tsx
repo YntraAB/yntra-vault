@@ -249,7 +249,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
   return (
     <div
-      className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
+      className="relative flex h-full min-h-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
       style={{ width: 'var(--passwordlist-width)' }}
     >
       {/* Desktop Header */}
@@ -322,7 +322,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
       {/* List */}
       <div
-        className="flex flex-1 flex-col overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-0"
+        className="flex flex-1 min-h-0 flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0 touch-pan-y"
         onContextMenu={handleListAreaContextMenu}
       >
         <AnimatePresence mode="wait">
@@ -332,7 +332,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-1 flex-col"
+              className="flex flex-1 min-h-0 flex-col"
             >
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="flex h-12 w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3">
@@ -349,7 +349,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-1 flex-col items-center justify-center py-16"
+              className="flex flex-1 min-h-0 flex-col items-center justify-center py-16"
             >
               <p className="text-[13px] text-[var(--text-tertiary)]">{t('list.empty_title')}</p>
             </motion.div>
@@ -359,7 +359,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-1 flex-col min-h-full"
+              className="flex flex-1 min-h-0 flex-col w-full"
             >
               {sections.map((section) => (
                 <div key={section.title}>

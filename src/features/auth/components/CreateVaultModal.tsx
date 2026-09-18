@@ -239,7 +239,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 select-none p-3 sm:p-4 touch-pan-y"
           onClick={onClose}
         >
           <motion.div
@@ -247,7 +247,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.97, opacity: 0, y: 6 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="w-full max-w-[420px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col"
+            className="w-full max-w-[420px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -273,7 +273,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5 flex-1 min-h-0 overflow-y-auto touch-pan-y">
               {/* Vault Name */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.vault_name')}</label>

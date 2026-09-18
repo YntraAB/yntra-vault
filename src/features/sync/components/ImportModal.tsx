@@ -199,7 +199,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 select-none p-4"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 select-none p-3 sm:p-4 touch-pan-y"
           onClick={handleClose}
         >
           <motion.div
@@ -207,7 +207,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.97, opacity: 0, y: 6 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="w-full max-w-[620px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[85vh]"
+            className="w-full max-w-[620px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -264,7 +264,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
         </div>
 
         {/* Body Content */}
-        <div className="p-5 overflow-y-auto flex-1">
+        <div className="p-5 overflow-y-auto flex-1 min-h-0 touch-pan-y">
           <AnimatePresence mode="wait">
             {/* STEP 1: BRAND SELECTION */}
             {step === 'brand' && (

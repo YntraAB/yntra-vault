@@ -463,7 +463,7 @@ export function PasswordDetail() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6 touch-pan-y">
       {isLoadingDetail ? (
         <div className="flex flex-col">
           {/* Header */}
