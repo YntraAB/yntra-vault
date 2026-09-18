@@ -13,7 +13,9 @@ use crate::vault::types::{CustomField, EntryType, FieldType};
 /// Supported import source formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ImportFormat {
+    #[default]
     AutoDetect,
     BitwardenJson,
     BitwardenCsv,
@@ -28,11 +30,6 @@ pub enum ImportFormat {
     GenericCsv,
 }
 
-impl Default for ImportFormat {
-    fn default() -> Self {
-        ImportFormat::AutoDetect
-    }
-}
 
 /// Upper bounds on import data to prevent memory exhaustion and DoS attacks.
 pub const MAX_IMPORT_PAYLOAD_BYTES: usize = 50 * 1024 * 1024; // 50 MB
@@ -632,8 +629,8 @@ impl Importer {
             if result.len() >= MAX_IMPORT_ENTRIES {
                 break;
             }
-            if chunk.contains("<Name>") && chunk.contains("</Name>") {
-                if let Some(n_start) = chunk.find("<Name>") {
+            if chunk.contains("<Name>") && chunk.contains("</Name>")
+                && let Some(n_start) = chunk.find("<Name>") {
                     let rest = &chunk[n_start + 6..];
                     if let Some(n_end) = rest.find("</Name>") {
                         let gname = rest[..n_end].trim();
@@ -642,7 +639,6 @@ impl Importer {
                         }
                     }
                 }
-            }
 
             for entry_chunk in chunk.split("<Entry>") {
                 if result.len() >= MAX_IMPORT_ENTRIES {
@@ -846,11 +842,10 @@ impl Importer {
                             if let Some(t) = data.get("totpUri").or_else(|| data.get("totp")).and_then(|v| v.as_str()) {
                                 totp = clean_totp_secret(t);
                             }
-                            if let Some(urls) = data.get("urls").and_then(|v| v.as_array()) {
-                                if let Some(u) = urls.first().and_then(|v| v.as_str()) {
+                            if let Some(urls) = data.get("urls").and_then(|v| v.as_array())
+                                && let Some(u) = urls.first().and_then(|v| v.as_str()) {
                                     url = u.to_string();
                                 }
-                            }
                         }
 
                         let email = if username.contains('@') { username.clone() } else { String::new() };
@@ -910,7 +905,7 @@ impl Importer {
 
             // Positional index fallback if headers were unmapped
             if title.is_empty() && username.is_empty() && password.is_empty() {
-                if row.len() > 0 { title = row[0].trim().to_string(); }
+                if !row.is_empty() { title = row[0].trim().to_string(); }
                 if row.len() > 1 { username = row[1].trim().to_string(); }
                 if row.len() > 2 { password = row[2].trim().to_string(); }
                 if row.len() > 3 { url = row[3].trim().to_string(); }
@@ -970,14 +965,13 @@ impl HeaderIndex {
         // 1. Try exact matches first
         for cand in candidates {
             let clean = cand.replace([' ', '_', '-'], "");
-            if let Some(&idx) = self.map.get(&clean) {
-                if idx < row.len() {
+            if let Some(&idx) = self.map.get(&clean)
+                && idx < row.len() {
                     let val = row[idx].trim();
                     if !val.is_empty() {
                         return val.to_string();
                     }
                 }
-            }
         }
 
         // 2. Try substring / partial matches
@@ -1032,14 +1026,13 @@ fn extract_xml_key_value(block: &str, key: &str) -> String {
     let direct_end = format!("</{}>", key);
     if let Some(s) = block.find(&direct_tag) {
         let after_tag = &block[s + direct_tag.len()..];
-        if after_tag.starts_with('>') || after_tag.starts_with(' ') {
-            if let Some(close_bracket) = after_tag.find('>') {
+        if (after_tag.starts_with('>') || after_tag.starts_with(' '))
+            && let Some(close_bracket) = after_tag.find('>') {
                 let val_rest = &after_tag[close_bracket + 1..];
                 if let Some(e) = val_rest.find(&direct_end) {
                     return unescape_xml(val_rest[..e].trim());
                 }
             }
-        }
     }
 
     String::new()

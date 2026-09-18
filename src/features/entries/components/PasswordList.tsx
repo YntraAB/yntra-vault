@@ -576,7 +576,7 @@ function ListItem({
         {showBreach && entry.breachStatus?.type === 'Breached' && (
           <ActionTooltip content={t('security.leaked_in_breach')}>
             <span>
-              <ShieldAlert size={12} className="text-red-500 shrink-0 animate-pulse" />
+              <ShieldAlert size={12} className="text-[var(--text-secondary)] shrink-0" />
             </span>
           </ActionTooltip>
         )}

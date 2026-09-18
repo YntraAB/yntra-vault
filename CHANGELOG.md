@@ -5,6 +5,96 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-09-18
+
+### Added
+- **Symmetrical Key File Generation in Master Password Rekeying**:
+  - Added option to generate a brand-new cryptographically secure `.key` file or select an existing one directly in `ChangeMasterPasswordModal`.
+  - Integrated `saveFileDialog` and `backend.generateKeyFile` to safely write random 32-byte key files with strict permissions prior to cryptographic subkey derivation and re-encryption.
+- **CLI Key File Generation & Initialization**:
+  - Added `--gen-keyfile <PATH>` option to `yntra init`, allowing new vaults to be initialized and bound to a fresh 32-byte keyfile in a single step.
+  - Added `--keyfile <PATH>` to `yntra generate` to create standalone cryptographically secure 32-byte keyfiles directly from the terminal.
+- **Global Appearance Configuration in SettingsProvider**:
+  - Implemented root-level propagation of user-selected `fontSize` and `data-density` attributes directly inside `SettingsProvider`, ensuring consistent UI typography and density across Login, Onboarding, and Vault Selection screens.
+- **Comprehensive Window & Modal Aesthetic Harmonization**:
+  - Standardized all application modals and dialogs (`DeleteEntryModal`, `DeleteTagModal`, `CreateTagModal`, `EditTagModal`, `EntryModal`, `BulkEditModal`, `AppPickerModal`, `AttachmentPreviewModal`, `SmartLoginModal`, `Hardware2FaModal`, `BackupTab` manual IP modal, `DeleteTrashModal`, `ImportModal`, `CreateVaultModal`, and `ChangeMasterPasswordModal`) to strictly match the clean, discrete monochrome geometry of `DevicePairingWizard` (P2P window) and `Onboarding` (first-run setup window).
+  - Enforced `rounded-[3px]` geometry, `border border-[var(--border)]`, `bg-[var(--bg-elevated)]` body, and `bg-[var(--bg-surface)]` header styling uniformly across all modals.
+  - Standardized modal headers with discrete `h-7 w-7` icon badge containers (`rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]`) and clean monochrome close/cancel/confirm action buttons.
+  - Eliminated all colorful badges, saturated buttons, and harsh borders (emerald, green, amber, red, purple, blue) across `AttachmentPreviewModal`, `SmartLoginModal`, `TOTPDisplay`, `ImportModal`, `Login` emergency recovery, `VaultSelect` warning and badges, and `SecurityDashboard` StatCard summary cards.
+  - Replaced hardcoded color tokens with semantic dark/light theme variables (`var(--border)`, `var(--bg-base)`, `var(--bg-elevated)`, `var(--text-secondary)`, `var(--text-primary)`, `var(--destructive)`).
+- **Structured Rekey Wizard in Change Master Password**:
+  - Implemented a 2-step verification and configuration flow in `ChangeMasterPasswordModal` (Step 0: current credentials verification; Step 1: new credentials, strength score, and keyfile options).
+  - Integrated a discrete 5-segment monochrome password strength meter using semantic theme tokens (`var(--text-primary)`, `var(--border-subtle)`), eliminating saturated multi-colored bars.
+
+### Security
+- **Empty (0-Byte) Key File Rejection**:
+  - Enforced strict non-zero validation in `read_key_file_safely` (`crates/core/src/vault/manager.rs`), preventing empty files from being accepted as keyfiles which would otherwise silently degrade to password-only derivation.
+- **Git Credential Helper Phishing Hardening & Strict Domain Boundary Isolation**:
+  - Implemented strict host and subdomain boundary matching (`host == domain || host.ends_with(&format!(".{domain}"))`), preventing cross-domain substring phishing attacks (e.g. `evilgithub.com` or `github.com.attacker.com` matching `github.com`).
+  - Hardened `normalize_host` and `extract_domain_stem` against URLs containing user credentials (`user@`, `user:token@`), custom ports, paths, and query fragments, ensuring correct host extraction.
+  - Restricted title-based heuristic matching to entries without explicit URLs, preventing domain mismatch bypasses.
+- **Unix Socket Path Hardening & IPC Inactivity Auto-Lock Parity**:
+  - Enforced strict `0700` permissions (`0o700`) on fallback Unix socket directories under `/tmp` when `$XDG_RUNTIME_DIR` and `$HOME` are unset.
+  - Aligned background inactivity timeout (15-minute idle) with explicit lock: `mgr.lock()` purges sensitive vault settings, search tokens, and keys from RAM, `clear_clipboard()` purges system clipboard, the Unix socket file is unlinked, and session tokens are invalidated.
+- **Secure File Permissions for Plaintext Exports (CSV / JSON)**:
+  - Added `write_sensitive_file_safely` creating export files with atomic `0o600` permissions on Unix and reapplying `set_permissions(0o600)` to ensure sensitive decrypted exports cannot be read by other local OS users.
+  - Maintained formula injection sanitization (CWE-1236) across CSV cell values.
+- **Atomic Linux Wrap-Key Acquisition & Complete TOCTOU Elimination**:
+  - Eliminated the `exists()` TOCTOU race condition in `linux_get_or_create_wrap_key`. Key files are read directly, or created atomically using `OpenOptions::create_new(true).mode(0o600)`, safely handling concurrent initializations without file replacement windows.
+- **Blinded Audit Key Zeroization & Zero-Allocation Strength Analysis**:
+  - Directly initialized ephemeral 32-byte BLAKE3 blinding keys into `zeroize::Zeroizing::new([0u8; 32])` with `fill_bytes(&mut *ephemeral_key)`, leaving zero unzeroized plaintext key copies on the stack.
+  - Replaced intermediate `Vec<u8>` plaintext password heap allocations with zero-allocation borrowed string slices (`std::str::from_utf8(&pwd_bytes)`) for real-time strength analysis.
+- **Smart Login TOTP CDP Injection Escaping**:
+  - Serialized one-time password characters via `serde_json::to_string` before dispatching to Chromium CDP JavaScript evaluation, preventing string breakout and script injection.
+
+### Changed
+- **Change Master Password Modal Geometry & Vertical Compaction**:
+  - Eliminated artificial `min-h-[300px]` and `justify-between` on the modal body container in `ChangeMasterPasswordModal`, reducing vertical footprint by ~45% and eliminating empty void spacing.
+  - Standardized modal width to `max-w-[420px]` to match `CreateVaultModal` and `Onboarding`.
+  - Added structured sub-header divider (`border-b border-[var(--border-subtle)] bg-[var(--bg-base)]/40`) under the stepper progress bar for clean separation from form fields.
+- **Discrete Monochrome Theme Harmony**:
+  - Replaced colorful badges, saturated buttons, and harsh red/rose/amber styling across `BackupTab`, `TrashTab`, `SecurityTab`, `KeybindsTab`, `DeleteTrashModal`, and `ImportModal` with consistent dark-mode tailored tokens (`var(--border)`, `var(--bg-elevated)`, `var(--text-secondary)`).
+- **Git Credential Helper Exact Domain Precedence**:
+  - Prioritized exact domain matches (`160` points) over subdomain matches (`140` points) in `score_entry_match`, ensuring specific credentials (e.g. `gist.github.com`) win deterministically over generic parent domain credentials.
+- **Bloom Filter Test Isolation**:
+  - Converted `test_generate_and_populate_bloom_filter` to in-memory bit validation, preventing test runs from modifying or dirtying `crates/core/data/bloom.bin` on disk.
+- **Idiomatic Rust & Clippy Zero-Warning Hygiene**:
+  - Cleaned up manual implementations of `div_ceil`, unnecessary mutable bindings, redundant reference dereferences, and collapsible conditionals across all 4 workspace crates (`yntra-crypto`, `yntra-vault-core`, `yntra-cli`, `src-tauri`), compiling cleanly under `-D warnings`.
+- **Smooth SPA Navigation for Setup Wizard Rerun**:
+  - Replaced hard `window.location.href` assignment with React Router `navigate('/setup')` in `GeneralTab`, avoiding uncoordinated hash reloads.
+- **Storage Footprint Metric Localization**:
+  - Removed hardcoded unit suffix (`" st"`) in `TrashTab` storage footprint display in favor of clean universal count notation.
+
+### Fixed
+- **Universal Navigation Translation Keys & Raw Key String Display**:
+  - Resolved an issue where buttons in `DevicePairingWizard` and `ChangeMasterPasswordModal` rendered raw translation key strings (`"common.back"`, `"common.next"`) instead of localized text.
+  - Added `'common.back'`, `'common.next'`, `'common.hide'`, `'common.show'`, and `'pairing.sync_again'` to `en.ts`, `sv.ts`, and propagated definitions across all 24 supported language dictionaries.
+- **Web URL vs Desktop Application Classification**:
+  - Fixed classifier heuristics in `smartlogin/classifier.rs` and frontend utility functions where domains with trailing paths (e.g. `https://store.steampowered.com/`) were erroneously flagged as desktop application paths rather than web targets.
+- **Login Screen App Logo Rendering**:
+  - Fixed logo asset path resolution and contrast on the Login screen, ensuring the Yntra Vault brand mark displays properly across both dark and light themes.
+- **Password Visibility ActionTooltips**:
+  - Wrapped secret field visibility toggles in `ChangeMasterPasswordModal` with localized `ActionTooltip` components (`login.hide_password` / `login.show_password`).
+- **Modal Exit Transitions & Framer Motion Unmount Glitches**:
+  - Eliminated premature unmount returns prior to `<AnimatePresence>` across `DeleteEntryModal`, `DeleteTagModal`, `EditTagModal`, `AppPickerModal`, `DeleteTrashModal`, `DevicePairingWizard`, `ImportModal`, and `BackupTab` manual IP prompt, restoring smooth exit animations across all dialogs.
+- **Internationalization & Localization Completeness**:
+  - Localized hardware lockout countdowns, master password validation errors, device names, and shortcut conflict toasts across `Login`, `BackupTab`, `CreateVaultModal`, `ChangeMasterPasswordModal`, and `KeybindsTab`.
+- **Login Key File Translation Key Lookup**:
+  - Corrected dictionary key lookups for `login.use_key_file` and `login.key_file_path` in `Login.tsx`, preventing fallback to hardcoded English strings in localized environments.
+- **Hardware 2FA Modal Exit Animation Transition**:
+  - Restructured JSX hierarchy in `Hardware2FaModal.tsx` to mount conditionally within top-level `<AnimatePresence>`, restoring smooth exit transitions and eliminating early return before animations.
+- **WebDAV Cloud Sync Toast Localization**:
+  - Replaced hardcoded English sync merge string with localized `settings.sync_success_count`.
+- **Emergency Kit Zero-Unwrap Crash Guard**:
+  - Replaced `.unwrap()` in `generate_emergency_kit` with `self.keys.as_ref().ok_or(VaultError::VaultLocked)?`, eliminating application abort crashes if invoked when the vault is locked.
+- **Windows Explorer File Revealing & Path Validation**:
+  - Added path existence checks in `show_in_explorer` and combined `/select,` into a single argument (`/select,<path>`).
+  - Added differentiation between files (selected in directory) and directories (opened directly), preventing Explorer from malfunctioning on folder paths.
+- **Bloom Filter Byte Conversion Zero-Unwrap**:
+  - Replaced `.unwrap()` calls on SHA-256 byte slice conversions in `is_breach_suspected` and bloom tests with unwrap-free array parsing (`unwrap_or([0u8; 8])`), adhering to project zero-panic release invariants.
+- **Frontend React Hook Dependencies & Strict Error Typing**:
+  - Corrected callback dependencies in `src/pages/Login.tsx` and effect dependencies in `src/pages/VaultSelect.tsx`, typing caught errors to `unknown` for robust production bundle stability.
+
 ---
 
 ## [0.1.8] - 2026-09-17

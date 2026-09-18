@@ -191,10 +191,7 @@ async fn handle_ssh_agent_packet(packet: &[u8]) -> Vec<u8> {
                 Some(d) => d.to_vec(),
                 None => return vec![5],
             };
-            let flags = match read_u32(packet, &mut cursor) {
-                Some(f) => f,
-                None => 0,
-            };
+            let flags = read_u32(packet, &mut cursor).unwrap_or_default();
 
             match try_ipc_request(&IpcRequest::SshSign { pubkey_blob: key_blob, data, flags }).await {
                 Some(IpcResponse::SshSignSuccess(sig_blob)) => {

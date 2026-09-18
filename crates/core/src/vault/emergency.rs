@@ -72,9 +72,10 @@ impl VaultManager {
         }
 
         let now = Utc::now();
+        let active_keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
         let hmac_tag = yntra_crypto::compute_hmac(
             b"yntra-vault-emergency-kit-audit-fingerprint-v1",
-            &self.keys.as_ref().unwrap().hmac_key,
+            &active_keys.hmac_key,
         );
         let v_hash = data_encoding::HEXLOWER.encode(&hmac_tag[..8]);
 
@@ -179,8 +180,8 @@ This document contains 3 recovery shares created using a 2-of-3 threshold Shamir
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
-        if let Some(ref mut audit) = self.data.settings.emergency_kit_audit {
-            if !audit.active_fingerprint.is_empty() {
+        if let Some(ref mut audit) = self.data.settings.emergency_kit_audit
+            && !audit.active_fingerprint.is_empty() {
                 audit.history.push(EmergencyKitAuditEntry {
                     timestamp: Utc::now(),
                     fingerprint: audit.active_fingerprint.clone(),
@@ -188,7 +189,6 @@ This document contains 3 recovery shares created using a 2-of-3 threshold Shamir
                 });
                 audit.active_fingerprint.clear();
             }
-        }
         self.save()?;
         Ok(())
     }

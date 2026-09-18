@@ -117,14 +117,12 @@ pub fn match_entries_for_mobile_context(
         let mut is_exact_match = false;
 
         // 1. In-App WebView Domain Host Override Inspection
-        if let Some(ref target_web_host) = web_host {
-            if let Some(entry_host) = extract_host_domain(&entry.url) {
-                if entry_host == *target_web_host || entry_host.ends_with(&format!(".{}", target_web_host)) {
+        if let Some(ref target_web_host) = web_host
+            && let Some(entry_host) = extract_host_domain(&entry.url)
+                && (entry_host == *target_web_host || entry_host.ends_with(&format!(".{}", target_web_host))) {
                     matched_reason = Some(format!("webview_webdomain_override ({})", target_web_host));
                     is_exact_match = true;
                 }
-            }
-        }
 
         // 2. Explicit Custom Field Package Match (e.g. custom field "package_name" = "com.spotify.music")
         if matched_reason.is_none() {
@@ -141,26 +139,21 @@ pub fn match_entries_for_mobile_context(
         }
 
         // 3. Verified Domain Match via Known App Package Table
-        if matched_reason.is_none() {
-            if let Some(domain) = target_domain {
-                if let Some(entry_host) = extract_host_domain(&entry.url) {
-                    if entry_host == domain || entry_host.ends_with(&format!(".{}", domain)) {
+        if matched_reason.is_none()
+            && let Some(domain) = target_domain
+                && let Some(entry_host) = extract_host_domain(&entry.url)
+                    && (entry_host == domain || entry_host.ends_with(&format!(".{}", domain))) {
                         matched_reason = Some(format!("known_package_verified_domain ({})", domain));
                         is_exact_match = true;
                     }
-                }
-            }
-        }
 
         // 4. Strict Exact URL Host match against package name domain
-        if matched_reason.is_none() && !entry.url.is_empty() {
-            if let Some(entry_host) = extract_host_domain(&entry.url) {
-                if entry_host == pkg_lower {
+        if matched_reason.is_none() && !entry.url.is_empty()
+            && let Some(entry_host) = extract_host_domain(&entry.url)
+                && entry_host == pkg_lower {
                     matched_reason = Some("exact_url_host_match".into());
                     is_exact_match = true;
                 }
-            }
-        }
 
         if let Some(reason) = matched_reason {
             results.push(AutofillCredentialItem {

@@ -26,7 +26,7 @@ async fn handle_git_get() -> Result<()> {
     let mut username = String::new();
 
     let stdin = stdin();
-    for line in stdin.lock().lines().flatten() {
+    for line in stdin.lock().lines().map_while(|res| res.ok()) {
         let line_trim = line.trim();
         if line_trim.is_empty() {
             break;
@@ -34,11 +34,10 @@ async fn handle_git_get() -> Result<()> {
         if let Some((k, v)) = line_trim.split_once('=') {
             match k.trim() {
                 "host" => host = v.trim().to_string(),
-                "url" => {
-                    if host.is_empty() {
+                "url"
+                    if host.is_empty() => {
                         host = normalize_host(v.trim());
                     }
-                }
                 "username" => username = v.trim().to_string(),
                 _ => {}
             }
@@ -62,7 +61,7 @@ async fn handle_git_get() -> Result<()> {
         .filter(|(_, score)| *score > 0)
         .collect();
 
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let best_id = scored.first().map(|(e, _)| e.id);
 
@@ -79,8 +78,8 @@ async fn handle_git_get() -> Result<()> {
     };
 
     // 4. Retrieve decrypted credentials and write to stdout in git-credential format
-    if let Some(id) = target_id {
-        if let Some(IpcResponse::GetEntry(entry)) = try_ipc_request(&IpcRequest::GetEntry { query: id.to_string() }).await {
+    if let Some(id) = target_id
+        && let Some(IpcResponse::GetEntry(entry)) = try_ipc_request(&IpcRequest::GetEntry { query: id.to_string() }).await {
             use std::io::Write;
             let user = if !entry.username.is_empty() {
                 &entry.username
@@ -91,24 +90,41 @@ async fn handle_git_get() -> Result<()> {
             println!("password={}", entry.password);
             let _ = std::io::stdout().flush();
         }
-    }
 
     Ok(())
 }
 
 pub fn normalize_host(host: &str) -> String {
-    let no_proto = if let Some((_, rest)) = host.split_once("://") {
+    let clean = host.trim();
+    // 1. Remove scheme/protocol if present
+    let no_proto = if let Some((_, rest)) = clean.split_once("://") {
         rest
     } else {
-        host
+        clean
     };
-    let no_port = no_proto.split(':').next().unwrap_or(no_proto);
-    let domain = if let Some((d, _)) = no_port.split_once('/') {
-        d
+    // 2. Remove path and query/hash
+    let host_and_port = if let Some((h, _)) = no_proto.split_once(&['/', '?', '#'][..]) {
+        h
     } else {
-        no_port
+        no_proto
     };
-    domain.trim_matches('/').to_lowercase()
+    // 3. Remove userinfo (e.g. user:pass@ or user@)
+    let host_and_port = if let Some((_, h)) = host_and_port.rsplit_once('@') {
+        h
+    } else {
+        host_and_port
+    };
+    // 4. Remove port (handling IPv6 [::1]:port if bracketed)
+    let host_only = if host_and_port.starts_with('[') {
+        if let Some((ipv6, _)) = host_and_port.split_once(']') {
+            ipv6.trim_start_matches('[')
+        } else {
+            host_and_port
+        }
+    } else {
+        host_and_port.split(':').next().unwrap_or(host_and_port)
+    };
+    host_only.trim_matches('.').to_lowercase()
 }
 
 pub fn extract_domain_stem(host: &str) -> &str {
@@ -118,12 +134,32 @@ pub fn extract_domain_stem(host: &str) -> &str {
     } else {
         clean
     };
-    let no_port = no_proto.split(':').next().unwrap_or(no_proto);
-    let trimmed = no_port.trim_matches('/');
+    let no_path = if let Some((h, _)) = no_proto.split_once(&['/', '?', '#'][..]) {
+        h
+    } else {
+        no_proto
+    };
+    let no_user = if let Some((_, h)) = no_path.rsplit_once('@') {
+        h
+    } else {
+        no_path
+    };
+    let no_port = if no_user.starts_with('[') {
+        if let Some((ipv6, _)) = no_user.split_once(']') {
+            ipv6.trim_start_matches('[')
+        } else {
+            no_user
+        }
+    } else {
+        no_user.split(':').next().unwrap_or(no_user)
+    };
+    let trimmed = no_port.trim_matches('.');
 
     let parts: Vec<&str> = trimmed.split('.').collect();
-    if parts.len() >= 2 {
-        parts[0]
+    if parts.len() >= 3 && matches!(parts[parts.len() - 2], "co" | "com" | "org" | "net" | "edu" | "gov") {
+        parts[parts.len() - 3]
+    } else if parts.len() >= 2 {
+        parts[parts.len() - 2]
     } else {
         trimmed
     }
@@ -134,24 +170,28 @@ pub fn score_entry_match(entry: &EntryPreview, host: &str, requested_user: &str)
     let clean_stem = extract_domain_stem(&clean_host).to_lowercase();
 
     let entry_title = entry.title.to_lowercase();
+    let clean_title = entry_title.trim();
     let entry_domain = normalize_host(&entry.url);
     let entry_user = entry.username.to_lowercase();
     let entry_email = entry.email.to_lowercase();
     let req_user = requested_user.trim().to_lowercase();
 
     let mut host_score: u32 = 0;
-    if !entry_domain.is_empty() && (entry_domain.contains(&clean_host) || clean_host.contains(&entry_domain)) {
-        host_score = 150;
-    } else if entry_title == clean_host {
+    if !entry_domain.is_empty() {
+        if entry_domain == clean_host {
+            host_score = 160;
+        } else if clean_host.ends_with(&format!(".{}", entry_domain)) {
+            host_score = 140;
+        }
+        // When entry specifies an explicit URL, do not allow domain mismatch via title fallback
+    } else if clean_title == clean_host {
         host_score = 140;
-    } else if entry_title.contains(&clean_host) {
-        host_score = 120;
-    } else if !clean_stem.is_empty() && entry_title.contains(&clean_stem) {
+    } else if !clean_stem.is_empty()
+        && (clean_title == clean_stem
+            || clean_title.split_whitespace().any(|word| word == clean_stem)
+            || clean_title.split(&['-', '_', '.'][..]).any(|word| word == clean_stem))
+    {
         host_score = 80;
-    } else if !clean_stem.is_empty() && clean_host.contains(&entry_title) && !entry_title.is_empty() {
-        host_score = 70;
-    } else if !clean_stem.is_empty() && entry_domain.contains(&clean_stem) {
-        host_score = 60;
     }
 
     if host_score == 0 {
@@ -176,7 +216,7 @@ fn handle_git_setup() -> Result<()> {
     let helper_cmd = format!("\"{}\" git-credential", exe.display().to_string().replace('\\', "/"));
 
     let status = Command::new("git")
-        .args(&["config", "--global", "credential.helper", &helper_cmd])
+        .args(["config", "--global", "credential.helper", &helper_cmd])
         .status()
         .map_err(|e| VaultError::InvalidFormat(format!("Failed to run git config: {}", e)))?;
 
@@ -272,4 +312,43 @@ mod tests {
         let score = score_entry_match(&entry, "github.com", "octocat@github.com");
         assert!(score >= 300);
     }
+
+    #[test]
+    fn test_score_entry_match_cross_domain_substring_phishing_rejected() {
+        let entry = make_preview("GitHub", "octocat", "https://github.com");
+
+        // Phishing domains that embed "github" must NEVER match
+        assert_eq!(score_entry_match(&entry, "evilgithub.com", "octocat"), 0);
+        assert_eq!(score_entry_match(&entry, "notgithub.com", "octocat"), 0);
+        assert_eq!(score_entry_match(&entry, "github.com.attacker.com", "octocat"), 0);
+        assert_eq!(score_entry_match(&entry, "mygithub.io", "octocat"), 0);
+        assert_eq!(score_entry_match(&entry, "hub.com", "octocat"), 0);
+
+        // Valid subdomains must match
+        assert!(score_entry_match(&entry, "gist.github.com", "octocat") > 0);
+        assert!(score_entry_match(&entry, "api.github.com", "octocat") > 0);
+    }
+
+    #[test]
+    fn test_normalize_host_with_userinfo_and_paths() {
+        assert_eq!(normalize_host("https://user@github.com/repo.git"), "github.com");
+        assert_eq!(normalize_host("https://user:token123@gitlab.com:8443/org/repo.git?ref=main#readme"), "gitlab.com");
+        assert_eq!(normalize_host("ssh://git@ssh.github.com:443/owner/repo.git"), "ssh.github.com");
+        assert_eq!(extract_domain_stem("https://token:secret@gitlab.com:8443/repo.git"), "gitlab");
+        assert_eq!(extract_domain_stem("https://git.internal.co.uk/repo.git"), "internal");
+    }
+
+    #[test]
+    fn test_score_entry_exact_domain_beats_subdomain() {
+        let general_entry = make_preview("GitHub General", "octocat", "https://github.com");
+        let specific_entry = make_preview("GitHub Gist", "octocat", "https://gist.github.com");
+
+        let general_score = score_entry_match(&general_entry, "gist.github.com", "octocat");
+        let specific_score = score_entry_match(&specific_entry, "gist.github.com", "octocat");
+
+        assert!(specific_score > general_score);
+        assert_eq!(specific_score, 310); // 160 + 150
+        assert_eq!(general_score, 290);  // 140 + 150
+    }
 }
+

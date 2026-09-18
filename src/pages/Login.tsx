@@ -180,7 +180,7 @@ export default function Login() {
     if (e) e.preventDefault();
     setError('');
     if (isLockedOut) {
-      setError(`Too many attempts. Try again in ${lockoutRemaining}s`);
+      setError(t('login.err_locked', { seconds: lockoutRemaining }) || `Too many attempts. Try again in ${lockoutRemaining}s`);
       return;
     }
 
@@ -230,13 +230,13 @@ export default function Login() {
       if (nextAttempts >= MAX_ATTEMPTS) {
         const delay = LOCKOUT_DELAYS[Math.min(nextAttempts, LOCKOUT_DELAYS.length - 1)];
         setLockedUntil(Date.now() + delay);
-        setError(`Too many failed attempts. Locked for ${delay / 1000}s`);
+        setError(t('login.err_locked', { seconds: delay / 1000 }) || `Too many failed attempts. Locked for ${delay / 1000}s`);
       } else {
         const errMsg = err?.toString() || 'Hardware key authentication failed';
         if (errMsg.includes('InvalidPassword')) {
-          setError('Incorrect master password');
+          setError(t('error.invalid_password') || 'Incorrect master password');
         } else if (errMsg.includes('Hardware2FaAuthFailed')) {
-          setError('Security key authentication failed. Touch rejected or timed out.');
+          setError(t('error.hardware_2fa_auth_failed') || 'Security key authentication failed. Touch rejected or timed out.');
         } else {
           setError(errMsg);
         }
@@ -253,7 +253,7 @@ export default function Login() {
       setError('');
 
       if (isLockedOut) {
-        setError(`Too many attempts. Try again in ${lockoutRemaining}s`);
+        setError(t('login.err_locked', { seconds: lockoutRemaining }) || `Too many attempts. Try again in ${lockoutRemaining}s`);
         return;
       }
 
@@ -261,13 +261,13 @@ export default function Login() {
       const passBytes = secretBytes && secretBytes.length > 0 ? secretBytes : new TextEncoder().encode(password);
 
       if (passBytes.length === 0) {
-        setError('Enter your master password');
+        setError(t('login.err_enter_password') || 'Enter your master password');
         triggerShake();
         return;
       }
 
       if (useKeyFile && !keyFilePath.trim()) {
-        setError('Please select or specify a Key File');
+        setError(t('login.err_specify_keyfile') || 'Please select or specify a Key File');
         triggerShake();
         return;
       }
@@ -316,7 +316,7 @@ export default function Login() {
           const delay = LOCKOUT_DELAYS[Math.min(newAttempts, LOCKOUT_DELAYS.length - 1)];
           if (delay > 0) {
             setLockedUntil(Date.now() + delay);
-            setError(`Incorrect password or key file. Locked for ${delay / 1000}s`);
+            setError(t('login.err_locked', { seconds: delay / 1000 }) || `Incorrect password or key file. Locked for ${delay / 1000}s`);
 
             // Auto-unlock countdown
             setTimeout(() => {
@@ -325,7 +325,7 @@ export default function Login() {
               inputRef.current?.focus();
             }, delay);
           } else {
-            setError('Incorrect password or invalid key file');
+            setError(t('login.err_incorrect') || 'Incorrect password or invalid key file');
           }
 
           triggerShake();
@@ -337,7 +337,7 @@ export default function Login() {
         setLoading(false);
       }
     },
-    [password, useKeyFile, keyFilePath, hardware2FaRequired, handleHardwareUnlock, biometricAvailable, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining, t, triggerShake]
+    [password, useKeyFile, keyFilePath, hardware2FaRequired, handleHardwareUnlock, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining, t, triggerShake]
   );
 
   const handleEmergencyRecovery = useCallback(async (e: React.FormEvent) => {
@@ -362,8 +362,8 @@ export default function Login() {
       const backend = await getBackend();
       const reconstructed = await backend.reconstructMasterPassword(sA, sB);
       setRecoveredPassword(reconstructed);
-    } catch (err: any) {
-      setRecoveryError(err?.message || String(err) || 'Failed to reconstruct password from shares');
+    } catch (err: unknown) {
+      setRecoveryError((err as Error)?.message || String(err) || 'Failed to reconstruct password from shares');
     } finally {
       setRecovering(false);
     }
@@ -385,7 +385,7 @@ export default function Login() {
       }
 
       const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
-      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+      const updated = recent.filter((v: { id?: string; path?: string }) => v.id !== info.id && v.path !== info.path);
       const newVault = { id: info.id, name: info.name, path: info.path };
       localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
@@ -393,13 +393,13 @@ export default function Login() {
       setIsLocked(false);
       setRecoveredPassword('');
       navigate('/app');
-    } catch (err: any) {
-      setRecoveryError(err?.message || String(err) || 'Failed to unlock vault with recovered password');
+    } catch (err: unknown) {
+      setRecoveryError((err as Error)?.message || String(err) || 'Failed to unlock vault with recovered password');
     } finally {
       passBytes.fill(0);
       setLoading(false);
     }
-  }, [recoveredPassword, currentVault, useKeyFile, keyFilePath, hardware2FaRequired, biometricAvailable, setCurrentVault, setIsLocked, navigate]);
+  }, [recoveredPassword, currentVault, useKeyFile, keyFilePath, setCurrentVault, setIsLocked, navigate]);
 
   return (
     <motion.div
@@ -413,14 +413,14 @@ export default function Login() {
         <div className="flex flex-col items-center text-center">
           <img
             src="/white-logo.png"
-            alt="Yntra Vault Logo"
-            className="mb-3 h-24 w-24 rounded-xl object-cover"
+            alt="Yntra Vault"
+            className="mb-3 h-20 w-20 rounded-[3px] object-cover invert dark:invert-0"
           />
           <h1 className="text-[18px] font-semibold tracking-tight text-[var(--text-primary)]">
             {currentVault?.name || 'Vault'}
           </h1>
           {hardware2FaRequired && (
-            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)]">
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)]">
               <KeyRound size={12} />
               <span>{t('login.hardware_key_enrolled') || 'Hardware Key Enrolled'}</span>
             </div>
@@ -501,7 +501,7 @@ export default function Login() {
                     onChange={(e) => setUseKeyFile(e.target.checked)}
                     className="rounded border-[var(--border)] text-[var(--text-primary)] focus:ring-0"
                   />
-                  <span>{t('login.use_keyfile') || 'Use Key File'}</span>
+                  <span>{t('login.use_key_file') || 'Use Key File'}</span>
                 </label>
               </div>
               {useKeyFile && (
@@ -510,7 +510,7 @@ export default function Login() {
                     type="text"
                     value={keyFilePath}
                     onChange={(e) => setKeyFilePath(e.target.value)}
-                    placeholder={t('login.keyfile_path_ph') || 'Path to .key file'}
+                    placeholder={t('login.key_file_path') || 'Path to .key file'}
                     className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none focus:border-[var(--border-focus)]"
                   />
                   <button
@@ -625,8 +625,8 @@ export default function Login() {
         ) : activeView === 'emergency_recovery' ? (
           <div className="mt-6 flex flex-col gap-3">
             <div className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-4 text-center shadow-sm">
-              <div className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400">
-                <KeyRound size={20} />
+              <div className="mb-2.5 flex h-9 w-9 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]">
+                <KeyRound size={16} />
               </div>
               <h2 className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)]">
                 {t('login.emergency_recovery')}
@@ -681,11 +681,11 @@ export default function Login() {
                 </form>
               ) : (
                 <div className="mt-3 flex w-full flex-col gap-2.5">
-                  <div className="flex flex-col gap-1 rounded-[3px] border border-green-500/30 bg-green-500/10 p-2.5 text-left">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-green-400">
+                  <div className="flex flex-col gap-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-2.5 text-left">
+                    <span className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                       {t('login.recovered_password_title')}
                     </span>
-                    <span className="font-mono text-[12px] font-semibold text-green-300 break-all select-all">
+                    <span className="font-mono text-[12px] font-semibold text-[var(--text-primary)] break-all select-all">
                       {recoveredPassword}
                     </span>
                   </div>
@@ -908,7 +908,7 @@ export default function Login() {
 
         {/* Attempts warning */}
         {attempts >= 3 && (
-          <div className="mt-3 rounded-md bg-[var(--destructive)]/10 px-3 py-2 text-center text-[11px] text-[var(--destructive)]">
+          <div className="mt-3 rounded-[3px] bg-[var(--destructive)]/10 px-3 py-2 text-center text-[11px] text-[var(--destructive)]">
             {t('login.attempts_left', { remaining: MAX_ATTEMPTS - attempts })}
           </div>
         )}

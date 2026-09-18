@@ -93,8 +93,6 @@ export function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalPro
     return () => { cancelled = true; };
   }, [open]);
 
-  if (!open) return null;
-
   const rawApps = installedApps.length > 0 ? installedApps : COMMON_APPS;
 
   const filteredApps = rawApps.filter(app => {
@@ -156,215 +154,178 @@ export function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalPro
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 select-none">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.15 }}
-          className="w-full max-w-xl rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-5 shadow-2xl flex flex-col max-h-[85vh]"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
-            <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--text-primary)]">
-              <Laptop size={18} className="text-[var(--accent-primary)]" />
-              <span>{t('app_picker.title')}</span>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {/* Search & Manual Browse Bar */}
-          <div className="mt-3.5 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t('app_picker.search_placeholder')}
-                className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-base)] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
-                autoFocus
-              />
-            </div>
-
-            <ActionTooltip content={t('app_picker.filter_noise_tooltip')}>
-              <button
-                type="button"
-                onClick={() => setHideSystemUtils(!hideSystemUtils)}
-                className={`flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors shrink-0 ${
-                  hideSystemUtils
-                    ? 'border-[var(--accent-primary)]/40 bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
-                    : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <Filter size={13} />
-                <span className="hidden sm:inline">{t('app_picker.filter_noise')}</span>
-                {hideSystemUtils && <Check size={12} />}
-              </button>
-            </ActionTooltip>
-
-            <ActionTooltip content={t('app_picker.browse_tooltip')}>
-              <button
-                type="button"
-                onClick={handleManualBrowse}
-                className="flex h-9 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0"
-              >
-                <FolderOpen size={14} />
-                <span className="hidden sm:inline">{t('app_picker.browse_file_system')}</span>
-              </button>
-            </ActionTooltip>
-          </div>
-
-          {/* Category Tabs */}
-          <div
-            onWheel={(e) => {
-              if (e.deltaY) {
-                e.currentTarget.scrollLeft += e.deltaY;
-              }
-            }}
-            className="mt-3 flex items-center gap-1 overflow-x-auto border-b border-[var(--border-subtle)] pb-2 text-[12px] scrollbar-none shrink-0"
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 select-none" onClick={onClose}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.15 }}
+            className="w-full max-w-xl mx-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl flex flex-col max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => setActiveTab('loggable')}
-              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'loggable'
-                  ? 'bg-[var(--accent-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t('app_picker.tab_loggable')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('browsers_communication')}
-              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'browsers_communication'
-                  ? 'bg-[var(--accent-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t('app_picker.tab_browsers')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('productivity_dev')}
-              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'productivity_dev'
-                  ? 'bg-[var(--accent-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t('app_picker.tab_dev')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('gaming')}
-              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'gaming'
-                  ? 'bg-[var(--accent-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t('app_picker.tab_gaming')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('system')}
-              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'system'
-                  ? 'bg-[var(--accent-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t('app_picker.tab_system')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('all')}
-              className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'all'
-                  ? 'bg-[var(--accent-primary)] text-white'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t('app_picker.tab_all')} ({rawApps.length})
-            </button>
-          </div>
-
-          {/* Apps List */}
-          <div className="mt-3 flex-1 overflow-y-auto pr-1 space-y-1 min-h-[240px]">
-            {loading ? (
-              <div className="flex h-40 items-center justify-center text-[13px] text-[var(--text-tertiary)]">
-                {t('app_picker.scanning')}
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
+                  <Laptop size={14} />
+                </div>
+                <span className="text-[13px] font-semibold text-[var(--text-primary)]">{t('app_picker.title')}</span>
               </div>
-            ) : filteredApps.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-48 gap-2 text-[13px] text-[var(--text-tertiary)] text-center">
-                <ShieldAlert size={28} className="text-[var(--text-tertiary)] opacity-60" />
-                <span>{t('app_picker.no_apps_found')}</span>
-                <div className="flex items-center gap-3 mt-1">
-                  {hideSystemUtils && (
-                    <button
-                      type="button"
-                      onClick={() => setHideSystemUtils(false)}
-                      className="text-[12px] text-[var(--accent-primary)] hover:underline font-medium"
-                    >
-                      {t('app_picker.show_os_utilities')}
-                    </button>
-                  )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex flex-col flex-1 min-h-0 p-4">
+              {/* Search & Manual Browse Bar */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={t('app_picker.search_placeholder')}
+                    className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] pl-9 pr-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                    autoFocus
+                  />
+                </div>
+
+                <ActionTooltip content={t('app_picker.filter_noise_tooltip')}>
+                  <button
+                    type="button"
+                    onClick={() => setHideSystemUtils(!hideSystemUtils)}
+                    className={`flex h-8 items-center gap-1.5 rounded-[3px] border px-2.5 text-[11.5px] font-medium transition-colors shrink-0 cursor-pointer ${
+                      hideSystemUtils
+                        ? 'border-[var(--text-primary)] bg-[var(--bg-active)] text-[var(--text-primary)]'
+                        : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Filter size={13} />
+                    <span className="hidden sm:inline">{t('app_picker.filter_noise')}</span>
+                    {hideSystemUtils && <Check size={12} />}
+                  </button>
+                </ActionTooltip>
+
+                <ActionTooltip content={t('app_picker.browse_tooltip')}>
                   <button
                     type="button"
                     onClick={handleManualBrowse}
-                    className="text-[12px] text-[var(--accent-primary)] hover:underline font-medium"
+                    className="flex h-8 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[11.5px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] shrink-0 cursor-pointer"
                   >
-                    {t('app_picker.browse_file_system')}
+                    <FolderOpen size={13} />
+                    <span className="hidden sm:inline">{t('app_picker.browse_file_system')}</span>
                   </button>
-                </div>
+                </ActionTooltip>
               </div>
-            ) : (
-              filteredApps.map((app, idx) => (
-                <button
-                  key={`${app.name}-${idx}`}
-                  type="button"
-                  onClick={() => {
-                    onSelectApp(app.path);
-                    onClose();
-                  }}
-                  className="flex w-full items-center justify-between rounded-md p-2.5 text-left transition-colors hover:bg-[var(--bg-hover)] group cursor-pointer border border-transparent hover:border-[var(--border-subtle)]"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] text-[var(--text-secondary)] group-hover:text-[var(--accent-primary)] shrink-0">
-                      <AppWindow size={16} />
+
+              {/* Category Tabs */}
+              <div
+                onWheel={(e) => {
+                  if (e.deltaY) {
+                    e.currentTarget.scrollLeft += e.deltaY;
+                  }
+                }}
+                className="mt-3 flex items-center gap-1.5 overflow-x-auto border-b border-[var(--border-subtle)] pb-2.5 text-[11px] scrollbar-none shrink-0"
+              >
+                {[
+                  { id: 'loggable' as const, label: t('app_picker.tab_loggable') },
+                  { id: 'browsers_communication' as const, label: t('app_picker.tab_browsers') },
+                  { id: 'productivity_dev' as const, label: t('app_picker.tab_dev') },
+                  { id: 'gaming' as const, label: t('app_picker.tab_gaming') },
+                  { id: 'system' as const, label: t('app_picker.tab_system') },
+                  { id: 'all' as const, label: `${t('app_picker.tab_all')} (${rawApps.length})` },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`rounded-[3px] px-2.5 py-1 font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                      activeTab === tab.id
+                        ? 'bg-[var(--text-primary)] text-[var(--bg-base)] shadow-2xs'
+                        : 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Apps List */}
+              <div className="mt-3 flex-1 overflow-y-auto pr-1 space-y-1 min-h-[240px]">
+                {loading ? (
+                  <div className="flex h-40 items-center justify-center text-[12px] text-[var(--text-tertiary)]">
+                    {t('app_picker.scanning')}
+                  </div>
+                ) : filteredApps.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-48 gap-2 text-[12px] text-[var(--text-tertiary)] text-center">
+                    <ShieldAlert size={24} className="text-[var(--text-tertiary)] opacity-60" />
+                    <span>{t('app_picker.no_apps_found')}</span>
+                    <div className="flex items-center gap-3 mt-1">
+                      {hideSystemUtils && (
+                        <button
+                          type="button"
+                          onClick={() => setHideSystemUtils(false)}
+                          className="text-[12px] text-[var(--text-primary)] hover:underline font-medium cursor-pointer"
+                        >
+                          {t('app_picker.show_os_utilities')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleManualBrowse}
+                        className="text-[12px] text-[var(--text-primary)] hover:underline font-medium cursor-pointer"
+                      >
+                        {t('app_picker.browse_file_system')}
+                      </button>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-[13px] font-medium text-[var(--text-primary)] truncate min-w-0">
-                          {app.name}
-                        </span>
-                        {getCategoryBadge(app.category, app.is_system)}
-                      </div>
-                      <ActionTooltip content={app.path}>
-                        <div className="text-[11px] font-mono text-[var(--text-tertiary)] truncate mt-0.5 max-w-full">
-                          {app.path}
+                  </div>
+                ) : (
+                  filteredApps.map((app, idx) => (
+                    <button
+                      key={`${app.name}-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        onSelectApp(app.path);
+                        onClose();
+                      }}
+                      className="flex w-full items-center justify-between rounded-[3px] p-2 text-left transition-colors hover:bg-[var(--bg-hover)] group cursor-pointer border border-transparent hover:border-[var(--border-subtle)]"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] shrink-0">
+                          <AppWindow size={14} />
                         </div>
-                      </ActionTooltip>
-                    </div>
-                  </div>
-                  <div className="text-[11px] font-medium text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] shrink-0 pl-2">
-                    {t('app_picker.select')}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </motion.div>
-      </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[12px] font-medium text-[var(--text-primary)] truncate min-w-0">
+                              {app.name}
+                            </span>
+                            {getCategoryBadge(app.category, app.is_system)}
+                          </div>
+                          <ActionTooltip content={app.path}>
+                            <div className="text-[10.5px] font-mono text-[var(--text-tertiary)] truncate mt-0.5 max-w-full">
+                              {app.path}
+                            </div>
+                          </ActionTooltip>
+                        </div>
+                      </div>
+                      <div className="text-[11px] font-medium text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] shrink-0 pl-2">
+                        {t('app_picker.select')}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </AnimatePresence>
   );
 }

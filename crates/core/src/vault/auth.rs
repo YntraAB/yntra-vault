@@ -156,6 +156,7 @@ impl VaultManager {
     /// Enroll Hardware 2FA for the current open vault with master password verification.
     /// Requires verification of master password (Factor 1) and hardware response (Factor 2).
     /// Disables and cleans up Biometric unlock to enforce two-factor security and prevent AAD tag divergence.
+    #[allow(clippy::too_many_arguments)]
     pub fn enable_hardware2fa_with_password(
         &mut self,
         password: &str,
@@ -249,8 +250,8 @@ impl VaultManager {
             .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", path.display(), e)))?;
         let vault_file = VaultFile::from_bytes(&file_bytes)?;
 
-        if let Some(ref hw_headers) = vault_file.hardware2fa {
-            if let Some(first) = hw_headers.first() {
+        if let Some(ref hw_headers) = vault_file.hardware2fa
+            && let Some(first) = hw_headers.first() {
                 return Ok(Some(Hardware2FaChallengeInfo {
                     enabled: true,
                     protocol: first.protocol,
@@ -259,7 +260,6 @@ impl VaultManager {
                     credential_id: first.credential_id.clone(),
                 }));
             }
-        }
         Ok(None)
     }
 
@@ -270,21 +270,19 @@ impl VaultManager {
 
     /// Check if Hardware 2FA is enrolled inside a .vdb file at path.
     pub fn is_hardware2fa_enabled_file(vault_path: &Path) -> bool {
-        if let Ok(file_bytes) = fs::read(vault_path) {
-            if let Ok(vault_file) = VaultFile::from_bytes(&file_bytes) {
+        if let Ok(file_bytes) = fs::read(vault_path)
+            && let Ok(vault_file) = VaultFile::from_bytes(&file_bytes) {
                 return vault_file.hardware2fa.is_some();
             }
-        }
         false
     }
 
     /// Check whether biometric unlock is enrolled inside a .vdb file at path.
     pub fn is_biometric_enabled_file(vault_path: &Path) -> bool {
-        if let Ok(file_bytes) = fs::read(vault_path) {
-            if let Ok(vault_file) = VaultFile::from_bytes(&file_bytes) {
+        if let Ok(file_bytes) = fs::read(vault_path)
+            && let Ok(vault_file) = VaultFile::from_bytes(&file_bytes) {
                 return vault_file.biometric.is_some();
             }
-        }
         false
     }
 }

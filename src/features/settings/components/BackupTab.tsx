@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { FolderInput, AlertTriangle, FileSpreadsheet, FileCode, Smartphone, Laptop, Plus, Unlink, Loader2, RefreshCw, X } from 'lucide-react';
 import { useAuth } from '@/features/auth';
 import { useEntries } from '@/features/entries';
@@ -142,7 +143,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         setIpPromptDevice(device);
       } else {
         addToast({
-          message: t('settings.sync_failed', { name: device.name || 'Enhet', err: errMsg }),
+          message: t('settings.sync_failed', { name: device.name || t('common.device') || 'Device', err: errMsg }),
           type: 'error',
         });
       }
@@ -153,14 +154,14 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
 
   const handleRevokeDevice = async (device: TrustedDevice) => {
     if (!backend) return;
-    const confirmMsg = t('settings.revoke_device_confirm', { name: device.name || 'Enhet' });
+    const confirmMsg = t('settings.revoke_device_confirm', { name: device.name || t('common.device') || 'Device' });
     if (!confirm(confirmMsg)) return;
 
     setRevokingDeviceId(device.id);
     try {
       await backend.revokeTrustedDevice(device.id);
       addToast({
-        message: t('settings.revoke_device_success', { name: device.name || 'Enhet' }),
+        message: t('settings.revoke_device_success', { name: device.name || t('common.device') || 'Device' }),
         type: 'success',
       });
       await loadTrustedDevices();
@@ -299,10 +300,11 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                         webdavPass || null
                       );
                       await Promise.all([refreshEntries(), refreshTags()]);
-                      if (stats.entries_added > 0 || stats.entries_updated > 0 || stats.trash_merged > 0) {
+                      const count = stats.entries_added + stats.entries_updated + stats.trash_merged;
+                      if (count > 0) {
                         addToast({
-                          message: `Cloud sync merged: ${stats.entries_added} added, ${stats.entries_updated} updated, ${stats.trash_merged} trashed.`,
-                          type: 'success'
+                          message: t('settings.sync_success_count', { count }),
+                          type: 'success',
                         });
                       } else {
                         addToast({ message: t('settings.upload_backup'), type: 'success' });
@@ -334,7 +336,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                       setIsRestoringWebdav(false);
                     }
                   }}
-                  className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] text-amber-500 cursor-pointer disabled:opacity-50"
+                  className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
                 >
                   {isRestoringWebdav ? `${t('settings.download_restore')}...` : t('settings.download_restore')}
                 </button>
@@ -357,14 +359,14 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-semibold tracking-wider text-[var(--text-tertiary)] uppercase">
-              {trustedDevices.length > 0 ? `${trustedDevices.length} ${trustedDevices.length === 1 ? 'enhet' : 'enheter'}` : ''}
+              {trustedDevices.length > 0 ? (trustedDevices.length === 1 ? (t('settings.devices_count_singular') || '1 device') : (t('settings.devices_count', { count: trustedDevices.length }) || `${trustedDevices.length} devices`)) : ''}
             </span>
             {isLoadingDevices && <Loader2 size={12} className="animate-spin text-[var(--text-tertiary)]" />}
           </div>
           <button
             type="button"
             onClick={() => setShowPairingWizard(true)}
-            className="flex h-8 items-center gap-1.5 rounded-md bg-[var(--text-primary)] px-3 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer shrink-0"
+            className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer shrink-0"
           >
             <Plus size={14} />
             <span>{t('settings.pair_new_device_btn')}</span>
@@ -374,9 +376,9 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         {/* Devices List or Empty State */}
         <div className="space-y-2">
           {uniqueDevices.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-elevated)] p-6 text-center">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-tertiary)] mb-2.5">
-                <Smartphone size={20} />
+            <div className="flex flex-col items-center justify-center rounded-[3px] border border-dashed border-[var(--border)] bg-[var(--bg-elevated)] p-6 text-center">
+              <div className="flex h-9 w-9 items-center justify-center rounded-[3px] bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-secondary)] mb-2.5">
+                <Smartphone size={18} />
               </div>
               <h4 className="text-[13px] font-semibold text-[var(--text-primary)]">
                 {t('settings.no_trusted_devices')}
@@ -404,24 +406,24 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               return (
                 <div
                   key={device.id}
-                  className="flex items-center justify-between gap-3.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3 transition-colors hover:border-[var(--border-subtle)]"
+                  className="flex items-center justify-between gap-3.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 transition-colors hover:border-[var(--border-subtle)]"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
-                      {isMobile ? <Smartphone size={18} /> : <Laptop size={18} />}
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]">
+                      {isMobile ? <Smartphone size={16} /> : <Laptop size={16} />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
-                          {device.name || 'Enhet'}
+                        <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
+                          {device.name || t('common.device') || 'Device'}
                         </span>
                         {device.os && (
-                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-secondary)]">
+                          <span className="inline-flex items-center rounded-[2px] px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-secondary)]">
                             {device.os}
                           </span>
                         )}
                         {isCurrentDevice && (
-                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-tertiary)]">
+                          <span className="inline-flex items-center rounded-[2px] px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-tertiary)]">
                             {t('settings.this_device')}
                           </span>
                         )}
@@ -442,7 +444,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                         type="button"
                         disabled={syncingDeviceId === device.id}
                         onClick={() => handleSyncDevice(device)}
-                        className="flex h-7.5 items-center gap-1.5 rounded-md bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                        className="flex h-7.5 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-2.5 text-[11px] font-medium text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
                         title={t('settings.sync_now_btn')}
                       >
                         <RefreshCw size={12} className={syncingDeviceId === device.id ? 'animate-spin' : ''} />
@@ -453,7 +455,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                         type="button"
                         disabled={revokingDeviceId === device.id}
                         onClick={() => handleRevokeDevice(device)}
-                        className="flex h-7.5 items-center gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-2.5 text-[11px] font-medium text-rose-500 hover:bg-rose-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                        className="flex h-7.5 items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
                         title={t('settings.revoke_device_btn')}
                       >
                         <Unlink size={12} />
@@ -497,8 +499,8 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         <p className="mb-2.5 text-[12px] text-[var(--text-secondary)]">
           {t('settings.manual_export_desc')}
         </p>
-        <div className="mb-3 flex items-center gap-2 rounded-[3px] border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-500 font-medium">
-          <AlertTriangle size={14} className="shrink-0" />
+        <div className="mb-3 flex items-center gap-2 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-[11px] text-[var(--text-secondary)] font-medium">
+          <AlertTriangle size={14} className="shrink-0 text-[var(--text-tertiary)]" />
           <span>{t('settings.export_warning')}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -579,70 +581,83 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       />
 
       {/* Manual IP Prompt Modal for 1-Click Sync */}
-      {ipPromptDevice && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none p-4"
-          onClick={() => setIpPromptDevice(null)}
-        >
+      <AnimatePresence>
+        {ipPromptDevice && (
           <div
-            className="w-full max-w-[400px] rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl overflow-hidden flex flex-col p-5"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] select-none p-4"
+            onClick={() => setIpPromptDevice(null)}
           >
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3 mb-3">
-              <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
-                {t('settings.prompt_device_ip_title', { name: ipPromptDevice.name || 'Device' })}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIpPromptDevice(null)}
-                className="rounded-md p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <p className="text-[12px] text-[var(--text-secondary)] mb-3 leading-relaxed">
-              {t('settings.prompt_device_ip_desc')}
-            </p>
-            <div className="flex flex-col gap-1.5 mb-4">
-              <input
-                type="text"
-                autoFocus
-                value={promptIpValue}
-                onChange={(e) => setPromptIpValue(formatIpv4Input(e.target.value, promptIpValue))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && promptIpValue.trim()) {
-                    handleSyncDevice(ipPromptDevice, promptIpValue);
-                  }
-                }}
-                placeholder={t('settings.prompt_device_ip_ph')}
-                className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 font-mono text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-              />
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIpPromptDevice(null)}
-                className="h-8 rounded-md px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] cursor-pointer"
-              >
-                {t('common.cancel') || 'Cancel'}
-              </button>
-              <button
-                type="button"
-                disabled={!promptIpValue.trim() || isPromptSubmitting}
-                onClick={async () => {
-                  setIsPromptSubmitting(true);
-                  await handleSyncDevice(ipPromptDevice, promptIpValue);
-                  setIsPromptSubmitting(false);
-                }}
-                className="flex h-8 items-center gap-1.5 rounded-md bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-              >
-                {isPromptSubmitting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                <span>{t('settings.connect_btn')}</span>
-              </button>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 4 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+              className="w-full max-w-[400px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]">
+                    <RefreshCw size={13} />
+                  </div>
+                  <div>
+                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
+                      {t('settings.prompt_device_ip_title', { name: ipPromptDevice.name || 'Device' })}
+                    </h3>
+                    <p className="text-[11px] text-[var(--text-tertiary)]">
+                      {t('settings.prompt_device_ip_desc')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIpPromptDevice(null)}
+                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="p-4 bg-[var(--bg-elevated)]">
+                <input
+                  type="text"
+                  autoFocus
+                  value={promptIpValue}
+                  onChange={(e) => setPromptIpValue(formatIpv4Input(e.target.value, promptIpValue))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && promptIpValue.trim()) {
+                      handleSyncDevice(ipPromptDevice, promptIpValue);
+                    }
+                  }}
+                  placeholder={t('settings.prompt_device_ip_ph')}
+                  className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] transition-colors placeholder:text-[var(--text-tertiary)]"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2.5 bg-[var(--bg-surface)]">
+                <button
+                  type="button"
+                  onClick={() => setIpPromptDevice(null)}
+                  className="h-7 rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
+                >
+                  {t('common.cancel') || 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  disabled={!promptIpValue.trim() || isPromptSubmitting}
+                  onClick={async () => {
+                    setIsPromptSubmitting(true);
+                    await handleSyncDevice(ipPromptDevice, promptIpValue);
+                    setIsPromptSubmitting(false);
+                  }}
+                  className="flex h-7 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3 text-[11px] font-medium text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                >
+                  {isPromptSubmitting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  <span>{t('settings.connect_btn')}</span>
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

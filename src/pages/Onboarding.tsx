@@ -103,8 +103,8 @@ export default function Onboarding() {
 
           <img
             src="/white-logo.png"
-            alt="Yntra Vault Logo"
-            className="mb-3 h-20 w-20 rounded-xl object-cover"
+            alt="Yntra Vault"
+            className="mb-3 h-20 w-20 rounded-[3px] object-cover invert dark:invert-0"
           />
           <h1 className="text-[20px] font-semibold tracking-tight text-[var(--text-primary)]">
             {t('onboarding.welcome_title')}

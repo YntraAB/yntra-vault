@@ -100,33 +100,35 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
           onClick={onClose}
         >
           <motion.div
-            initial={{ scale: 0.96, opacity: 0 }}
+            initial={{ scale: 0.97, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }}
+            exit={{ scale: 0.97, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="w-full max-w-[380px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+            className="w-full max-w-[380px] mx-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
               <div className="flex items-center gap-2.5">
-                <TagIcon size={16} className="text-[var(--text-primary)]" />
-                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
+                  <TagIcon size={14} />
+                </div>
+                <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
                   {t('tags.new_tag')}
                 </h2>
               </div>
               <ActionTooltip content={t('common.close')}>
                 <button
                   onClick={onClose}
-                  className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
-                  <X size={16} />
+                  <X size={15} />
                 </button>
               </ActionTooltip>
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3.5 p-4">
               {/* Name */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">
@@ -141,7 +143,7 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
                     setError('');
                   }}
                   placeholder={t('tag.name_ph')}
-                  className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+                  className={`h-8 w-full rounded-[3px] border bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors ${
                     error ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
                   }`}
                 />
@@ -161,25 +163,25 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
                       key={c}
                       type="button"
                       onClick={() => setColor(c)}
-                      className="flex h-7 w-7 items-center justify-center rounded-full transition-transform hover:scale-110"
+                      className="flex h-6 w-6 items-center justify-center rounded-[3px] transition-transform hover:scale-105 cursor-pointer"
                       style={{
                         backgroundColor: c,
-                        boxShadow: color === c ? `0 0 0 2px var(--bg-base), 0 0 0 4px ${c}` : 'none',
+                        boxShadow: color === c ? '0 0 0 2px var(--bg-base), 0 0 0 3px var(--border-focus)' : 'none',
                       }}
                     >
-                      {color === c && <Check size={14} className="text-white" />}
+                      {color === c && <Check size={13} className="text-white" />}
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Preview */}
-              <div className="flex items-center gap-2 rounded-md bg-[var(--bg-elevated)] px-3 py-2.5">
+              <div className="flex items-center gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2">
                 <span
-                  className="h-2 w-2 rounded-full"
+                  className="h-2 w-2 rounded-[2px]"
                   style={{ backgroundColor: color }}
                 />
-                <span className="text-[13px] font-medium text-[var(--text-primary)]">
+                <span className="text-[12px] font-medium text-[var(--text-primary)]">
                   {name.trim() || t('tags.tag_name')}
                 </span>
                 <span className="ml-auto text-[11px] tabular-nums text-[var(--text-tertiary)]">
@@ -188,17 +190,17 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
               </div>
 
               {/* Actions */}
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex justify-end gap-2 pt-1 border-t border-[var(--border-subtle)] mt-1">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                  className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
                   {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-4 text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90"
+                  className="flex h-8 items-center gap-2 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 cursor-pointer"
                 >
                   {t('sidebar.new_tag')}
                 </button>

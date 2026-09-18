@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -29,6 +30,7 @@ export interface GeneralTabProps {
 }
 
 export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps) {
+  const navigate = useNavigate();
   const { currentVault, lockVault, setCurrentVault } = useAuth();
   const { settings, updateSettings } = useSettings();
   const { addToast } = useToast();
@@ -274,7 +276,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
             localStorage.removeItem('yntra-vault-setup-completed');
             lockVault();
             setCurrentVault(null);
-            window.location.href = '/#/setup';
+            navigate('/setup');
           }}
           className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
         >

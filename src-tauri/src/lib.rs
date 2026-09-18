@@ -209,20 +209,19 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             {
                 // Enforce Window Capture Protection (WDA_EXCLUDEFROMCAPTURE) against screen scraping malware
-                if let Some(window) = app.get_webview_window("main") {
-                    if let Ok(hwnd) = window.hwnd() {
+                if let Some(window) = app.get_webview_window("main")
+                    && let Ok(hwnd) = window.hwnd() {
                         let _ = yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, true);
                     }
-                }
             }
 
             #[cfg(not(mobile))]
             {
                 // Setup System Tray Menu & Icon on desktop platforms
-                if let Ok(quit_i) = MenuItem::with_id(app, "quit", "Close", true, None::<&str>) {
+                if let Ok(quit_i) = MenuItem::with_id(app, "quit", "Close", true, None::<&str>)
 
-                    if let Ok(show_i) = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>) {
-                        if let Ok(menu) = Menu::with_items(app, &[&show_i, &quit_i]) {
+                    && let Ok(show_i) = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)
+                        && let Ok(menu) = Menu::with_items(app, &[&show_i, &quit_i]) {
                             let mut tray_builder = TrayIconBuilder::new()
                                 .menu(&menu)
                                 .show_menu_on_left_click(false);
@@ -247,8 +246,8 @@ pub fn run() {
                                     }
                                 })
                                 .on_tray_icon_event(|tray, event| {
-                                    if let TrayIconEvent::Click { button, button_state, .. } = event {
-                                        if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                                    if let TrayIconEvent::Click { button, button_state, .. } = event
+                                        && button == MouseButton::Left && button_state == MouseButtonState::Up {
                                             let app = tray.app_handle();
                                             if let Some(window) = app.get_webview_window("main") {
                                                 if window.is_visible().unwrap_or(false) {
@@ -259,20 +258,16 @@ pub fn run() {
                                                 }
                                             }
                                         }
-                                    }
                                 })
                                 .build(app);
                         }
-                    }
-                }
 
                 // Conditionally show main window based on launch argument
                 let is_minimized = std::env::args().any(|arg| arg == "--minimized");
-                if !is_minimized {
-                    if let Some(window) = app.get_webview_window("main") {
+                if !is_minimized
+                    && let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
                     }
-                }
             }
 
             let app_handle = app.handle().clone();
@@ -282,10 +277,10 @@ pub fn run() {
                     let state = app_handle.state::<AppState>();
 
                     // Aggressive Auto-Lock: Check OS Workstation Lock / Screen Lock / Sleep
-                    if state.lock_on_system_lock.load(std::sync::atomic::Ordering::Relaxed) {
-                        if yntra_vault_core::crypto::is_workstation_locked() {
-                            if let Ok(mut vault) = state.vault.lock() {
-                                if vault.is_some() {
+                    if state.lock_on_system_lock.load(std::sync::atomic::Ordering::Relaxed)
+                        && yntra_vault_core::crypto::is_workstation_locked()
+                            && let Ok(mut vault) = state.vault.lock()
+                                && vault.is_some() {
                                     if let Some(ref mut manager) = *vault {
                                         manager.lock();
                                     }
@@ -293,9 +288,6 @@ pub fn run() {
                                     let _ = yntra_vault_core::crypto::clear_clipboard();
                                     let _ = app_handle.emit("vault-locked", ());
                                 }
-                            }
-                        }
-                    }
 
                     // Extract path while holding lock briefly, then check filesystem outside lock
                     let vault_path_str = {
@@ -303,10 +295,7 @@ pub fn run() {
                             Ok(v) => v,
                             Err(_) => continue,
                         };
-                        match *vault {
-                            Some(ref manager) => Some(manager.info().path),
-                            None => None,
-                        }
+                        (*vault).as_ref().map(|manager| manager.info().path)
                     };
                     // Filesystem check outside mutex scope
                     if let Some(path_str) = vault_path_str {

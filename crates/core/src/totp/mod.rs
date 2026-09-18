@@ -20,18 +20,15 @@ type HmacSha512 = Hmac<Sha512>;
 
 /// TOTP algorithm selection.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default)]
 pub enum TotpAlgorithm {
+    #[default]
     SHA1,
     SHA256,
     SHA512,
     Steam,
 }
 
-impl Default for TotpAlgorithm {
-    fn default() -> Self {
-        TotpAlgorithm::SHA1
-    }
-}
 
 /// Full TOTP configuration for an account.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -96,14 +93,13 @@ pub fn generate_totp_at(config: &TotpConfig, timestamp: u64) -> crate::Result<To
     }
 
     // Auto-detect and parse URI format if passed directly in secret
-    if trimmed_secret.starts_with("steam://") || trimmed_secret.starts_with("otpauth://") {
-        if let Ok(mut parsed) = parse_otpauth_uri(trimmed_secret) {
+    if (trimmed_secret.starts_with("steam://") || trimmed_secret.starts_with("otpauth://"))
+        && let Ok(mut parsed) = parse_otpauth_uri(trimmed_secret) {
             if config.algorithm != TotpAlgorithm::SHA1 && parsed.algorithm == TotpAlgorithm::SHA1 {
                 parsed.algorithm = config.algorithm;
             }
             return generate_totp_at(&parsed, timestamp);
         }
-    }
 
     // Decode the base32 secret
     let secret_upper = trimmed_secret.to_uppercase().replace(" ", "");

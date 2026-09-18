@@ -332,14 +332,13 @@ fn try_set_element_value_via_uia(
     text: &str,
 ) -> bool {
     unsafe {
-        if let Ok(pattern_obj) = focused.GetCurrentPattern(UIA_ValuePatternId) {
-            if let Ok(val_pattern) = pattern_obj.cast::<IUIAutomationValuePattern>() {
+        if let Ok(pattern_obj) = focused.GetCurrentPattern(UIA_ValuePatternId)
+            && let Ok(val_pattern) = pattern_obj.cast::<IUIAutomationValuePattern>() {
                 let bstr = BSTR::from(text);
                 if val_pattern.SetValue(&bstr).is_ok() {
                     return true;
                 }
             }
-        }
     }
     false
 }
@@ -445,13 +444,11 @@ fn inject_secret_guarded(
 
 fn get_element_value(focused: &IUIAutomationElement) -> String {
     unsafe {
-        if let Ok(pattern_obj) = focused.GetCurrentPattern(UIA_ValuePatternId) {
-            if let Ok(val_pattern) = pattern_obj.cast::<IUIAutomationValuePattern>() {
-                if let Ok(bstr_val) = val_pattern.CurrentValue() {
+        if let Ok(pattern_obj) = focused.GetCurrentPattern(UIA_ValuePatternId)
+            && let Ok(val_pattern) = pattern_obj.cast::<IUIAutomationValuePattern>()
+                && let Ok(bstr_val) = val_pattern.CurrentValue() {
                     return bstr_val.to_string();
                 }
-            }
-        }
     }
     String::new()
 }
@@ -512,6 +509,51 @@ fn is_known_web_browser(proc_name: &str) -> bool {
         || p.contains("iexplore")
 }
 
+fn extract_domain_token(url: &str) -> String {
+    let parsed = match reqwest::Url::parse(url) {
+        Ok(p) => p,
+        Err(_) => return String::new(),
+    };
+    let host = match parsed.host_str() {
+        Some(h) => h.to_lowercase(),
+        None => return String::new(),
+    };
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.is_empty() {
+        return String::new();
+    }
+    if parts.len() == 1 {
+        return parts[0].to_string();
+    }
+
+    // Check multi-part second-level domain (e.g. .co.uk, .com.au, .co.jp)
+    if parts.len() >= 3 {
+        let last_two = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+        let is_multipart = matches!(
+            last_two.as_str(),
+            "co.uk" | "gov.uk" | "ac.uk" | "org.uk" | "net.uk" |
+            "com.au" | "net.au" | "org.au" | "edu.au" | "gov.au" |
+            "co.jp" | "ne.jp" | "or.jp" | "go.jp" | "ac.jp" |
+            "com.br" | "net.br" | "org.br" | "gov.br" |
+            "co.nz" | "net.nz" | "org.nz" | "gov.nz" |
+            "com.tr" | "org.tr" | "net.tr" | "gov.tr" |
+            "com.sg" | "edu.sg" | "gov.sg" |
+            "com.mx" | "org.mx" | "gob.mx"
+        ) || (parts[parts.len() - 1].len() == 2 && parts[parts.len() - 2].len() <= 3);
+
+        if is_multipart && parts.len() >= 3 {
+            return parts[parts.len() - 3].to_string();
+        }
+    }
+
+    // Standard single-part TLD (e.g. .com, .org, .net, .io, .se, .dev)
+    if parts.len() >= 2 {
+        return parts[parts.len() - 2].to_string();
+    }
+
+    parts[0].to_string()
+}
+
 fn is_verified_login_context(
     hwnd: HWND,
     title: &str,
@@ -547,28 +589,36 @@ fn is_verified_login_context(
 
     // 2. Strict Domain & Process Executable Anti-Phishing Guard
     if !target_domain_token.is_empty() {
+        let is_token_match = |text: &str| -> bool {
+            if text.contains(target_domain_token) {
+                return true;
+            }
+            if target_domain_token == "steampowered" && text.contains("steam") {
+                return true;
+            }
+            false
+        };
+
         if is_browser {
             // Browser window MUST contain the verified domain token in its title bar snippet
             // E.g., "Sign in to GitHub · GitHub - Google Chrome" contains "github" -> Verified.
-            // A phishing window titled "Sign In - Google Chrome" does NOT contain "github" -> Rejected!
-            if !title_lower.contains(target_domain_token) {
+            if !is_token_match(&title_lower) {
                 return false;
             }
         } else {
             // Native Application window: Process name or window title MUST match domain token
             // E.g., "discord.exe" matches "discord" -> Verified.
             // Spoofed app "phish.exe" with title "Sign In - Google Chrome" -> Rejected!
-            if !proc_name.contains(target_domain_token) && !title_lower.contains(target_domain_token) {
+            if !is_token_match(&proc_name) && !is_token_match(&title_lower) {
                 return false;
             }
         }
     } else if !is_browser {
         // If no URL is provided AND process is not a recognized browser, require an explicit password field
-        if let Ok(win_el) = unsafe { automation.ElementFromHandle(hwnd) } {
-            if !active_window_has_password_field(automation, &win_el) {
+        if let Ok(win_el) = unsafe { automation.ElementFromHandle(hwnd) }
+            && !active_window_has_password_field(automation, &win_el) {
                 return false;
             }
-        }
     }
 
     true
@@ -644,7 +694,7 @@ fn is_likely_login_url(url: &str) -> bool {
 }
 
 fn is_likely_login_text(text: &str) -> bool {
-    let t = text.to_lowercase().replace(' ', "").replace('-', "");
+    let t = text.to_lowercase().replace([' ', '-'], "");
     t == "login"
         || t == "signin"
         || t == "loggain"
@@ -783,30 +833,26 @@ fn try_click_login_link(
 
             if is_login_btn {
                 unsafe {
-                    if let Ok(pattern_obj) = el.GetCurrentPattern(UIA_InvokePatternId) {
-                        if let Ok(invoke_pattern) = pattern_obj.cast::<IUIAutomationInvokePattern>() {
-                            if invoke_pattern.Invoke().is_ok() {
+                    if let Ok(pattern_obj) = el.GetCurrentPattern(UIA_InvokePatternId)
+                        && let Ok(invoke_pattern) = pattern_obj.cast::<IUIAutomationInvokePattern>()
+                            && invoke_pattern.Invoke().is_ok() {
                                 return true;
                             }
-                        }
-                    }
                 }
             }
         }
         false
     };
 
-    if let Some(buttons) = find_targeted_elements(automation, window_el, UIA_ButtonControlTypeId) {
-        if check_array(buttons) {
+    if let Some(buttons) = find_targeted_elements(automation, window_el, UIA_ButtonControlTypeId)
+        && check_array(buttons) {
             return true;
         }
-    }
 
-    if let Some(links) = find_targeted_elements(automation, window_el, UIA_HyperlinkControlTypeId) {
-        if check_array(links) {
+    if let Some(links) = find_targeted_elements(automation, window_el, UIA_HyperlinkControlTypeId)
+        && check_array(links) {
             return true;
         }
-    }
 
     false
 }
@@ -1051,16 +1097,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
         };
 
         std::thread::spawn(move || {
-            let domain_token = if let Ok(parsed) = reqwest::Url::parse(&normalized_url) {
-                parsed.host_str()
-                    .unwrap_or("")
-                    .split('.')
-                    .find(|&s| s != "www" && s != "com" && s != "org" && s != "net" && s != "io" && s != "se" && s != "co" && s != "uk")
-                    .unwrap_or("")
-                    .to_string()
-            } else {
-                String::new()
-            };
+            let domain_token = extract_domain_token(&normalized_url);
 
             // Use normalized target URL directly without network probing (enforces offline invariant)
             let target_url = if !normalized_url.is_empty() && launch_browser {
@@ -1081,17 +1118,8 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                     let hwnd = GetForegroundWindow();
                     let is_already_active = if !hwnd.is_invalid() {
                         let title = get_window_title(hwnd).to_lowercase();
-                        let domain_token = if let Ok(parsed) = reqwest::Url::parse(&target_url) {
-                            parsed.host_str()
-                                .unwrap_or("")
-                                .split('.')
-                                .find(|&s| s != "www" && s != "com" && s != "org" && s != "net" && s != "io" && s != "se")
-                                .unwrap_or("")
-                                .to_string()
-                        } else {
-                            String::new()
-                        };
-                        !domain_token.is_empty() && title.contains(&domain_token)
+                        let active_token = extract_domain_token(&target_url);
+                        !active_token.is_empty() && title.contains(&active_token)
                     } else {
                         false
                     };
@@ -1115,8 +1143,8 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                         // Fallback: If we landed on a homepage (e.g. because resolver fell back to original base URL)
                         // and no input is focused, try to find and click a login link.
                         let hwnd = GetForegroundWindow();
-                        if !hwnd.is_invalid() {
-                            if let Ok(window_el) = automation.ElementFromHandle(hwnd) {
+                        if !hwnd.is_invalid()
+                            && let Ok(window_el) = automation.ElementFromHandle(hwnd) {
                                 let mut already_on_login_form = false;
                                 if let Ok(focused) = automation.GetFocusedElement() {
                                     let class_name = focused.CurrentClassName()
@@ -1136,19 +1164,16 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                                 }
 
                                 // SOTA: Prevent clicking login links if we are already on a login page containing a password field
-                                if !already_on_login_form {
-                                    if active_window_has_password_field(&automation, &window_el) {
+                                if !already_on_login_form
+                                    && active_window_has_password_field(&automation, &window_el) {
                                         already_on_login_form = true;
                                     }
-                                }
 
-                                if !already_on_login_form {
-                                    if try_click_login_link(&automation, &window_el) {
+                                if !already_on_login_form
+                                    && try_click_login_link(&automation, &window_el) {
                                         let _ = poll_until_login_context_ready(&automation, &domain_token, 3000);
                                     }
-                                }
                             }
-                        }
                     }
                 }
 
@@ -1235,11 +1260,10 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                         if loop_counter % 5 == 0 {
                             focus_attempts += 1;
                             let hwnd = GetForegroundWindow();
-                            if !hwnd.is_invalid() {
-                                if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
+                            if !hwnd.is_invalid()
+                                && let Ok(win_el) = automation.ElementFromHandle(hwnd) {
                                     let _ = try_focus_username_field(&automation, &win_el);
                                 }
-                            }
                         }
                     }
 
@@ -1253,15 +1277,13 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                             false
                         };
 
-                        if on_register {
-                            if let Ok(win_el) = automation.ElementFromHandle(hwnd) {
-                                if try_click_login_link(&automation, &win_el) {
+                        if on_register
+                            && let Ok(win_el) = automation.ElementFromHandle(hwnd)
+                                && try_click_login_link(&automation, &win_el) {
                                     let _ = poll_until_login_context_ready(&automation, &domain_token, 3000);
                                     last_focused_element_id = None; // Reset focus to re-evaluate on redirected page
                                     continue;
                                 }
-                            }
-                        }
 
                         let is_totp_field = name.contains("code")
                             || name.contains("token")
@@ -1396,3 +1418,21 @@ impl AutotypeDriver for WindowsAutotypeDriver {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_domain_token_subdomains() {
+        assert_eq!(extract_domain_token("https://store.steampowered.com/"), "steampowered");
+        assert_eq!(extract_domain_token("https://steamcommunity.com/login"), "steamcommunity");
+        assert_eq!(extract_domain_token("https://login.microsoftonline.com/"), "microsoftonline");
+        assert_eq!(extract_domain_token("https://accounts.google.com/signin"), "google");
+        assert_eq!(extract_domain_token("https://auth.bank.co.uk/"), "bank");
+        assert_eq!(extract_domain_token("https://portal.service.com.au/app"), "service");
+        assert_eq!(extract_domain_token("https://github.com/login"), "github");
+        assert_eq!(extract_domain_token("https://sub.domain.se"), "domain");
+    }
+}
+

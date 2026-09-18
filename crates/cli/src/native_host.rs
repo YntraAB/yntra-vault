@@ -137,14 +137,13 @@ pub fn install_native_host_manifest(browser: &str) -> Result<()> {
             };
 
             let status = Command::new("reg")
-                .args(&["add", reg_path, "/ve", "/t", "REG_SZ", "/d", &manifest_path.to_string_lossy(), "/f"])
+                .args(["add", reg_path, "/ve", "/t", "REG_SZ", "/d", &manifest_path.to_string_lossy(), "/f"])
                 .status();
 
-            if let Ok(st) = status {
-                if st.success() {
+            if let Ok(st) = status
+                && st.success() {
                     println!("{} Registered Windows Registry key for {}", "✓".green().bold(), b.cyan());
                 }
-            }
         }
     }
 

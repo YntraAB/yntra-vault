@@ -72,14 +72,21 @@ pub fn check_vault_file_exists(path: String) -> bool {
 
 #[tauri::command]
 pub fn show_in_explorer(path: String) -> Result<(), String> {
+    let target_path = Path::new(&path);
+    if !target_path.exists() {
+        return Err(format!("File or directory does not exist: {}", path));
+    }
+
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        Command::new("explorer")
-            .arg("/select,")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        let mut cmd = Command::new("explorer");
+        if target_path.is_dir() {
+            cmd.arg(path.replace('/', "\\"));
+        } else {
+            cmd.arg(format!("/select,{}", path.replace('/', "\\")));
+        }
+        cmd.spawn().map_err(|e| e.to_string())?;
         Ok(())
     }
     #[cfg(target_os = "macos")]
@@ -95,12 +102,15 @@ pub fn show_in_explorer(path: String) -> Result<(), String> {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         use std::process::Command;
-        if let Some(parent) = Path::new(&path).parent() {
-            Command::new("xdg-open")
-                .arg(parent)
-                .spawn()
-                .map_err(|e| e.to_string())?;
-        }
+        let dest = if target_path.is_dir() {
+            target_path
+        } else {
+            target_path.parent().unwrap_or(target_path)
+        };
+        Command::new("xdg-open")
+            .arg(dest)
+            .spawn()
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 }
@@ -124,12 +134,10 @@ pub async fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
             std::env::var("ProgramData").ok().map(|p| format!("{}\\Microsoft\\Windows\\Start Menu\\Programs", p)),
         ];
 
-        for dir_opt in dirs_to_scan {
-            if let Some(dir) = dir_opt {
-                let path = Path::new(&dir);
-                if path.exists() {
-                    scan_dir_for_apps(path, &mut apps, 0);
-                }
+        for dir in dirs_to_scan.into_iter().flatten() {
+            let path = Path::new(&dir);
+            if path.exists() {
+                scan_dir_for_apps(path, &mut apps, 0);
             }
         }
     }
@@ -156,7 +164,7 @@ pub async fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
         }
     }
 
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps.dedup_by(|a, b| a.name.to_lowercase() == b.name.to_lowercase() || a.path == b.path);
 
     Ok(apps)

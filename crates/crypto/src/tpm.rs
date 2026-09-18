@@ -189,11 +189,11 @@ pub mod windows_hdw {
     /// Encrypt using Windows App-Bound DPAPI with domain-separated entropy and UI forbidden.
     pub fn dpapi_encrypt(data: &[u8]) -> crate::Result<Vec<u8>> {
         let mut entropy = get_app_bound_entropy();
-        let mut data_in = CRYPT_INTEGER_BLOB {
+        let data_in = CRYPT_INTEGER_BLOB {
             cbData: data.len() as u32,
             pbData: data.as_ptr() as *mut u8,
         };
-        let mut entropy_blob = CRYPT_INTEGER_BLOB {
+        let entropy_blob = CRYPT_INTEGER_BLOB {
             cbData: entropy.len() as u32,
             pbData: entropy.as_mut_ptr(),
         };
@@ -201,9 +201,9 @@ pub mod windows_hdw {
 
         let success = unsafe {
             CryptProtectData(
-                &mut data_in,
+                &data_in,
                 None,
-                Some(&mut entropy_blob),
+                Some(&entropy_blob),
                 None,
                 None,
                 CRYPTPROTECT_UI_FORBIDDEN,
@@ -229,11 +229,11 @@ pub mod windows_hdw {
     /// falling back to legacy NULL entropy for seamless backward compatibility.
     pub fn dpapi_decrypt(data: &[u8]) -> crate::Result<Vec<u8>> {
         let mut entropy = get_app_bound_entropy();
-        let mut data_in = CRYPT_INTEGER_BLOB {
+        let data_in = CRYPT_INTEGER_BLOB {
             cbData: data.len() as u32,
             pbData: data.as_ptr() as *mut u8,
         };
-        let mut entropy_blob = CRYPT_INTEGER_BLOB {
+        let entropy_blob = CRYPT_INTEGER_BLOB {
             cbData: entropy.len() as u32,
             pbData: entropy.as_mut_ptr(),
         };
@@ -242,9 +242,9 @@ pub mod windows_hdw {
         // 1. Primary: Attempt App-Bound unprotect with entropy
         let success = unsafe {
             CryptUnprotectData(
-                &mut data_in,
+                &data_in,
                 None,
-                Some(&mut entropy_blob),
+                Some(&entropy_blob),
                 None,
                 None,
                 CRYPTPROTECT_UI_FORBIDDEN,
@@ -267,7 +267,7 @@ pub mod windows_hdw {
         let mut data_out_legacy = CRYPT_INTEGER_BLOB::default();
         let legacy_success = unsafe {
             CryptUnprotectData(
-                &mut data_in,
+                &data_in,
                 None,
                 None,
                 None,
@@ -391,34 +391,55 @@ fn linux_get_or_create_wrap_key() -> crate::Result<[u8; 32]> {
     let _ = std::fs::set_permissions(&key_dir, dir_perms);
 
     let key_path = key_dir.join("wrap-key.bin");
-    if key_path.exists() {
-        let data = std::fs::read(&key_path)
-            .map_err(|e| crate::error::VaultError::DecryptionError(format!("Read wrap key: {}", e)))?;
-        if data.len() == 32 {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&data);
-            return Ok(key);
+
+    // 1. Try reading existing wrap key directly without TOCTOU exists() check
+    match std::fs::read(&key_path) {
+        Ok(data) => {
+            if data.len() == 32 {
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&data);
+                return Ok(key);
+            }
+            return Err(crate::error::VaultError::DecryptionError("Corrupted wrap key file".into()));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Key file does not exist yet; proceed to atomic creation below
+        }
+        Err(e) => {
+            return Err(crate::error::VaultError::DecryptionError(format!("Read wrap key: {}", e)));
         }
     }
 
-    // Generate new key and create file atomically with restricted permissions (0600)
+    // 2. Generate new key and create file atomically with restricted permissions (0600)
     let mut key = [0u8; 32];
     rand::rng().fill(&mut key);
 
-    let mut file = std::fs::OpenOptions::new()
+    match std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&key_path)
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Open wrap key with 0600: {}", e)))?;
-
-    file.write_all(&key)
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Write wrap key: {}", e)))?;
-    file.flush()
-        .map_err(|e| crate::error::VaultError::EncryptionError(format!("Flush wrap key: {}", e)))?;
-
-    Ok(key)
+    {
+        Ok(mut file) => {
+            file.write_all(&key)
+                .map_err(|e| crate::error::VaultError::EncryptionError(format!("Write wrap key: {}", e)))?;
+            file.flush()
+                .map_err(|e| crate::error::VaultError::EncryptionError(format!("Flush wrap key: {}", e)))?;
+            Ok(key)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let data = std::fs::read(&key_path)
+                .map_err(|e| crate::error::VaultError::DecryptionError(format!("Read wrap key: {}", e)))?;
+            if data.len() == 32 {
+                let mut existing_key = [0u8; 32];
+                existing_key.copy_from_slice(&data);
+                Ok(existing_key)
+            } else {
+                Err(crate::error::VaultError::DecryptionError("Corrupted wrap key file".into()))
+            }
+        }
+        Err(e) => Err(crate::error::VaultError::EncryptionError(format!("Open wrap key with 0600: {}", e))),
+    }
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -649,7 +670,7 @@ mod tests {
         let encrypted = windows_hdw::dpapi_encrypt(secret).unwrap();
 
         // Simulate an infostealer running in userland attempting blind CryptUnprotectData without entropy
-        let mut data_in = CRYPT_INTEGER_BLOB {
+        let data_in = CRYPT_INTEGER_BLOB {
             cbData: encrypted.len() as u32,
             pbData: encrypted.as_ptr() as *mut u8,
         };
@@ -657,7 +678,7 @@ mod tests {
 
         let blind_decrypt_result = unsafe {
             CryptUnprotectData(
-                &mut data_in,
+                &data_in,
                 None,
                 None, // Infostealers pass NULL entropy
                 None,
@@ -683,14 +704,14 @@ mod tests {
         let legacy_secret = b"legacy-v1-unbound-secret-data";
 
         // Create a legacy DPAPI blob without entropy (as created by earlier versions)
-        let mut data_in = CRYPT_INTEGER_BLOB {
+        let data_in = CRYPT_INTEGER_BLOB {
             cbData: legacy_secret.len() as u32,
             pbData: legacy_secret.as_ptr() as *mut u8,
         };
         let mut data_out = CRYPT_INTEGER_BLOB::default();
 
         let legacy_blob = unsafe {
-            let res = CryptProtectData(&mut data_in, None, None, None, None, 0, &mut data_out);
+            let res = CryptProtectData(&data_in, None, None, None, None, 0, &mut data_out);
             assert!(res.is_ok(), "Legacy protect should succeed");
             let bytes = std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize).to_vec();
             let _ = LocalFree(windows::Win32::Foundation::HLOCAL(data_out.pbData as *mut _));
@@ -710,14 +731,14 @@ mod tests {
 
         let legacy_secret = b"legacy-untagged-envelope-payload";
 
-        let mut data_in = CRYPT_INTEGER_BLOB {
+        let data_in = CRYPT_INTEGER_BLOB {
             cbData: legacy_secret.len() as u32,
             pbData: legacy_secret.as_ptr() as *mut u8,
         };
         let mut data_out = CRYPT_INTEGER_BLOB::default();
 
         let raw_dpapi_blob = unsafe {
-            let res = CryptProtectData(&mut data_in, None, None, None, None, 0, &mut data_out);
+            let res = CryptProtectData(&data_in, None, None, None, None, 0, &mut data_out);
             assert!(res.is_ok());
             let bytes = std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize).to_vec();
             let _ = LocalFree(windows::Win32::Foundation::HLOCAL(data_out.pbData as *mut _));

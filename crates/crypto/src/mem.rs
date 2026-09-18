@@ -135,7 +135,7 @@ impl LockedBuffer {
     /// Create a new pre-locked, page-aligned zeroed buffer protected by leading and trailing guard pages.
     pub fn zeroed(len: usize) -> Self {
         let page_size = 4096;
-        let payload_pages = if len == 0 { 1 } else { (len + page_size - 1) / page_size };
+        let payload_pages = if len == 0 { 1 } else { len.div_ceil(page_size) };
         let payload_alloc_size = payload_pages * page_size;
         let total_pages = 1 + payload_pages + 1; // Leading guard + payload pages + trailing guard
         let total_size = total_pages * page_size;

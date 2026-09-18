@@ -53,6 +53,12 @@ pub fn read_key_file_safely(path: &Path) -> crate::Result<crate::crypto::LockedB
     let meta = fs::metadata(path).map_err(|e| {
         VaultError::VaultNotFound(format!("Key file error ({}): {}", path.display(), e))
     })?;
+    if meta.len() == 0 {
+        return Err(VaultError::InvalidFormat(format!(
+            "Key file ({}) is empty (0 bytes)",
+            path.display()
+        )));
+    }
     if meta.len() > MAX_KEY_FILE_SIZE {
         return Err(VaultError::InvalidFormat(format!(
             "Key file ({}) size ({} bytes) exceeds maximum allowed limit of 32 MB",

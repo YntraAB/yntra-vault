@@ -63,8 +63,52 @@ export function getTOTPRemainingSeconds(period: number = 30): number {
   return remaining === period ? period : remaining;
 }
 
+/**
+ * Determines whether a string target represents a desktop application path or application protocol,
+ * rather than a web URL or domain.
+ */
+export function isAppPath(target?: string | null): boolean {
+  if (!target || !target.trim()) return false;
+  const clean = target.trim();
+
+  // Explicit web schemes are always web URLs, never application paths
+  if (/^https?:\/\//i.test(clean)) {
+    return false;
+  }
+
+  // Custom application protocol schemes (e.g. steam://, discord://, spotify://)
+  if (/^[a-zA-Z0-9_-]+:\/\//i.test(clean)) {
+    return !/^(https?|ftp|file|javascript|data|blob):\/\//i.test(clean);
+  }
+
+  // Local Windows file/drive paths or UNC network shares
+  if (/^[a-zA-Z]:[\\/]|^\\\\/i.test(clean)) {
+    return true;
+  }
+
+  // Executable file extensions (Windows & cross-platform)
+  if (/\.(exe|bat|cmd|msi|lnk)$/i.test(clean)) {
+    return true;
+  }
+
+  // Unix/macOS application bundles and binary paths
+  if (clean.startsWith('/') && (clean.includes('.app') || /^\/(Applications|usr|opt|bin|sbin)/i.test(clean))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Determines whether a string target represents a web URL or domain.
+ */
+export function isWebUrl(target?: string | null): boolean {
+  if (!target || !target.trim()) return false;
+  return !isAppPath(target);
+}
+
 export function getDomain(url: string): string | null {
-  if (!url) return null;
+  if (!url || isAppPath(url)) return null;
   let clean = url.trim().toLowerCase();
   if (!/^https?:\/\//i.test(clean)) {
     clean = 'https://' + clean;
@@ -80,6 +124,17 @@ export function getDomain(url: string): string | null {
 export function deriveTitle(title: string, url?: string, email?: string, username?: string): string {
   if (title && title.trim().length > 0) {
     return title.trim();
+  }
+  if (url && isAppPath(url)) {
+    const clean = url.trim();
+    if (/^[a-zA-Z0-9_-]+:\/\//.test(clean)) {
+      const scheme = clean.split('://')[0];
+      return scheme.charAt(0).toUpperCase() + scheme.slice(1);
+    }
+    const name = clean.split(/[\\/]/).pop()?.replace(/\.(exe|app|bat|cmd|msi|lnk)$/i, '');
+    if (name) {
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    }
   }
   const domain = getDomain(url || '');
   if (domain) {
@@ -123,6 +178,17 @@ export async function openExternalUrl(target: string): Promise<void> {
   if (!target || !target.trim()) return;
   const cleanTarget = target.trim();
 
+  // If it's an application path or custom protocol (e.g. steam://, spotify://, C:\Program Files\...)
+  if (isAppPath(cleanTarget)) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(cleanTarget);
+    } catch {
+      // Ignore failure if running outside desktop shell
+    }
+    return;
+  }
+
   // Reject local file/drive paths, UNC network shares, and root paths
   if (
     /^[a-zA-Z]:[\\/]/.test(cleanTarget) ||
@@ -134,7 +200,7 @@ export async function openExternalUrl(target: string): Promise<void> {
 
   let formatted = cleanTarget;
   if (!/^https?:\/\//i.test(cleanTarget)) {
-    // Reject any custom protocol schemes (e.g. file:, javascript:, ms-msdt:)
+    // Reject any dangerous custom protocol schemes (e.g. file:, javascript:, ms-msdt:)
     if (/^[a-z0-9+.-]+:/i.test(cleanTarget)) {
       return;
     }

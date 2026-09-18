@@ -40,12 +40,11 @@ pub async fn execute_secret_injection(
             if let Some((k, v)) = line_trim.split_once('=') {
                 let key = k.trim().to_string();
                 let mut val = v.trim().trim_matches('"').trim_matches('\'').to_string();
-                if val.contains("yntra://") {
-                    if let Some(resolved) = resolve_yntra_secret_uri(vault_path, password.clone(), keyfile, &val).await? {
+                if val.contains("yntra://")
+                    && let Some(resolved) = resolve_yntra_secret_uri(vault_path, password.clone(), keyfile, &val).await? {
                         val = resolved;
                         replacements_count += 1;
                     }
-                }
                 env_vars.push((key, val));
             }
         }
@@ -53,12 +52,11 @@ pub async fn execute_secret_injection(
 
     // Process system environment variables
     for (_key, val) in env_vars.iter_mut() {
-        if val.contains("yntra://") {
-            if let Some(resolved) = resolve_yntra_secret_uri(vault_path, password.clone(), keyfile, val).await? {
+        if val.contains("yntra://")
+            && let Some(resolved) = resolve_yntra_secret_uri(vault_path, password.clone(), keyfile, val).await? {
                 *val = resolved;
                 replacements_count += 1;
             }
-        }
     }
 
     if replacements_count > 0 {

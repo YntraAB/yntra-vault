@@ -184,6 +184,9 @@ struct InitArgs {
     /// Name for the new vault metadata
     #[arg(short, long, default_value = "Main Vault")]
     name: String,
+    /// Automatically generate and bind a new 32-byte cryptographic keyfile at the specified path
+    #[arg(long, value_name = "PATH")]
+    gen_keyfile: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -295,6 +298,9 @@ struct TotpArgs {
 
 #[derive(Args)]
 struct GenerateArgs {
+    /// Generate a cryptographically secure 32-byte raw keyfile at specified path
+    #[arg(long, value_name = "PATH")]
+    keyfile: Option<PathBuf>,
     /// Password length (character count)
     #[arg(short, long, default_value = "24")]
     length: usize,
@@ -611,11 +617,10 @@ fn acquire_password(provided: Option<String>) -> Result<Zeroizing<String>> {
         );
         return Ok(Zeroizing::new(pass));
     }
-    if let Ok(env_pass) = env::var("YNTRA_PASSWORD") {
-        if !env_pass.is_empty() {
+    if let Ok(env_pass) = env::var("YNTRA_PASSWORD")
+        && !env_pass.is_empty() {
             return Ok(Zeroizing::new(env_pass));
         }
-    }
     let input = prompt_password("Enter Master Password: ")
         .map_err(|e| VaultError::InvalidFormat(format!("Terminal input error: {}", e)))?;
     if input.is_empty() {
@@ -677,6 +682,16 @@ fn handle_init(vault_path: &Path, args: &InitArgs, password: Option<String>, key
     if vault_path.exists() {
         return Err(VaultError::VaultAlreadyExists(format!("Vault file already exists at: {}", vault_path.display())));
     }
+    
+    // Determine effective keyfile path: explicit keyfile or newly generated keyfile
+    let effective_keyfile = if let Some(gen_path) = &args.gen_keyfile {
+        VaultManager::generate_key_file(gen_path)?;
+        println!("{} Generated 32-byte keyfile at {}", "✓".green().bold(), gen_path.display().to_string().yellow());
+        Some(gen_path.as_path())
+    } else {
+        keyfile
+    };
+
     println!("{} Creating new vault at {}", "→".blue().bold(), vault_path.display().to_string().yellow());
     let pass = acquire_password(password.clone())?;
     
@@ -688,7 +703,7 @@ fn handle_init(vault_path: &Path, args: &InitArgs, password: Option<String>, key
         }
     }
 
-    let _manager = VaultManager::create_with_keyfile(&args.name, &pass, keyfile, vault_path)?;
+    let _manager = VaultManager::create_with_keyfile(&args.name, &pass, effective_keyfile, vault_path)?;
     println!("{} Vault created successfully!", "✓".green().bold());
     Ok(())
 }
@@ -812,8 +827,8 @@ async fn handle_get(
     };
 
     if args.copy {
-        let mut secret = Zeroizing::new(entry.password.clone());
-        let _ = copy_to_clipboard_defended(&mut secret, true, None);
+        let secret = Zeroizing::new(entry.password.clone());
+        let _ = copy_to_clipboard_defended(&secret, true, None);
         println!("{} Password for '{}' copied to defended clipboard!", "✓".green().bold(), entry.title);
         return Ok(());
     }
@@ -978,12 +993,11 @@ async fn handle_edit(
     };
 
     // Try IPC first
-    if let Some(IpcResponse::GetEntry(existing)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await {
-        if let Some(IpcResponse::UpdateEntrySuccess) = try_ipc_request(&IpcRequest::UpdateEntry { id: existing.id, update: update.clone() }).await {
+    if let Some(IpcResponse::GetEntry(existing)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await
+        && let Some(IpcResponse::UpdateEntrySuccess) = try_ipc_request(&IpcRequest::UpdateEntry { id: existing.id, update: update.clone() }).await {
             println!("{} Entry updated via IPC session daemon!", "✓".green().bold());
             return Ok(());
         }
-    }
 
     let mut manager = open_vault(vault_path, password, keyfile)?;
     let entry_id = resolve_entry_id(&manager, &args.query)?;
@@ -1001,8 +1015,8 @@ async fn handle_delete(
     keyfile: Option<&Path>,
 ) -> Result<()> {
     // Try IPC first
-    if let Some(IpcResponse::GetEntry(existing)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await {
-        if let Some(IpcResponse::DeleteEntrySuccess) = try_ipc_request(&IpcRequest::DeleteEntry { id: existing.id, permanent: args.permanent }).await {
+    if let Some(IpcResponse::GetEntry(existing)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await
+        && let Some(IpcResponse::DeleteEntrySuccess) = try_ipc_request(&IpcRequest::DeleteEntry { id: existing.id, permanent: args.permanent }).await {
             if args.permanent {
                 println!("{} Entry permanently deleted via IPC daemon!", "✓".red().bold());
             } else {
@@ -1010,7 +1024,6 @@ async fn handle_delete(
             }
             return Ok(());
         }
-    }
 
     let mut manager = open_vault(vault_path, password, keyfile)?;
     let entry_id = resolve_entry_id(&manager, &args.query)?;
@@ -1056,8 +1069,8 @@ async fn handle_totp(
     let code = generate_totp(&config)?;
     
     if args.copy {
-        let mut secret = Zeroizing::new(code.code.clone());
-        let _ = copy_to_clipboard_defended(&mut secret, true, None);
+        let secret = Zeroizing::new(code.code.clone());
+        let _ = copy_to_clipboard_defended(&secret, true, None);
         println!("{} TOTP code [{}] copied to defended clipboard!", "✓".green().bold(), code.code);
     } else {
         if code.seconds_remaining < 5 {
@@ -1071,6 +1084,12 @@ async fn handle_totp(
 }
 
 fn handle_generate(args: &GenerateArgs) -> Result<()> {
+    if let Some(kf_path) = &args.keyfile {
+        VaultManager::generate_key_file(kf_path)?;
+        println!("{} Generated 32-byte cryptographic keyfile at {}", "✓".green().bold(), kf_path.display().to_string().yellow());
+        return Ok(());
+    }
+
     let password = if args.diceware {
         let opts = GeneratorOptions {
             mode: GeneratorMode::Diceware,
@@ -1094,8 +1113,8 @@ fn handle_generate(args: &GenerateArgs) -> Result<()> {
     let score = analyze_password(&password);
 
     if args.copy {
-        let mut secret = Zeroizing::new(password.clone());
-        let _ = copy_to_clipboard_defended(&mut secret, true, None);
+        let secret = Zeroizing::new(password.clone());
+        let _ = copy_to_clipboard_defended(&secret, true, None);
         println!("{} Generated password copied to defended clipboard!", "✓".green().bold());
     } else {
         println!("{} Generated Password: {}", "🔑".bold(), password.bold().green());

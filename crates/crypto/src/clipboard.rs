@@ -61,10 +61,8 @@ pub fn copy_to_clipboard_defended(text: &str, is_sensitive: bool, clear_after_se
             *lock = Some(ClipboardState { tx_id, hash });
         }
 
-        if let Some(secs) = clear_after_secs {
-            if secs > 0 {
-                schedule_auto_clear(tx_id, hash, secs);
-            }
+        if let Some(secs) = clear_after_secs.filter(|&secs| secs > 0) {
+            schedule_auto_clear(tx_id, hash, secs);
         }
     }
 
@@ -117,10 +115,10 @@ pub fn schedule_auto_clear(tx_id: u64, hash: u64, timeout_secs: u64) {
             // Re-check current clipboard content hash before clearing to avoid wiping user's manual copy
             if is_clipboard_matching_hash(hash) {
                 let _ = clear_clipboard();
-            } else if let Ok(mut lock) = ACTIVE_CLIPBOARD_STATE.lock() {
-                if *lock == Some(ClipboardState { tx_id, hash }) {
-                    *lock = None;
-                }
+            } else if let Ok(mut lock) = ACTIVE_CLIPBOARD_STATE.lock()
+                && *lock == Some(ClipboardState { tx_id, hash })
+            {
+                *lock = None;
             }
         }
     });
@@ -192,40 +190,40 @@ fn copy_windows_defended(text: &str) -> crate::Result<()> {
 
         // 1. History Bypass Flag: CanIncludeInClipboardHistory = 0
         let fmt_history = RegisterClipboardFormatW(w!("CanIncludeInClipboardHistory"));
-        if fmt_history != 0 {
-            if let Ok(h_flag) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>()) {
-                let p_flag = GlobalLock(h_flag) as *mut u32;
-                if !p_flag.is_null() {
-                    std::ptr::write(p_flag, 0u32);
-                    let _ = GlobalUnlock(h_flag);
-                    let _ = SetClipboardData(fmt_history, HANDLE(h_flag.0));
-                }
+        if fmt_history != 0
+            && let Ok(h_flag) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>())
+        {
+            let p_flag = GlobalLock(h_flag) as *mut u32;
+            if !p_flag.is_null() {
+                std::ptr::write(p_flag, 0u32);
+                let _ = GlobalUnlock(h_flag);
+                let _ = SetClipboardData(fmt_history, HANDLE(h_flag.0));
             }
         }
 
         // 2. Cloud Clipboard Bypass Flag: CanUploadToCloudClipboard = 0
         let fmt_cloud = RegisterClipboardFormatW(w!("CanUploadToCloudClipboard"));
-        if fmt_cloud != 0 {
-            if let Ok(h_flag) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>()) {
-                let p_flag = GlobalLock(h_flag) as *mut u32;
-                if !p_flag.is_null() {
-                    std::ptr::write(p_flag, 0u32);
-                    let _ = GlobalUnlock(h_flag);
-                    let _ = SetClipboardData(fmt_cloud, HANDLE(h_flag.0));
-                }
+        if fmt_cloud != 0
+            && let Ok(h_flag) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>())
+        {
+            let p_flag = GlobalLock(h_flag) as *mut u32;
+            if !p_flag.is_null() {
+                std::ptr::write(p_flag, 0u32);
+                let _ = GlobalUnlock(h_flag);
+                let _ = SetClipboardData(fmt_cloud, HANDLE(h_flag.0));
             }
         }
 
         // 3. Clipboard Monitor Exclusion Flag: ExcludeClipboardContentFromMonitorProcessing = 1
         let fmt_exclude = RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing"));
-        if fmt_exclude != 0 {
-            if let Ok(h_flag) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>()) {
-                let p_flag = GlobalLock(h_flag) as *mut u32;
-                if !p_flag.is_null() {
-                    std::ptr::write(p_flag, 1u32);
-                    let _ = GlobalUnlock(h_flag);
-                    let _ = SetClipboardData(fmt_exclude, HANDLE(h_flag.0));
-                }
+        if fmt_exclude != 0
+            && let Ok(h_flag) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>())
+        {
+            let p_flag = GlobalLock(h_flag) as *mut u32;
+            if !p_flag.is_null() {
+                std::ptr::write(p_flag, 1u32);
+                let _ = GlobalUnlock(h_flag);
+                let _ = SetClipboardData(fmt_exclude, HANDLE(h_flag.0));
             }
         }
 

@@ -108,35 +108,35 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
           onClick={onClose}
         >
           <motion.div
-            initial={{ scale: 0.96, opacity: 0 }}
+            initial={{ scale: 0.97, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }}
+            exit={{ scale: 0.97, opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="flex max-h-[90vh] w-full max-w-[520px] mx-3 flex-col rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+            className="flex max-h-[90vh] w-full max-w-[520px] mx-3 flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
               <div className="flex items-center gap-2.5">
-                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">
+                <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
                   Bulk Edit Credentials
                 </h2>
-                <span className="flex h-5.5 items-center justify-center rounded-full bg-[var(--accent-primary)]/15 px-2.5 text-[11px] font-semibold text-[var(--accent-primary)]">
-                  {selectedIds.length} entries selected
+                <span className="flex h-5 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 text-[10.5px] font-medium text-[var(--text-secondary)]">
+                  {selectedIds.length} selected
                 </span>
               </div>
               <button
                 onClick={onClose}
-                className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
               >
-                <X size={16} />
+                <X size={15} />
               </button>
             </div>
 
             {/* Form Content */}
-            <div className="flex flex-col gap-4 overflow-y-auto p-5 flex-1 min-h-0">
+            <div className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0">
               {/* Title Card */}
-              <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+              <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <label htmlFor="bulk-title-check" className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)] cursor-pointer">
                     <Type size={14} className="text-[var(--text-tertiary)]" />
@@ -149,7 +149,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                       id="bulk-title-check"
                       checked={applyTitle}
                       onChange={(e) => setApplyTitle(e.target.checked)}
-                      className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent-primary)] focus:ring-0 cursor-pointer"
+                      className="h-3.5 w-3.5 rounded-[2px] border-[var(--border)] text-[var(--text-primary)] focus:ring-0 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -159,13 +159,13 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                     placeholder={t('bulk.enter_title')}
                     value={titleValue}
                     onChange={(e) => setTitleValue(e.target.value)}
-                    className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                    className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                   />
                 )}
               </div>
 
               {/* Username / Email Card */}
-              <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+              <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <label htmlFor="bulk-user-check" className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)] cursor-pointer">
                     <User size={14} className="text-[var(--text-tertiary)]" />
@@ -178,7 +178,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                       id="bulk-user-check"
                       checked={applyUsername}
                       onChange={(e) => setApplyUsername(e.target.checked)}
-                      className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent-primary)] focus:ring-0 cursor-pointer"
+                      className="h-3.5 w-3.5 rounded-[2px] border-[var(--border)] text-[var(--text-primary)] focus:ring-0 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -188,20 +188,20 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                     placeholder={t('entry_modal.username_placeholder')}
                     value={usernameValue}
                     onChange={(e) => setUsernameValue(e.target.value)}
-                    className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                    className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                   />
                 )}
               </div>
 
               {/* Tags Card */}
-              <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+              <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                 <label className="flex items-center justify-between text-[12px] font-medium text-[var(--text-secondary)]">
                   <span className="flex items-center gap-2">
                     <TagIcon size={14} className="text-[var(--text-tertiary)]" />
                     {t('sidebar.tags')}
                   </span>
                 </label>
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
                   {allTags.map((tag) => {
                     const action = tagActions[tag.name] || 'keep';
                     return (
@@ -209,16 +209,16 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                         key={tag.name}
                         type="button"
                         onClick={() => cycleTagAction(tag.name)}
-                        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
+                        className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
                           action === 'add'
-                            ? 'bg-[var(--accent)] text-[var(--bg-base)] shadow-2xs font-semibold'
+                            ? 'bg-[var(--text-primary)] text-[var(--bg-base)] shadow-2xs font-semibold'
                             : action === 'remove'
-                            ? 'bg-red-500/20 text-red-400 line-through'
-                            : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                            ? 'bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-tertiary)] line-through'
+                            : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)]'
                         }`}
                       >
-                        {action === 'add' && <Plus size={12} />}
-                        {action === 'remove' && <Minus size={12} />}
+                        {action === 'add' && <Plus size={11} />}
+                        {action === 'remove' && <Minus size={11} />}
                         <span>{tag.name}</span>
                       </button>
                     );
@@ -227,22 +227,22 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
               </div>
 
               {/* Favorite & Pin Card */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="flex flex-col gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                   <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
-                    <Star size={14} className="text-[var(--text-tertiary)]" />
+                    <Star size={13} className="text-[var(--text-tertiary)]" />
                     {t('entry.favorites')}
                   </span>
-                  <div className="flex items-center gap-1 pt-1">
+                  <div className="flex items-center gap-1 pt-0.5">
                     {(['keep', 'set-true', 'set-false'] as const).map((mode) => (
                       <button
                         key={mode}
                         type="button"
                         onClick={() => setFavAction(mode)}
-                        className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-all ${
+                        className={`flex-1 rounded-[3px] py-1 text-[11px] font-medium transition-all cursor-pointer border ${
                           favAction === mode
-                            ? 'bg-[var(--accent)] text-[var(--bg-base)] shadow-2xs font-semibold'
-                            : 'bg-[var(--bg-elevated)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                            ? 'border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-base)] font-semibold'
+                            : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
                         }`}
                       >
                         {mode === 'keep' ? t('common.keep') : mode === 'set-true' ? t('common.yes') : t('common.no')}
@@ -251,21 +251,21 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+                <div className="flex flex-col gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                   <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
-                    <Pin size={14} className="text-[var(--text-tertiary)]" />
+                    <Pin size={13} className="text-[var(--text-tertiary)]" />
                     {t('entry.pinned')}
                   </span>
-                  <div className="flex items-center gap-1 pt-1">
+                  <div className="flex items-center gap-1 pt-0.5">
                     {(['keep', 'set-true', 'set-false'] as const).map((mode) => (
                       <button
                         key={mode}
                         type="button"
                         onClick={() => setPinAction(mode)}
-                        className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-all ${
+                        className={`flex-1 rounded-[3px] py-1 text-[11px] font-medium transition-all cursor-pointer border ${
                           pinAction === mode
-                            ? 'bg-[var(--accent)] text-[var(--bg-base)] shadow-2xs font-semibold'
-                            : 'bg-[var(--bg-elevated)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                            ? 'border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-base)] font-semibold'
+                            : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
                         }`}
                       >
                         {mode === 'keep' ? t('common.keep') : mode === 'set-true' ? t('common.yes') : t('common.no')}
@@ -276,7 +276,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
               </div>
 
               {/* Website URL Card */}
-              <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+              <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <label htmlFor="bulk-url-check" className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)] cursor-pointer">
                     <Globe size={14} className="text-[var(--text-tertiary)]" />
@@ -289,7 +289,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                       id="bulk-url-check"
                       checked={applyUrl}
                       onChange={(e) => setApplyUrl(e.target.checked)}
-                      className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent-primary)] focus:ring-0 cursor-pointer"
+                      className="h-3.5 w-3.5 rounded-[2px] border-[var(--border)] text-[var(--text-primary)] focus:ring-0 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -299,13 +299,13 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                     placeholder={t('entry_modal.url_app_placeholder')}
                     value={urlValue}
                     onChange={(e) => setUrlValue(e.target.value)}
-                    className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                    className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                   />
                 )}
               </div>
 
               {/* Notes Card */}
-              <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 shadow-2xs">
+              <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <label htmlFor="bulk-notes-check" className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)] cursor-pointer">
                     <FileText size={14} className="text-[var(--text-tertiary)]" />
@@ -341,7 +341,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                         id="bulk-notes-check"
                         checked={applyNotes}
                         onChange={(e) => setApplyNotes(e.target.checked)}
-                        className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent-primary)] focus:ring-0 cursor-pointer"
+                        className="h-3.5 w-3.5 rounded-[2px] border-[var(--border)] text-[var(--text-primary)] focus:ring-0 cursor-pointer"
                       />
                     </div>
                   </div>
@@ -352,18 +352,18 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                     placeholder={t('bulk.notes_placeholder')}
                     value={notesValue}
                     onChange={(e) => setNotesValue(e.target.value)}
-                    className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] p-2.5 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                    className="w-full resize-none rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-2.5 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                   />
                 )}
               </div>
 
               {/* Actions / Footer */}
-              <div className="flex justify-end border-t border-[var(--border-subtle)] pt-4 mt-2">
+              <div className="flex justify-end border-t border-[var(--border-subtle)] pt-3 mt-1">
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={onClose}
-                    className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                   >
                     {t('common.cancel')}
                   </button>
@@ -371,11 +371,11 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
                     type="button"
                     onClick={handleSave}
                     disabled={isSubmitting}
-                    className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-5 text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-50"
+                    className="flex h-8 items-center gap-2 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-50 cursor-pointer"
                   >
                     {isSubmitting ? (
                       <>
-                        <Loader2 size={14} className="animate-spin" />
+                        <Loader2 size={13} className="animate-spin" />
                         {t('common.loading')}
                       </>
                     ) : (

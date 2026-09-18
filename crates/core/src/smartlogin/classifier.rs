@@ -70,7 +70,7 @@ pub fn classify_form(
     let mut scored_inputs: Vec<ScoredField> = snapshot
         .inputs
         .iter()
-        .map(|input| score_input(input))
+        .map(score_input)
         .filter(|sf| sf.confidence > 0.10)
         .collect();
 
@@ -104,7 +104,7 @@ pub fn classify_form(
     let scored_buttons: Vec<ScoredButton> = snapshot
         .buttons
         .iter()
-        .map(|b| score_button(b))
+        .map(score_button)
         .filter(|sb| sb.confidence > 0.10)
         .collect();
 

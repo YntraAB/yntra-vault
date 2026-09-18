@@ -46,8 +46,8 @@ impl VaultManager {
         let total = self.data.entries.len();
 
         // Ephemeral keyed hash map for zero-plaintext password reuse detection
-        let mut ephemeral_key = [0u8; 32];
-        rand::rng().fill_bytes(&mut ephemeral_key);
+        let mut ephemeral_key = zeroize::Zeroizing::new([0u8; 32]);
+        rand::rng().fill_bytes(&mut *ephemeral_key);
         let mut hash_map: HashMap<[u8; 32], Vec<(Uuid, String)>> = HashMap::new();
 
         struct EntryAuditMeta {
@@ -71,11 +71,9 @@ impl VaultManager {
                 let strength = match &entry.strength_score {
                     Some(score) => score.clone(),
                     None => {
-                        let pwd_str = zeroize::Zeroizing::new(
-                            String::from_utf8(pwd_bytes.to_vec())
-                                .map_err(|e| VaultError::DecryptionError(e.to_string()))?,
-                        );
-                        crate::breach::strength::analyze_password(&pwd_str)
+                        let pwd_str = std::str::from_utf8(&pwd_bytes)
+                            .map_err(|e| VaultError::DecryptionError(e.to_string()))?;
+                        crate::breach::strength::analyze_password(pwd_str)
                     }
                 };
 
@@ -109,8 +107,8 @@ impl VaultManager {
             // Perform password strength, reuse, and age audits only if password is non-empty
             if let Some(blind_hash) = &item.blind_hash {
                 // Weak password (fallback to real-time calculation if None)
-                if let Some(score) = &item.strength {
-                    if score.level <= StrengthLevel::Weak {
+                if let Some(score) = &item.strength
+                    && score.level <= StrengthLevel::Weak {
                         weak += 1;
                         issues.push(SecurityIssue {
                             entry_id: entry.id,
@@ -123,11 +121,10 @@ impl VaultManager {
                             ),
                         });
                     }
-                }
 
                 // Reused password
-                if let Some(duplicates) = hash_map.get(blind_hash) {
-                    if duplicates.len() > 1 {
+                if let Some(duplicates) = hash_map.get(blind_hash)
+                    && duplicates.len() > 1 {
                         reused += 1;
                         let other_services: Vec<String> = duplicates
                             .iter()
@@ -142,7 +139,6 @@ impl VaultManager {
                             description: format!("Password is reused on: {}", other_services.join(", ")),
                         });
                     }
-                }
 
                 // Old password (> 90 days)
                 let age_days = (Utc::now() - entry.password_changed_at).num_days();

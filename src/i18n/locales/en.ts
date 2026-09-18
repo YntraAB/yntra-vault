@@ -19,6 +19,13 @@ export const en = {
   'common.browse': 'Browse',
   'common.required': 'Required',
   'common.download': 'Download',
+  'common.device': 'Device',
+  'common.devices': 'Devices',
+  'common.verifying': 'Verifying...',
+  'common.back': 'Back',
+  'common.next': 'Next',
+  'common.hide': 'Hide',
+  'common.show': 'Show',
 
   // Sidebar
   'sidebar.vaults': 'Vaults',
@@ -97,6 +104,11 @@ export const en = {
   'create_vault.creating': 'Creating Vault...',
   'create_vault.create_btn': 'Create Vault',
   'create_vault.err_pass_mismatch': 'Passwords do not match',
+  'create_vault.err_name_short': 'Vault name must be at least 2 characters',
+  'create_vault.err_choose_location': 'Please choose a file location',
+  'create_vault.err_pass_length': 'Master password must be at least 12 characters',
+  'create_vault.err_confirm_pass': 'Please confirm your master password',
+  'create_vault.err_keyfile_required': 'Please choose or specify a Key File location',
 
   // Password List
   'list.title': 'Passwords',
@@ -522,6 +534,10 @@ export const en = {
 
   // Change Master Password Modal
   'cmp.title': 'Change Master Password',
+  'cmp.step_current': 'Current Password',
+  'cmp.step_new': 'New Password',
+  'cmp.current_pass_desc': 'Enter your current master password to verify authorization before re-encrypting the vault.',
+  'cmp.new_pass_desc': 'Choose a strong master password of at least 12 characters. The vault will be re-encrypted with a new key.',
   'cmp.current_pass': 'Current Password',
   'cmp.current_pass_ph': 'Enter current password',
   'cmp.req_keyfile': 'Vault currently requires Key File',
@@ -533,6 +549,11 @@ export const en = {
   'cmp.req_new_keyfile': 'Require Key File for new key',
   'cmp.new_keyfile_ph': 'New .key file path',
   'cmp.changing': 'Changing...',
+  'cmp.err_enter_current': 'Enter your current password',
+  'cmp.err_current_keyfile': 'Please select current Key File',
+  'cmp.err_min_chars': 'New password must be at least 12 characters',
+  'cmp.err_confirm_pass': 'Please confirm your new password',
+  'cmp.err_new_keyfile': 'Please select or specify new Key File location',
 
   // Tag Modals
   'tag.name_ph': 'e.g. Work, Personal, Finance...',
@@ -752,6 +773,7 @@ export const en = {
   'toast.decrypted_csv_exported': 'Decrypted CSV exported successfully!',
   'toast.decrypted_json_exported': 'Decrypted JSON exported successfully!',
   'toast.shortcut_updated': 'Shortcut updated successfully',
+  'toast.shortcut_conflict': 'Shortcut saved (Conflicts with "{action}")',
   'toast.shortcuts_reset': 'Reset shortcuts to default',
   'toast.recovery_shares_generated': 'Recovery shares generated!',
   'toast.hash_reconstructed': 'Hash reconstructed successfully',
@@ -1049,6 +1071,10 @@ export const en = {
   'settings.revoke_device_confirm': 'Are you sure you want to disconnect {name}? This device will no longer be able to sync until it is re-paired with a fresh 6-digit PIN.',
   'settings.revoke_device_success': '{name} has been disconnected.',
   'settings.revoke_device_failed': 'Could not disconnect device: {err}',
+  'settings.devices_count': '{count} devices',
+  'settings.devices_count_singular': '1 device',
+  'settings.trash_items_warning': '{count} items will be permanently erased.',
+  'settings.trash_items_warning_singular': '1 item will be permanently erased.',
   'settings.auto_wifi_sync_toggle': 'Sync automatically over Wi-Fi with paired devices',
   'settings.auto_wifi_sync_desc': 'Paired devices update passwords automatically in the background without needing manual interaction.',
   'settings.syncing': 'Syncing...',
@@ -1089,6 +1115,7 @@ export const en = {
   'pairing.last_connected_ip': 'Last connected IP: {ip}',
   'pairing.enter_pin_sub': 'Enter the 6-digit PIN displayed on your other device.',
   'pairing.host_code_sub': 'Enter the code below on your other device to pair them securely.',
+  'pairing.sync_again': 'Sync Again',
   'common.done': 'Done',
 };
 

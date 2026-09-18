@@ -134,12 +134,12 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   }, [name, generateNewKeyFile]);
 
   const validate = (checkPath: string, passLength: number): string | null => {
-    if (name.trim().length < 2) return 'Vault name must be at least 2 characters';
-    if (!checkPath.trim()) return 'Please choose a file location';
-    if (passLength < 12) return 'Master password must be at least 12 characters';
-    if (!confirmPassword) return 'Please confirm your master password';
+    if (name.trim().length < 2) return t('create_vault.err_name_short') || 'Vault name must be at least 2 characters';
+    if (!checkPath.trim()) return t('create_vault.err_choose_location') || 'Please choose a file location';
+    if (passLength < 12) return t('create_vault.err_pass_length') || 'Master password must be at least 12 characters';
+    if (!confirmPassword) return t('create_vault.err_confirm_pass') || 'Please confirm your master password';
     if (password !== confirmPassword) return t('create_vault.err_pass_mismatch');
-    if (useKeyFile && !keyFilePath.trim()) return 'Please choose or specify a Key File location';
+    if (useKeyFile && !keyFilePath.trim()) return t('create_vault.err_keyfile_required') || 'Please choose or specify a Key File location';
     return null;
   };
 
@@ -161,7 +161,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
           filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
         });
         if (!selected) {
-          setError('You must choose a file location to create the vault');
+          setError(t('create_vault.err_choose_location') || 'You must choose a file location to create the vault');
           return;
         }
         targetPath = selected;
@@ -169,7 +169,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
         setPathModified(true);
       } catch (e) {
         console.error('Browse failed:', e);
-        setError('Failed to select file location');
+        setError(t('create_vault.err_choose_location') || 'Failed to select file location');
         return;
       }
     }
@@ -243,31 +243,37 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
           onClick={onClose}
         >
           <motion.div
-            initial={{ scale: 0.96, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="w-full max-w-[440px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+            initial={{ scale: 0.97, opacity: 0, y: 6 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.97, opacity: 0, y: 6 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="w-full max-w-[420px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5 bg-[var(--bg-base)]">
               <div className="flex items-center gap-2.5">
-                <Database size={18} className="text-[var(--text-primary)]" />
-                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">{t('create_vault.title')}</h2>
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
+                  <Database size={14} />
+                </div>
+                <div>
+                  <h2 className="text-[14px] font-medium text-[var(--text-primary)] leading-tight">{t('create_vault.title')}</h2>
+                  <p className="text-[11px] text-[var(--text-tertiary)]">{t('create_vault.subtitle')}</p>
+                </div>
               </div>
               <ActionTooltip content={t('common.close')}>
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
-                  <X size={16} />
+                  <X size={15} />
                 </button>
               </ActionTooltip>
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5 max-h-[80vh] overflow-y-auto">
               {/* Vault Name */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.vault_name')}</label>
@@ -277,7 +283,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t('create_vault.name_placeholder')}
-                  className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                  className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
                 />
               </div>
 
@@ -293,16 +299,16 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                       setPathModified(true);
                     }}
                     placeholder={t('create_vault.location_ph')}
-                    className="h-9 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
+                    className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
                   />
                   {isTauri() && (
                     <ActionTooltip content={t('common.browse')}>
                       <button
                         type="button"
                         onClick={handleBrowse}
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
                       >
-                        <FolderOpen size={15} />
+                        <FolderOpen size={14} />
                       </button>
                     </ActionTooltip>
                   )}
@@ -342,7 +348,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder={t('create_vault.reenter_pass_ph')}
-                  className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+                  className={`h-8 w-full rounded-[3px] border bg-[var(--bg-base)] px-2.5 font-mono text-[12px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
                     confirmPassword && confirmPassword !== password
                       ? 'border-[var(--destructive)]'
                       : 'border-[var(--border)]'
@@ -354,7 +360,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
               </div>
 
               {/* Key File Option */}
-              <div className="flex flex-col gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
+              <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
                 <label className="flex items-center gap-2 cursor-pointer select-none text-[12px] font-medium text-[var(--text-primary)]">
                   <input
                     type="checkbox"
@@ -363,7 +369,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                       setUseKeyFile(e.target.checked);
                       setError(null);
                     }}
-                    className="rounded border-[var(--border)] accent-[var(--accent)]"
+                    className="rounded-[2px] border-[var(--border)] accent-[var(--accent)]"
                   />
                   <KeyRound size={14} className="text-[var(--text-secondary)]" />
                   <span>{t('create_vault.enable_keyfile')}</span>
@@ -400,13 +406,13 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                         value={keyFilePath}
                         onChange={(e) => setKeyFilePath(e.target.value)}
                         placeholder={generateNewKeyFile ? t('create_vault.save_keyfile_ph') : t('create_vault.exist_keyfile_ph')}
-                        className="h-8 flex-1 rounded border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                       />
                       {isTauri() && (
                         <button
                           type="button"
                           onClick={handleBrowseKeyFile}
-                          className="flex h-8 items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                          className="flex h-8 items-center gap-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                         >
                           <FolderOpen size={12} />
                           {t('common.browse')}
@@ -418,8 +424,8 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
               </div>
 
               {/* Security Note */}
-              <div className="flex items-start gap-2 rounded-md bg-[var(--bg-elevated)] px-3 py-2.5">
-                <ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--text-primary)]" />
+              <div className="flex items-start gap-2 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2.5">
+                <ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--text-secondary)]" />
                 <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
                   {t('create_vault.security_note')}
                 </p>
@@ -427,28 +433,28 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
 
               {/* Error */}
               {error && (
-                <div className="rounded-md bg-red-500/10 px-3 py-2 text-[12px] text-red-400">
+                <div className="rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px] text-[var(--destructive)] font-medium">
                   {error}
                 </div>
               )}
 
               {/* Actions */}
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex justify-end gap-2 pt-1 border-t border-[var(--border-subtle)]">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                  className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
                   {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-4 text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-50"
+                  className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
                 >
                   {loading ? (
                     <>
-                      <Loader2 size={14} className="animate-spin" />
+                      <Loader2 size={13} className="animate-spin" />
                       {t('create_vault.creating')}
                     </>
                   ) : (

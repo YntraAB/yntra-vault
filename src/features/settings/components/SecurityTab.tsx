@@ -154,14 +154,14 @@ export function SecurityTab({
             hwActive || isTogglingBio
               ? 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] opacity-50 cursor-not-allowed'
               : bioActive
-                ? 'border border-[var(--destructive)] bg-transparent text-[var(--destructive)] hover:bg-[var(--destructive)]/10'
+                ? 'border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                 : 'border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
           {isTogglingBio ? (
             <>
               <Loader2 size={12} className="animate-spin" />
-              <span>Verifying...</span>
+              <span>{t('common.verifying') || 'Verifying...'}</span>
             </>
           ) : bioActive ? (
             t('common.disable')
@@ -190,7 +190,7 @@ export function SecurityTab({
               <button
                 type="button"
                 onClick={onDisableHw}
-                className="h-8 rounded-[3px] border border-[var(--destructive)] bg-transparent px-3 text-[12px] font-medium text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 {t('common.disable')}
               </button>
@@ -265,7 +265,7 @@ export function SecurityTab({
                       setIsResettingAudit(false);
                     }
                   }}
-                  className="flex items-center gap-1 h-6.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 text-[10.5px] font-medium text-[var(--text-secondary)] hover:text-red-400 hover:border-red-500/30 transition-colors cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-1 h-6.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 text-[10.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-focus)] transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isResettingAudit ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
                   {t('settings.reset_kit_button')}

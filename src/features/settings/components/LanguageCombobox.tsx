@@ -62,7 +62,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
           setSearch('');
         }}
         className={cn(
-          'flex h-10 w-full items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 outline-none ring-0 cursor-pointer select-none'
+          'flex h-10 w-full items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 outline-none ring-0 cursor-pointer select-none'
         )}
       >
         <div className="flex items-center gap-2 truncate">
@@ -76,7 +76,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-[320px] rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] shadow-xl overflow-hidden focus:outline-none focus:ring-0 outline-none ring-0 animate-in fade-in-0 zoom-in-95 select-none">
+        <div className="absolute left-0 top-full mt-1 z-50 w-[320px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] shadow-xl overflow-hidden focus:outline-none focus:ring-0 outline-none ring-0 animate-in fade-in-0 zoom-in-95 select-none">
           <div className="flex items-center px-3 border-b border-[var(--border)]">
             <Search className="mr-2 h-4 w-4 shrink-0 opacity-50 text-[var(--text-secondary)]" />
             <input
@@ -107,7 +107,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
                         setOpen(false);
                       }}
                       className={cn(
-                        'w-full flex items-center justify-between px-3 py-2 text-sm rounded-md cursor-pointer transition-colors text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
+                        'w-full flex items-center justify-between px-3 py-2 text-sm rounded-[3px] cursor-pointer transition-colors text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
                         isSelected && 'bg-[var(--accent-bg)] font-medium text-[var(--accent)]'
                       )}
                     >

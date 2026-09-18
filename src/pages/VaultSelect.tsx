@@ -71,7 +71,7 @@ export default function VaultSelect() {
     };
 
     initVaults();
-  }, []);
+  }, [manualSelect, navigate, setCurrentVault, setIsLocked]);
 
   const handleSelect = (vault: Vault) => {
     setCurrentVault(vault);
@@ -120,12 +120,12 @@ export default function VaultSelect() {
       className="flex h-dvh w-dvw items-center justify-center bg-[var(--bg-base)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] overflow-y-auto select-none"
     >
       <div className="w-full max-w-[420px] py-6">
-        {/* Header */}
-        <div className="flex flex-col items-center">
+        {/* Logo and App Title */}
+        <div className="flex flex-col items-center select-none">
           <img
             src="/white-logo.png"
-            alt="Yntra Vault Logo"
-            className="h-24 w-24 rounded-xl object-cover"
+            alt="Yntra Vault"
+            className="h-20 w-20 rounded-[3px] object-cover invert dark:invert-0"
           />
           <h1 className="mt-4 text-[20px] font-semibold tracking-tight text-[var(--text-primary)]">
             {t('vault_select.title')}
@@ -133,14 +133,14 @@ export default function VaultSelect() {
         </div>
 
         {!isTauri() && (
-          <div className="mt-6 flex flex-col gap-2 rounded-[3px] border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] text-amber-400">
-            <div className="flex items-center gap-2 font-medium">
-              <AlertTriangle size={14} className="shrink-0 animate-pulse" />
+          <div className="mt-6 flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 text-[12px] text-[var(--text-secondary)]">
+            <div className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
+              <AlertTriangle size={14} className="shrink-0 text-[var(--text-secondary)]" />
               <span>{t('vault_select.web_warning_title')}</span>
             </div>
-            <p className="text-[11px] leading-relaxed text-amber-500/80 dark:text-amber-400/80">
+            <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
               {t('vault_select.web_warning_desc')}
-              <code className="mt-1.5 block rounded border border-amber-500/20 bg-black/30 px-2 py-1 font-mono text-[10px] text-amber-300 select-all">
+              <code className="mt-1.5 block rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-1 font-mono text-[10px] text-[var(--text-primary)] select-all">
                 bun tauri dev
               </code>
             </p>
@@ -182,7 +182,7 @@ export default function VaultSelect() {
                         </span>
                         {missingVaults.has(vault.id) && (
                           <ActionTooltip content={t('vault_select.file_not_found')}>
-                            <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-400 border border-red-500/20">
+                            <span className="inline-flex items-center gap-1 rounded-[3px] bg-[var(--bg-base)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-secondary)] border border-[var(--border)]">
                               <AlertTriangle size={10} />
                               {t('vault_select.file_not_found')}
                             </span>
@@ -199,7 +199,7 @@ export default function VaultSelect() {
                         e.stopPropagation();
                         removeRecent(vault.id);
                       }}
-                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-[3px] text-[var(--text-tertiary)] hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-[3px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -212,7 +212,7 @@ export default function VaultSelect() {
 
         {/* Empty State when no vaults are opened yet */}
         {recentVaults.length === 0 && (
-          <div className="mt-8 mb-2 flex flex-col items-center justify-center rounded-[6px] border border-dashed border-[var(--border)] p-6 text-center bg-[var(--bg-elevated)]/30 select-none">
+          <div className="mt-8 mb-2 flex flex-col items-center justify-center rounded-[3px] border border-dashed border-[var(--border)] p-6 text-center bg-[var(--bg-elevated)]/30 select-none">
             <Database size={26} className="text-[var(--text-tertiary)] mb-2 opacity-70" />
             <p className="text-[13px] font-medium text-[var(--text-primary)]">
               {t('vault_select.no_recent_title') || 'No Vault Open'}

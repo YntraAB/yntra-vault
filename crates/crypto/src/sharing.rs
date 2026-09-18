@@ -12,8 +12,8 @@ fn get_tables() -> &'static ([u8; 256], [u8; 256]) {
         let mut exp = [0u8; 256];
         let mut log = [0u8; 256];
         let mut val = 1u8;
-        for i in 0..255 {
-            exp[i] = val;
+        for (i, exp_entry) in exp.iter_mut().take(255).enumerate() {
+            *exp_entry = val;
             log[val as usize] = i as u8;
 
             // xtime: multiply by 2 in GF(256), reducing by 0x11b if overflow
@@ -23,7 +23,7 @@ fn get_tables() -> &'static ([u8; 256], [u8; 256]) {
                 val << 1
             };
             // Multiply by 3: val*3 = val*2 + val (addition is XOR in GF(256))
-            val = doubled ^ val;
+            val ^= doubled;
         }
         exp[255] = exp[0];
         (exp, log)
@@ -133,7 +133,7 @@ pub fn parse_share(share_str: &str) -> crate::Result<(u8, Vec<u8>)> {
         crate::error::VaultError::InvalidFormat("Invalid share coordinate".into())
     })?;
 
-    if coord < 1 || coord > 3 {
+    if !(1..=3).contains(&coord) {
         return Err(crate::error::VaultError::InvalidFormat(
             "Share coordinate must be between 1 and 3".into(),
         ));

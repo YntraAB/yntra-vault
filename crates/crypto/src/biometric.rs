@@ -98,11 +98,10 @@ mod win_hello {
                         &windows::Foundation::IAsyncOperation::<UserConsentVerificationResult>::IID,
                         &mut op as *mut _ as _,
                     );
-                    if hr.is_ok() && op.is_some() {
-                        op.unwrap()
-                    } else {
-                        UserConsentVerifier::RequestVerificationAsync(&msg)
-                            .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?
+                    match (hr.is_ok(), op) {
+                        (true, Some(op_val)) => op_val,
+                        _ => UserConsentVerifier::RequestVerificationAsync(&msg)
+                            .map_err(|e| VaultError::BiometricHardwareError(format!("Windows Hello request failed: {}", e)))?,
                     }
                 },
                 Err(_) => {

@@ -107,7 +107,9 @@ pub struct EntryPreview {
 
 /// Pre-built entry templates for common account types.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default)]
 pub enum EntryType {
+    #[default]
     Login,
     CreditCard,
     Identity,
@@ -119,11 +121,6 @@ pub enum EntryType {
     Custom,
 }
 
-impl Default for EntryType {
-    fn default() -> Self {
-        EntryType::Login
-    }
-}
 
 /// Custom field with type information.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -166,8 +163,10 @@ pub const MAX_PASSWORD_HISTORY: usize = 10;
 // ─── Breach Detection Types ────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default)]
 pub enum BreachStatus {
     /// Not yet checked
+    #[default]
     Unknown,
     /// Currently checking
     Checking,
@@ -182,11 +181,6 @@ pub enum BreachStatus {
     Error { message: String },
 }
 
-impl Default for BreachStatus {
-    fn default() -> Self {
-        BreachStatus::Unknown
-    }
-}
 
 // ─── Password Strength Types ───────────────────────────────────────────
 

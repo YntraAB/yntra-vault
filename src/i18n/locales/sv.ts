@@ -19,6 +19,13 @@ export const sv = {
   'common.browse': 'Bläddra',
   'common.required': 'Obligatoriskt',
   'common.download': 'Ladda ner',
+  'common.device': 'Enhet',
+  'common.devices': 'Enheter',
+  'common.verifying': 'Verifierar...',
+  'common.back': 'Tillbaka',
+  'common.next': 'Nästa',
+  'common.hide': 'Dölj',
+  'common.show': 'Visa',
 
   // Sidebar
   'sidebar.vaults': 'Valv',
@@ -74,6 +81,11 @@ export const sv = {
   'create_vault.creating': 'Skapar valv...',
   'create_vault.create_btn': 'Skapa valv',
   'create_vault.err_pass_mismatch': 'Lösenorden matchar inte',
+  'create_vault.err_name_short': 'Valvnamnet måste vara minst 2 tecken',
+  'create_vault.err_choose_location': 'Välj en plats att spara valvet på',
+  'create_vault.err_pass_length': 'Huvudlösenordet måste vara minst 12 tecken',
+  'create_vault.err_confirm_pass': 'Bekräfta ditt huvudlösenord',
+  'create_vault.err_keyfile_required': 'Välj eller ange en sökväg för nyckelfilen',
 
   // Password List
   'list.title': 'Lösenord',
@@ -129,7 +141,7 @@ export const sv = {
   'detail.run_smart_login': 'Kör Smart Login',
   'detail.username': 'Användarnamn',
   'detail.password': 'Lösenord',
-  'detail.url': 'Webbplats-URL',
+  'detail.url': 'Webbplats-URL / Programsökväg',
   'detail.email': 'E-post',
   'detail.notes': 'Anteckningar',
   'detail.totp': 'TOTP 2FA-kod',
@@ -483,6 +495,10 @@ export const sv = {
 
   // Change Master Password Modal
   'cmp.title': 'Ändra huvudlösenord',
+  'cmp.step_current': 'Nuvarande lösenord',
+  'cmp.step_new': 'Nytt lösenord',
+  'cmp.current_pass_desc': 'Ange ditt nuvarande huvudlösenord för att verifiera din identitet innan krypteringsnycklarna byts ut.',
+  'cmp.new_pass_desc': 'Välj ett starkt huvudlösenord på minst 12 tecken. Valvet krypteras om med en ny nyckel.',
   'cmp.current_pass': 'Nuvarande lösenord',
   'cmp.current_pass_ph': 'Ange nuvarande lösenord',
   'cmp.req_keyfile': 'Valvet kräver för närvarande en nyckelfil',
@@ -494,6 +510,11 @@ export const sv = {
   'cmp.req_new_keyfile': 'Kräv nyckelfil för ny nyckel',
   'cmp.new_keyfile_ph': 'Ny .key-filsökväg',
   'cmp.changing': 'Ändrar...',
+  'cmp.err_enter_current': 'Ange ditt nuvarande lösenord',
+  'cmp.err_current_keyfile': 'Välj din nuvarande nyckelfil',
+  'cmp.err_min_chars': 'Nytt lösenord måste vara minst 12 tecken',
+  'cmp.err_confirm_pass': 'Bekräfta ditt nya lösenord',
+  'cmp.err_new_keyfile': 'Välj eller ange en sökväg för den nya nyckelfilen',
 
   // Tag Modals
   'tag.name_ph': 't.ex. Arbete, Privat, Ekonomi...',
@@ -713,6 +734,7 @@ export const sv = {
   'toast.decrypted_csv_exported': 'Avkrypterad CSV exporterad framgångsrikt!',
   'toast.decrypted_json_exported': 'Avkrypterad JSON exporterad framgångsrikt!',
   'toast.shortcut_updated': 'Genväg uppdaterad framgångsrikt',
+  'toast.shortcut_conflict': 'Genvägen sparades (Konflikt med "{action}")',
   'toast.shortcuts_reset': 'Genvägar återställda till standard',
   'toast.recovery_shares_generated': 'Återställningsandelar genererade!',
   'toast.hash_reconstructed': 'Hash rekonstruerad framgångsrikt',
@@ -1053,6 +1075,10 @@ export const sv = {
   'settings.revoke_device_confirm': 'Är du säker på att du vill koppla från {name}? Enheten kommer inte längre kunna synka automatiskt förrän den paras om med en ny 6-siffrig kod.',
   'settings.revoke_device_success': '{name} har kopplats från.',
   'settings.revoke_device_failed': 'Kunde inte koppla från enhet: {err}',
+  'settings.devices_count': '{count} enheter',
+  'settings.devices_count_singular': '1 enhet',
+  'settings.trash_items_warning': '{count} objekt raderas permanent.',
+  'settings.trash_items_warning_singular': '1 objekt raderas permanent.',
   'settings.auto_wifi_sync_toggle': 'Synka automatiskt över Wi-Fi med kopplade enheter',
   'settings.auto_wifi_sync_desc': 'Kopplade enheter uppdaterar lösenord automatiskt i bakgrunden utan att du behöver göra något.',
   'settings.syncing': 'Synkar...',
@@ -1093,6 +1119,7 @@ export const sv = {
   'pairing.last_connected_ip': 'Senast anslutna IP: {ip}',
   'pairing.enter_pin_sub': 'Mata in den 6-siffriga koden som visas på din andra enhet.',
   'pairing.host_code_sub': 'Mata in koden nedan på din andra enhet för att koppla ihop dem.',
+  'pairing.sync_again': 'Synka igen',
   'common.done': 'Klar',
 };
 

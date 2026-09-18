@@ -63,6 +63,8 @@ const SERVICE_LOGIN_URLS: &[(&str, &str)] = &[
     ("outlook.live.com", "https://login.live.com/"),
     ("live.com", "https://login.live.com/"),
     ("hotmail.com", "https://login.live.com/"),
+    ("steampowered.com", "https://store.steampowered.com/login/"),
+    ("steamcommunity.com", "https://steamcommunity.com/login/home/"),
 ];
 
 /// Auth domains that are allowed for cross-domain navigation.
@@ -84,6 +86,8 @@ const AUTH_DOMAINS: &[(&str, &str)] = &[
     ("linkedin.com", "www.linkedin.com"),
     ("amazon.com", "www.amazon.com"),
     ("reddit.com", "www.reddit.com"),
+    ("steampowered.com", "steamcommunity.com"),
+    ("steamcommunity.com", "steampowered.com"),
 ];
 
 /// Normalize a user-provided URL for navigation.
@@ -114,7 +118,7 @@ pub fn has_login_form(snapshot: &PageSnapshot) -> bool {
         matches!(i.input_type.as_str(), "email" | "tel")
     });
 
-    let has_identifier = snapshot.inputs.iter().any(|i| is_likely_identifier_input(i));
+    let has_identifier = snapshot.inputs.iter().any(is_likely_identifier_input);
 
     // Check for Next/Continue/Sign-in buttons (multilingual)
     let has_action_button = snapshot.buttons.iter().any(|b| {
@@ -390,7 +394,7 @@ fn score_login_button_as_nav(button: &ButtonInfo) -> f64 {
         score -= 0.15;
     }
 
-    score.max(0.0).min(1.0)
+    score.clamp(0.0, 1.0)
 }
 
 /// Check if a target URL is an allowed auth domain for the given entry URL.
@@ -575,6 +579,8 @@ mod tests {
     fn test_auth_domain_allowed() {
         assert!(is_allowed_auth_domain("https://gmail.com", "https://accounts.google.com/signin"));
         assert!(is_allowed_auth_domain("https://outlook.com", "https://login.microsoftonline.com"));
+        assert!(is_allowed_auth_domain("https://store.steampowered.com", "https://steamcommunity.com/login/home/"));
+        assert!(is_allowed_auth_domain("https://steamcommunity.com", "https://store.steampowered.com/login/"));
         assert!(!is_allowed_auth_domain("https://gmail.com", "https://evil.com"));
         assert!(!is_allowed_auth_domain("https://gmail.com", "https://evil.com/login"));
         assert!(!is_allowed_auth_domain("https://bank.com", "https://attacker.com/signin"));
@@ -631,6 +637,12 @@ mod tests {
     fn test_probe_urls_gmail() {
         let probes = get_probe_urls("gmail.com");
         assert!(probes[0].contains("accounts.google.com"));
+    }
+
+    #[test]
+    fn test_probe_urls_steam() {
+        let probes = get_probe_urls("https://store.steampowered.com/");
+        assert_eq!(probes, vec!["https://store.steampowered.com/login/"]);
     }
 
     #[test]

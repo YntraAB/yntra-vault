@@ -7,7 +7,7 @@
 
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 import type { PasswordEntry } from '@/types';
 import { ActionTooltip } from '@/components/ui/tooltip';
@@ -51,64 +51,78 @@ export function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEntryModal
     }
   }, [entry, onClose]);
 
-  if (!entry) return null;
-
   return (
     <AnimatePresence>
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.98, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.98, opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="w-full max-w-[380px] mx-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] p-5 shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
+      {entry && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs select-none"
+          onClick={onClose}
         >
-          <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
-            <h3 className="text-[16px] font-semibold text-[var(--text-primary)]">
-              {t('delete.title')}
-            </h3>
-            <ActionTooltip content={t('common.close')}>
+          <motion.div
+            initial={{ scale: 0.97, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.97, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="w-full max-w-[380px] mx-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
+                  <Trash2 size={14} />
+                </div>
+                <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                  {t('delete.title')}
+                </h3>
+              </div>
+              <ActionTooltip content={t('common.close')}>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                >
+                  <X size={15} />
+                </button>
+              </ActionTooltip>
+            </div>
+
+            {/* Content */}
+            <div className="p-4">
+              <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                {t('delete.confirm_before')}
+                <span className="font-semibold text-[var(--text-primary)] bg-[var(--bg-base)] px-2 py-0.5 rounded-[3px] border border-[var(--border)] inline-block my-0.5 shadow-2xs select-text">
+                  {entry.title}
+                </span>
+                {t('delete.confirm_after')}
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
               <button
+                ref={cancelBtnRef}
                 type="button"
                 onClick={onClose}
-                className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
               >
-                <X size={16} />
+                {t('common.cancel')}
               </button>
-            </ActionTooltip>
-          </div>
-
-          <p className="mt-4 text-[13px] text-[var(--text-secondary)] leading-relaxed">
-            {t('delete.confirm_before')}<span className="font-bold text-[var(--text-primary)] bg-[var(--bg-elevated)] px-2 py-0.5 rounded border border-[var(--border)] inline-block my-0.5 shadow-sm select-text">{entry.title}</span>{t('delete.confirm_after')}
-          </p>
-
-          <div className="mt-5 flex justify-end gap-2 pt-3 border-t border-[var(--border-subtle)]">
-            <button
-              ref={cancelBtnRef}
-              type="button"
-              onClick={onClose}
-              className="h-9 rounded-md border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--border-focus)]"
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              ref={deleteBtnRef}
-              type="button"
-              onClick={() => {
-                onConfirm();
-                onClose();
-              }}
-              className="h-9 rounded-md bg-red-600 px-4 text-[13px] font-semibold text-white transition-all hover:bg-red-700 active:bg-red-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500/50"
-            >
-              {t('common.delete')}
-            </button>
-          </div>
-        </motion.div>
-      </div>
+              <button
+                ref={deleteBtnRef}
+                type="button"
+                onClick={() => {
+                  onConfirm();
+                  onClose();
+                }}
+                className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+              >
+                {t('common.delete')}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </AnimatePresence>
   );
 }

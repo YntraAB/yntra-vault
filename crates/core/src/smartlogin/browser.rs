@@ -10,7 +10,7 @@
 //! 6. Check if the browser process is currently running
 
 use chromiumoxide::browser::Browser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::smartlogin::types::*;
@@ -339,11 +339,9 @@ async fn connect_and_get_page(
     tokio::time::timeout(timeout, async {
         loop {
             let ready_js = r#"document.readyState === 'complete' || document.readyState === 'interactive'"#;
-            if let Ok(result) = page.evaluate(ready_js).await {
-                if let Ok(ready) = result.into_value::<bool>() {
-                    if ready { break; }
-                }
-            }
+            if let Ok(result) = page.evaluate(ready_js).await
+                && let Ok(ready) = result.into_value::<bool>()
+                    && ready { break; }
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         }
     })
@@ -804,39 +802,31 @@ async fn wait_for_cdp_endpoint(
         }
 
         // 1. Dynamic port allocation: Check DevToolsActivePort inside profile directory
-        if port == 0 || active_port_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&active_port_path) {
+        if (port == 0 || active_port_path.exists())
+            && let Ok(content) = std::fs::read_to_string(&active_port_path) {
                 let mut lines = content.lines();
-                if let (Some(port_str), Some(ws_path)) = (lines.next(), lines.next()) {
-                    if let Ok(assigned_port) = port_str.trim().parse::<u16>() {
+                if let (Some(port_str), Some(ws_path)) = (lines.next(), lines.next())
+                    && let Ok(assigned_port) = port_str.trim().parse::<u16>() {
                         let endpoint = format!("http://127.0.0.1:{assigned_port}/json/version");
-                        if let Ok(resp) = reqwest::get(&endpoint).await {
-                            if let Ok(text) = resp.text().await {
-                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                                    if let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+                        if let Ok(resp) = reqwest::get(&endpoint).await
+                            && let Ok(text) = resp.text().await
+                                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                                    && let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
                                         return Ok(ws.to_string());
                                     }
-                                }
-                            }
-                        }
                         return Ok(format!("ws://127.0.0.1:{assigned_port}{ws_path}"));
                     }
-                }
             }
-        }
 
         // 2. Fixed port fallback
         if port != 0 {
             let endpoint = format!("http://127.0.0.1:{port}/json/version");
-            if let Ok(resp) = reqwest::get(&endpoint).await {
-                if let Ok(text) = resp.text().await {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+            if let Ok(resp) = reqwest::get(&endpoint).await
+                && let Ok(text) = resp.text().await
+                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
                             return Ok(ws.to_string());
                         }
-                    }
-                }
-            }
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
@@ -874,14 +864,13 @@ fn scan_registry_browsers(browsers: &mut Vec<BrowserInfo>, default_progid: &Opti
     // Scan HKLM\SOFTWARE\Clients\StartMenuInternet
     if let Ok(clients) = hklm.open_subkey(r"SOFTWARE\Clients\StartMenuInternet") {
         for name_result in clients.enum_keys() {
-            if let Ok(name) = name_result {
-                if let Some(info) = parse_registry_browser(&clients, &name, default_progid) {
+            if let Ok(name) = name_result
+                && let Some(info) = parse_registry_browser(&clients, &name, default_progid) {
                     // Only include Chromium-based browsers
                     if is_chromium_based(&info) {
                         browsers.push(info);
                     }
                 }
-            }
         }
     }
 
@@ -889,13 +878,11 @@ fn scan_registry_browsers(browsers: &mut Vec<BrowserInfo>, default_progid: &Opti
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(clients) = hkcu.open_subkey(r"SOFTWARE\Clients\StartMenuInternet") {
         for name_result in clients.enum_keys() {
-            if let Ok(name) = name_result {
-                if let Some(info) = parse_registry_browser(&clients, &name, default_progid) {
-                    if is_chromium_based(&info) {
+            if let Ok(name) = name_result
+                && let Some(info) = parse_registry_browser(&clients, &name, default_progid)
+                    && is_chromium_based(&info) {
                         browsers.push(info);
                     }
-                }
-            }
         }
     }
 }
@@ -957,10 +944,10 @@ fn parse_registry_browser(
 /// Handles: "C:\path\to\browser.exe" --arg  or  C:\path\to\browser.exe
 fn parse_exe_from_command(cmd: &str) -> Option<PathBuf> {
     let trimmed = cmd.trim();
-    if trimmed.starts_with('"') {
+    if let Some(rest) = trimmed.strip_prefix('"') {
         // Quoted path
-        let end = trimmed[1..].find('"')?;
-        Some(PathBuf::from(&trimmed[1..=end]))
+        let end = rest.find('"')?;
+        Some(PathBuf::from(&rest[..end]))
     } else {
         // Unquoted — take until first space or end
         let end = trimmed.find(' ').unwrap_or(trimmed.len());
@@ -969,7 +956,7 @@ fn parse_exe_from_command(cmd: &str) -> Option<PathBuf> {
 }
 
 /// Detect the user data directory for a Chromium browser from its exe path.
-fn detect_profile_dir(exe_path: &PathBuf, name: &str) -> PathBuf {
+fn detect_profile_dir(exe_path: &Path, name: &str) -> PathBuf {
     let local_appdata = std::env::var("LOCALAPPDATA")
         .unwrap_or_else(|_| r"C:\Users\Default\AppData\Local".into());
 
@@ -1014,14 +1001,13 @@ fn detect_profile_dir(exe_path: &PathBuf, name: &str) -> PathBuf {
 
     // Fallback: try to derive from the exe's own directory
     // Many Chromium browsers put "User Data" next to the Application folder
-    if let Some(app_dir) = exe_path.parent() {
-        if let Some(parent) = app_dir.parent() {
+    if let Some(app_dir) = exe_path.parent()
+        && let Some(parent) = app_dir.parent() {
             let user_data = parent.join("User Data");
             if user_data.exists() {
                 return user_data;
             }
         }
-    }
 
     // Final fallback: use Chrome's default path
     PathBuf::from(&local_appdata)
@@ -1117,6 +1103,6 @@ fn scan_common_paths(browsers: &mut Vec<BrowserInfo>, default_progid: &Option<St
     }
 }
 
-fn normalize_path(path: &PathBuf) -> PathBuf {
+fn normalize_path(path: &Path) -> PathBuf {
     path.to_string_lossy().to_lowercase().into()
 }

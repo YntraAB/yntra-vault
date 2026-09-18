@@ -237,7 +237,7 @@ pub fn listen_pairing_beacon(
 
         match socket.recv_from(&mut buf) {
             Ok((len, peer_addr)) => {
-                if len >= 38 && &buf[..4] == &PAIRING_BEACON_MAGIC {
+                if len >= 38 && buf[..4] == PAIRING_BEACON_MAGIC {
                     let received_id = &buf[4..36];
                     if received_id.ct_eq(expected_pairing_id).into() {
                         let peer_port = u16::from_be_bytes([buf[36], buf[37]]);
@@ -381,12 +381,11 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
     }
 
     // Also bind explicit listen_addr if specified and not already bound
-    if !listen_addr.is_empty() && !listen_addr.ends_with(":5324") && !listen_addr.ends_with(":5322") {
-        if let Ok(l) = TcpListener::bind(listen_addr) {
+    if !listen_addr.is_empty() && !listen_addr.ends_with(":5324") && !listen_addr.ends_with(":5322")
+        && let Ok(l) = TcpListener::bind(listen_addr) {
             let _ = l.set_nonblocking(true);
             listeners.push(l);
         }
-    }
 
     // Fallback if none could be bound
     if listeners.is_empty() {
@@ -417,11 +416,10 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
     };
 
     let (mut stream, peer_sock_addr) = loop {
-        if let Some(ref cancel) = cancel_flag {
-            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some(ref cancel) = cancel_flag
+            && cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(VaultError::SyncError("Pairing host listening was cancelled by user".into()));
             }
-        }
 
         // Periodically refresh adapter IPs (at most every 10s) to avoid excessive socket probing
         if last_ips_refresh.elapsed() >= Duration::from_secs(10) {
@@ -445,15 +443,14 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
         if let Some(ref sock) = udp_socket {
             let mut qbuf = [0u8; 64];
             while let Ok((qlen, client_addr)) = sock.recv_from(&mut qbuf) {
-                if qlen >= 36 && &qbuf[..4] == &PAIRING_QUERY_MAGIC {
-                    if qbuf[4..36].ct_eq(&pairing_beacon_id).into() {
+                if qlen >= 36 && qbuf[..4] == PAIRING_QUERY_MAGIC
+                    && qbuf[4..36].ct_eq(&pairing_beacon_id).into() {
                         let mut reply = [0u8; 38];
                         reply[..4].copy_from_slice(&PAIRING_BEACON_MAGIC);
                         reply[4..36].copy_from_slice(&pairing_beacon_id);
                         reply[36..38].copy_from_slice(&local_port.to_be_bytes());
                         let _ = sock.send_to(&reply, client_addr);
                     }
-                }
             }
         }
 
@@ -703,11 +700,10 @@ pub fn run_p2p_pairing_client_with_device(
             let _ = probe_sock.send_to(&q_packet, probe_dest);
 
             let mut resp_buf = [0u8; 64];
-            if let Ok((rlen, _)) = probe_sock.recv_from(&mut resp_buf) {
-                if rlen >= 38 && &resp_buf[..4] == &PAIRING_BEACON_MAGIC && resp_buf[4..36].ct_eq(&beacon_id).into() {
+            if let Ok((rlen, _)) = probe_sock.recv_from(&mut resp_buf)
+                && rlen >= 38 && resp_buf[..4] == PAIRING_BEACON_MAGIC && resp_buf[4..36].ct_eq(&beacon_id).into() {
                     confirmed_host_port = Some(u16::from_be_bytes([resp_buf[36], resp_buf[37]]));
                 }
-            }
         }
     }
 
@@ -1410,14 +1406,14 @@ mod tests {
         let host_thread = std::thread::spawn(move || {
             let _ = responder_sock.set_read_timeout(Some(Duration::from_millis(1500)));
             let mut qbuf = [0u8; 64];
-            if let Ok((qlen, client_addr)) = responder_sock.recv_from(&mut qbuf) {
-                if qlen >= 36 && &qbuf[..4] == &PAIRING_QUERY_MAGIC && qbuf[4..36] == b_id_clone {
-                    let mut reply = [0u8; 38];
-                    reply[..4].copy_from_slice(&PAIRING_BEACON_MAGIC);
-                    reply[4..36].copy_from_slice(&b_id_clone);
-                    reply[36..38].copy_from_slice(&5324u16.to_be_bytes());
-                    let _ = responder_sock.send_to(&reply, client_addr);
-                }
+            if let Ok((qlen, client_addr)) = responder_sock.recv_from(&mut qbuf)
+                && qlen >= 36 && qbuf[..4] == PAIRING_QUERY_MAGIC && qbuf[4..36] == b_id_clone
+            {
+                let mut reply = [0u8; 38];
+                reply[..4].copy_from_slice(&PAIRING_BEACON_MAGIC);
+                reply[4..36].copy_from_slice(&b_id_clone);
+                reply[36..38].copy_from_slice(&5324u16.to_be_bytes());
+                let _ = responder_sock.send_to(&reply, client_addr);
             }
         });
 

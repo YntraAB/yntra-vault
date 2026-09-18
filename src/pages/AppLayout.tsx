@@ -247,7 +247,7 @@ export default function AppLayout() {
                 <div className="flex h-13 w-full items-center justify-between px-3">
                   <button
                     onClick={() => selectEntryById(null)}
-                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[14px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
+                    className="flex items-center gap-1.5 rounded-[3px] px-2.5 py-1.5 text-[14px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
                   >
                     <ChevronLeft size={19} />
                     <span>{t('mobile.back_to_vault')}</span>

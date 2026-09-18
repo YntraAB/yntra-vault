@@ -19,11 +19,11 @@ pub fn is_breach_suspected(password: &str) -> bool {
     hasher.update(password.as_bytes());
     let hash = hasher.finalize();
 
-    // Split 32-byte hash into four 8-byte integers
-    let val1 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
-    let val2 = u64::from_be_bytes(hash[8..16].try_into().unwrap());
-    let val3 = u64::from_be_bytes(hash[16..24].try_into().unwrap());
-    let val4 = u64::from_be_bytes(hash[24..32].try_into().unwrap());
+    // Split 32-byte hash into four 8-byte integers without unwrap
+    let val1 = u64::from_be_bytes(hash[0..8].try_into().unwrap_or([0u8; 8]));
+    let val2 = u64::from_be_bytes(hash[8..16].try_into().unwrap_or([0u8; 8]));
+    let val3 = u64::from_be_bytes(hash[16..24].try_into().unwrap_or([0u8; 8]));
+    let val4 = u64::from_be_bytes(hash[24..32].try_into().unwrap_or([0u8; 8]));
 
     // Calculate bit indices
     let idx1 = val1 % TOTAL_BITS;
@@ -44,7 +44,6 @@ fn is_bit_set(idx: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn test_bloom_filter_basic() {
@@ -67,10 +66,10 @@ mod tests {
             hasher.update(pw.as_bytes());
             let hash = hasher.finalize();
 
-            let val1 = u64::from_be_bytes(hash[0..8].try_into().unwrap());
-            let val2 = u64::from_be_bytes(hash[8..16].try_into().unwrap());
-            let val3 = u64::from_be_bytes(hash[16..24].try_into().unwrap());
-            let val4 = u64::from_be_bytes(hash[24..32].try_into().unwrap());
+            let val1 = u64::from_be_bytes(hash[0..8].try_into().unwrap_or([0u8; 8]));
+            let val2 = u64::from_be_bytes(hash[8..16].try_into().unwrap_or([0u8; 8]));
+            let val3 = u64::from_be_bytes(hash[16..24].try_into().unwrap_or([0u8; 8]));
+            let val4 = u64::from_be_bytes(hash[24..32].try_into().unwrap_or([0u8; 8]));
 
             let idx1 = val1 % TOTAL_BITS;
             let idx2 = val2 % TOTAL_BITS;
@@ -83,7 +82,6 @@ mod tests {
                 data[byte_idx] |= 1 << bit_pos;
             }
         }
-
-        fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/breach/bloom.bin"), &data).unwrap();
+        assert_eq!(&data[..], &BLOOM_DATA[..]);
     }
 }

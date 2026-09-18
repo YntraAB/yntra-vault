@@ -272,26 +272,27 @@ impl SmartLoginEngine {
         // Type character by character into document.activeElement using JS 
         // to avoid Chromium CDP "Lost Focus" pseudo-class issues when the site auto-advances.
         for ch in code.chars() {
+            let ch_json = serde_json::to_string(&ch.to_string()).unwrap_or_else(|_| "\"\"".into());
             let type_js = format!(
                 r#"
                 (() => {{
                     const el = document.activeElement;
                     if (el && el.tagName === 'INPUT') {{
+                        const val = {ch_json};
                         // Append character to value if it's a single box, or set it if it's a multi-box
                         if (el.maxLength === 1) {{
-                            el.value = '{}';
+                            el.value = val;
                         }} else {{
-                            el.value += '{}';
+                            el.value += val;
                         }}
                         el.dispatchEvent(new Event('input', {{bubbles: true, composed: true}}));
                         
                         // Fire a simulated keydown/keyup so React/Vue auto-advance scripts trigger!
-                        el.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}));
-                        el.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}));
+                        el.dispatchEvent(new KeyboardEvent('keydown', {{key: val, bubbles: true}}));
+                        el.dispatchEvent(new KeyboardEvent('keyup', {{key: val, bubbles: true}}));
                     }}
                 }})()
-                "#,
-                ch, ch, ch, ch
+                "#
             );
             let _ = page.evaluate(type_js).await;
             tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
@@ -454,15 +455,14 @@ impl SmartLoginEngine {
                             analyzer::wait_for_page_ready(&current_page, 8000).await;
 
                             // Re-analyze after probe navigation
-                            if let Ok(snap) = analyzer::analyze_page(&current_page, &self.logger).await {
-                                if discovery::has_login_form(&snap) {
+                            if let Ok(snap) = analyzer::analyze_page(&current_page, &self.logger).await
+                                && discovery::has_login_form(&snap) {
                                     self.logger.log(
                                         LoginState::FormDetected,
                                         format!("Login form found at {probe_url}"),
                                     );
                                     return Ok(current_page);
                                 }
-                            }
                         }
                         Err(_) => continue,
                     }
@@ -846,11 +846,10 @@ impl SmartLoginEngine {
         "#;
 
         let result = page.evaluate(submit_js).await;
-        if let Ok(val) = result {
-            if let Ok(status) = val.into_value::<String>() {
+        if let Ok(val) = result
+            && let Ok(status) = val.into_value::<String>() {
                 self.logger.log(LoginState::SubmittingLogin, format!("Submit: {status}"));
             }
-        }
     }
 
     /// Try to click an account chooser button (e.g., "Use another account").
@@ -879,11 +878,10 @@ impl SmartLoginEngine {
         })()
         "#;
 
-        if let Ok(result) = page.evaluate(js).await {
-            if let Ok(val) = result.into_value::<String>() {
+        if let Ok(result) = page.evaluate(js).await
+            && let Ok(val) = result.into_value::<String>() {
                 return val.starts_with("clicked");
             }
-        }
         false
     }
 

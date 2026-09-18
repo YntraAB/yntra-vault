@@ -999,4 +999,5 @@ export const no = {
   'settings.listener_active_desc': 'Ready to receive sync from your mobile or other paired devices',
   'settings.listener_inactive_desc': 'Turn on to allow your mobile or other devices to sync changes to this computer',
   'settings.listener_info_note': 'What does it listen to? It listens locally on your Wi-Fi for devices sharing this exact vault via an anonymous BLAKE3 beacon. Nobody on the network can see or access your vault.',
+  'pairing.sync_again': 'Sync Again',
 };

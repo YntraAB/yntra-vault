@@ -246,8 +246,7 @@ impl VaultManager {
                 ));
             }
         }
-        std::fs::write(dest_path, csv)
-            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write CSV: {}", e)))
+        write_sensitive_file_safely(dest_path, &csv)
     }
 
     /// Exports decrypted vault entries to a JSON file.
@@ -260,7 +259,32 @@ impl VaultManager {
         }
         let json = serde_json::to_string_pretty(&items)
             .map_err(|e| VaultError::SerializationError(format!("Failed to format JSON: {}", e)))?;
-        std::fs::write(dest_path, json)
-            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write JSON: {}", e)))
+        write_sensitive_file_safely(dest_path, &json)
+    }
+}
+
+fn write_sensitive_file_safely(path: &Path, content: &str) -> crate::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| VaultError::InvalidFormat(format!("Failed to open export file with 0600: {}", e)))?;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        file.write_all(content.as_bytes())
+            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write export file: {}", e)))?;
+        file.sync_all()
+            .map_err(|e| VaultError::InvalidFormat(format!("Failed to sync export file: {}", e)))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content)
+            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write export file: {}", e)))
     }
 }

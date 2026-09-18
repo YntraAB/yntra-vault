@@ -19,6 +19,7 @@ import {
   Download,
   Loader2,
   Play,
+  Laptop,
   MoreVertical,
 } from 'lucide-react';
 import { useEntries, isRecoveryField } from '../context/EntriesContext';
@@ -43,7 +44,7 @@ import { useTotp } from '../hooks/useTotp';
 import { useBackend } from '@/lib/useBackend';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 import { Favicon } from './Favicon';
-import { formatDate, getFieldLayout, openExternalUrl } from '@/lib/utils';
+import { formatDate, getFieldLayout, openExternalUrl, isAppPath } from '@/lib/utils';
 import { formatBytes, getAttachmentIcon } from '@/lib/formatters';
 import type { Tag, AttachmentInfo } from '@/types';
 import { ActionTooltip } from '@/components/ui/tooltip';
@@ -541,19 +542,25 @@ export function PasswordDetail() {
                   )}
                   {data.url && !isEditing && (
                     <div className="min-w-0 max-w-full">
-                      <a
-                        href={/^https?:\/\//i.test(data.url) ? data.url : `https://${data.url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openExternalUrl(data.url);
-                        }}
-                        className="mt-0.5 inline-block truncate text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] max-w-full select-text"
-                      >
-                        {data.url}
-                      </a>
+                      {isAppPath(data.url) ? (
+                        <span className="mt-0.5 inline-block truncate text-[12px] text-[var(--text-secondary)] max-w-full font-mono select-text">
+                          {data.url}
+                        </span>
+                      ) : (
+                        <a
+                          href={/^https?:\/\//i.test(data.url) ? data.url : `https://${data.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openExternalUrl(data.url);
+                          }}
+                          className="mt-0.5 inline-block truncate text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] max-w-full select-text"
+                        >
+                          {data.url}
+                        </a>
+                      )}
                     </div>
                   )}
                   {isEditing && editData && (
@@ -633,7 +640,7 @@ export function PasswordDetail() {
                     </ActionTooltip>
 
                     {/* Smart Login */}
-                    {isTauri() && !!data.url && (
+                    {isTauri() && !!data.url && !isAppPath(data.url) && (
                       <SmartLoginButton
                         entryId={data.id}
                         entryTitle={data.title}
@@ -766,7 +773,7 @@ export function PasswordDetail() {
                   }
 
                   if (id === 'url') {
-                    const isAppPath = /[\\/]|\.exe$|\.app$/i.test(data.url);
+                    const isApp = isAppPath(data.url);
                     return (
                       <motion.div
                         key="url"
@@ -776,7 +783,7 @@ export function PasswordDetail() {
                         className={`flex items-center gap-3 rounded-[3px] bg-[var(--bg-elevated)] ${fieldItemPaddingClass} transition-colors hover:bg-[var(--bg-hover)]`}
                       >
                         <span className="shrink-0 text-[var(--text-secondary)] select-none">
-                          <Link size={15} />
+                          {isApp ? <Laptop size={15} /> : <Link size={15} />}
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-tertiary)] select-none">
@@ -799,7 +806,7 @@ export function PasswordDetail() {
                         {!isEditing && (
                           <div className="flex items-center gap-1">
                             {data.url && (
-                              <ActionTooltip content={isAppPath ? 'Launch Application' : t('detail.open_website')}>
+                              <ActionTooltip content={isApp ? t('detail.launch_app') : t('detail.open_website')}>
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -809,7 +816,7 @@ export function PasswordDetail() {
                                   }}
                                   className="inline-flex items-center justify-center rounded-[3px] p-1.5 sm:p-1 text-[var(--text-tertiary)] transition-all duration-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 cursor-pointer"
                                 >
-                                  {isAppPath ? <Play size={14} /> : <ExternalLink size={14} />}
+                                  {isApp ? <Play size={14} /> : <ExternalLink size={14} />}
                                 </button>
                               </ActionTooltip>
                             )}
@@ -1048,7 +1055,7 @@ export function PasswordDetail() {
                           addToast({ message: t('toast.remove_passkey_failed', { err: String(err) }), type: 'error' });
                         }
                       }}
-                      className="text-[11px] font-medium text-red-400 hover:text-red-300 transition-colors"
+                      className="text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                     >
                       Remove
                     </button>
@@ -1062,7 +1069,7 @@ export function PasswordDetail() {
               <div className="px-4 py-3 border-t border-[var(--border-subtle)]">
                 <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)] mb-2 select-none">
                   <Paperclip size={13} /> Attachments
-                  <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] border border-[var(--border)]">
+                  <span className="rounded-[3px] bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-secondary)] border border-[var(--border)]">
                     {data.attachments.length}
                   </span>
                 </div>
@@ -1070,7 +1077,7 @@ export function PasswordDetail() {
                   {data.attachments.map((att: AttachmentInfo) => (
                     <div
                       key={att.id}
-                      className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 shadow-sm hover:border-[var(--border)] transition-colors"
+                      className="flex items-center justify-between rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 shadow-sm hover:border-[var(--border)] transition-colors"
                     >
                       <div
                         onClick={() => handlePreviewAttachment(att)}
@@ -1094,7 +1101,7 @@ export function PasswordDetail() {
                             <button
                               type="button"
                               onClick={() => handleDeleteAttachment(att)}
-                              className="rounded-md p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+                              className="rounded-[3px] p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -1106,7 +1113,7 @@ export function PasswordDetail() {
                             <button
                               type="button"
                               disabled={loadingPreviewId === att.id || downloadingAttId === att.id}
-                              className="rounded-md p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
+                              className="rounded-[3px] p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
                               aria-label="More options"
                             >
                               {loadingPreviewId === att.id || downloadingAttId === att.id ? (
@@ -1366,7 +1373,7 @@ function TOTPField({
           </div>
           <div className="flex items-baseline gap-1.5">
             <span className={`font-mono text-[13px] font-semibold tracking-wider select-all ${
-              isUrgent ? 'text-red-400 animate-pulse' : 'text-[var(--text-primary)]'
+              isUrgent ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
             }`}>
               {formattedCode}
             </span>
@@ -1398,7 +1405,7 @@ const CountdownRing: React.FC<{
   const r = size / 2 - 1.5;
   const circumference = 2 * Math.PI * r;
   const strokeDashoffset = circumference * (1 - progress);
-  const color = urgent ? '#ef4444' : 'var(--accent, #e8e8e8)';
+  const color = urgent ? 'var(--text-secondary)' : 'var(--accent, #e8e8e8)';
 
   return (
     <svg width={size} height={size} className="shrink-0 -rotate-90">
@@ -1460,11 +1467,11 @@ const PasswordSafetySection: React.FC<{
   if (!shouldShowContainer) return null;
 
   const borderAccentClass = isBreached
-    ? 'border-l-2 border-l-red-500/80 bg-red-500/5'
+    ? 'border-l-2 border-l-[var(--border-focus)] bg-[var(--bg-elevated)]'
     : isReused
-      ? 'border-l-2 border-l-purple-500/80 bg-purple-500/5'
+      ? 'border-l-2 border-l-[var(--border)] bg-[var(--bg-elevated)]'
       : isWeak
-        ? 'border-l-2 border-l-amber-500/80 bg-amber-500/5'
+        ? 'border-l-2 border-l-[var(--border)] bg-[var(--bg-elevated)]'
         : 'border-l-2 border-l-[var(--border-focus)]';
 
   return (

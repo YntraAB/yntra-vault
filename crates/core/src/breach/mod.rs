@@ -59,13 +59,12 @@ pub async fn check_password_breach(password: &str) -> crate::Result<BreachResult
     let mut found = false;
 
     for line in body.lines() {
-        if let Some((line_suffix, count_str)) = line.split_once(':') {
-            if line_suffix.eq_ignore_ascii_case(suffix) {
+        if let Some((line_suffix, count_str)) = line.split_once(':')
+            && line_suffix.eq_ignore_ascii_case(suffix) {
                 breach_count = count_str.trim().parse().unwrap_or(0);
                 found = true;
                 break;
             }
-        }
     }
 
     Ok(BreachResult {

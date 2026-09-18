@@ -150,7 +150,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
       {/* Domain Preset Info & Options Expand Row */}
       <div className="flex items-center justify-between border-t border-[var(--border-subtle)] pt-2 mt-1 px-0.5">
         {presetInfo ? (
-          <div className="text-[11px] text-amber-500 font-medium">
+          <div className="text-[11px] text-[var(--text-secondary)] font-medium">
             Smart Preset: {presetInfo.rule.displayName}
           </div>
         ) : (

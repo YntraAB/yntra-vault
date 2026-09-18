@@ -141,7 +141,7 @@ export function TrashTab() {
           <ActionTooltip content={t('settings.trash_empty')}>
             <button
               onClick={promptEmptyTrash}
-              className="mb-4 flex items-center gap-1.5 rounded-[3px] border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[12px] font-medium text-red-500 transition-colors hover:bg-red-500 hover:text-white cursor-pointer"
+              className="mb-4 flex items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
             >
               <Trash size={13} />
               {t('settings.trash_empty')}
@@ -189,7 +189,7 @@ export function TrashTab() {
                     <button
                       type="button"
                       onClick={() => promptPermanentDelete(item)}
-                      className="inline-flex h-7 items-center gap-1 rounded-[3px] px-2 text-[11px] font-medium text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/10 cursor-pointer"
+                      className="inline-flex h-7 items-center gap-1 rounded-[3px] px-2 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                     >
                       <Trash2 size={12} />
                       {t('settings.delete_permanently')}
@@ -222,7 +222,7 @@ export function TrashTab() {
                 {t('settings.storage_active_attachments')}
               </span>
               <span className="text-[13px] font-semibold text-[var(--text-primary)]">
-                {metrics ? `${formatBytes(metrics.active_attachment_bytes)} (${metrics.active_attachment_count} st)` : '—'}
+                {metrics ? `${formatBytes(metrics.active_attachment_bytes)} (${metrics.active_attachment_count})` : '—'}
               </span>
             </div>
             <div className="flex flex-col gap-0.5 rounded-[3px] bg-[var(--bg-base)] p-2 border border-[var(--border-subtle)]">

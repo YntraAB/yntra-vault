@@ -129,8 +129,8 @@ impl AppState {
     }
 
     async fn fetch_active_detail(&mut self) {
-        if let Some(selected) = self.list_state.selected() {
-            if selected < self.filtered_indices.len() {
+        if let Some(selected) = self.list_state.selected()
+            && selected < self.filtered_indices.len() {
                 let real_idx = self.filtered_indices[selected];
                 let entry_id = self.entries[real_idx].id;
 
@@ -138,7 +138,6 @@ impl AppState {
                     self.active_decrypted = Some(e);
                 }
             }
-        }
     }
 }
 
@@ -149,8 +148,8 @@ async fn main_loop(
     loop {
         terminal.draw(|f| draw_ui(f, state)).map_err(|e| VaultError::InvalidFormat(format!("Draw error: {}", e)))?;
 
-        if event::poll(Duration::from_millis(250)).map_err(|e| VaultError::InvalidFormat(format!("Poll error: {}", e)))? {
-            if let Event::Key(key) = event::read().map_err(|e| VaultError::InvalidFormat(format!("Read error: {}", e)))? {
+        if event::poll(Duration::from_millis(250)).map_err(|e| VaultError::InvalidFormat(format!("Poll error: {}", e)))?
+            && let Event::Key(key) = event::read().map_err(|e| VaultError::InvalidFormat(format!("Read error: {}", e)))? {
                 match state.mode {
                     Mode::Searching => match key.code {
                         KeyCode::Esc | KeyCode::Enter => state.mode = Mode::Normal,
@@ -194,8 +193,8 @@ async fn main_loop(
                         }
                         KeyCode::Tab | KeyCode::Down => state.create_step = (state.create_step + 1) % 4,
                         KeyCode::Up => state.create_step = if state.create_step == 0 { 3 } else { state.create_step - 1 },
-                        KeyCode::Enter => {
-                            if !state.create_title.is_empty() {
+                        KeyCode::Enter
+                            if !state.create_title.is_empty() => {
                                 let new_entry = NewEntry {
                                     title: state.create_title.clone(),
                                     username: state.create_user.clone(),
@@ -223,7 +222,6 @@ async fn main_loop(
                                 state.create_step = 0;
                                 state.mode = Mode::Normal;
                             }
-                        }
                         KeyCode::Backspace => match state.create_step {
                             0 => { state.create_title.pop(); },
                             1 => { state.create_user.pop(); },
@@ -245,52 +243,45 @@ async fn main_loop(
                         KeyCode::Char('/') => state.mode = Mode::Searching,
                         KeyCode::Char('a') => state.mode = Mode::Creating,
                         KeyCode::Char('s') => state.show_password = !state.show_password,
-                        KeyCode::Char('d') => {
-                            if state.active_decrypted.is_some() {
+                        KeyCode::Char('d')
+                            if state.active_decrypted.is_some() => {
                                 state.mode = Mode::ConfirmDelete;
                             }
-                        }
                         KeyCode::Char('c') => {
                             if let Some(ref e) = state.active_decrypted {
-                                let mut sec = Zeroizing::new(e.password.clone());
-                                let _ = copy_to_clipboard_defended(&mut sec, true, None);
+                                let sec = Zeroizing::new(e.password.clone());
+                                let _ = copy_to_clipboard_defended(&sec, true, None);
                                 state.status_msg = format!("✓ Password for '{}' copied to defended clipboard!", e.title);
                             }
                         }
                         KeyCode::Char('t') => {
-                            if let Some(ref e) = state.active_decrypted {
-                                if let Some(totp_sec) = e.totp_secret.as_deref() {
-                                    if let Ok(cfg) = parse_totp_config(totp_sec) {
-                                        if let Ok(code) = generate_totp(&cfg) {
-                                            let mut sec = Zeroizing::new(code.code.clone());
-                                            let _ = copy_to_clipboard_defended(&mut sec, true, None);
+                            if let Some(ref e) = state.active_decrypted
+                                && let Some(totp_sec) = e.totp_secret.as_deref()
+                                    && let Ok(cfg) = parse_totp_config(totp_sec)
+                                        && let Ok(code) = generate_totp(&cfg) {
+                                            let sec = Zeroizing::new(code.code.clone());
+                                            let _ = copy_to_clipboard_defended(&sec, true, None);
                                             state.status_msg = format!("✓ TOTP [{}] copied to defended clipboard!", code.code);
                                         }
-                                    }
-                                }
-                            }
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if !state.filtered_indices.is_empty() {
+                        KeyCode::Down | KeyCode::Char('j')
+                            if !state.filtered_indices.is_empty() => {
                                 let curr = state.list_state.selected().unwrap_or(0);
                                 let next = (curr + 1) % state.filtered_indices.len();
                                 state.list_state.select(Some(next));
                                 state.fetch_active_detail().await;
                             }
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if !state.filtered_indices.is_empty() {
+                        KeyCode::Up | KeyCode::Char('k')
+                            if !state.filtered_indices.is_empty() => {
                                 let curr = state.list_state.selected().unwrap_or(0);
                                 let next = if curr == 0 { state.filtered_indices.len() - 1 } else { curr - 1 };
                                 state.list_state.select(Some(next));
                                 state.fetch_active_detail().await;
                             }
-                        }
                         _ => {}
                     }
                 }
             }
-        }
     }
 }
 
@@ -383,9 +374,9 @@ fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
             Line::from(vec![]),
         ];
 
-        if let Some(totp_sec) = entry.totp_secret.as_deref() {
-            if let Ok(cfg) = parse_totp_config(totp_sec) {
-                if let Ok(code) = generate_totp(&cfg) {
+        if let Some(totp_sec) = entry.totp_secret.as_deref()
+            && let Ok(cfg) = parse_totp_config(totp_sec)
+                && let Ok(code) = generate_totp(&cfg) {
                     let code_str = code.code;
                     let rem_str = format!(" ({}s remaining)", code.seconds_remaining);
                     lines.push(Line::from(vec![
@@ -394,8 +385,6 @@ fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
                         Span::styled(rem_str, Style::default().fg(Color::DarkGray)),
                     ]));
                 }
-            }
-        }
 
         if !entry.notes.is_empty() {
             lines.push(Line::from(vec![Span::styled("Notes:    ", Style::default().add_modifier(Modifier::BOLD))]));

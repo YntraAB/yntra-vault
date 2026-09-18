@@ -389,13 +389,6 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
     return defaultOrdinal ? `${defaultOrdinal} ${suffix}` : suffix;
   }, []);
 
-  const getDropdownLabel = useCallback((key: StandardFieldKey | FieldType, baseLabel: string): string => {
-    const count = getFieldCount(key);
-    if (count === 0) return baseLabel;
-    const ordinal = getOrdinal(count);
-    return `${ordinal} ${baseLabel}`;
-  }, [getFieldCount, getOrdinal]);
-
   const applyTemplatePreset = useCallback((presetFields: StandardFieldKey[]) => {
     setFieldsOrder(prev => {
       const hasAttachments = prev.includes('attachments');
@@ -601,27 +594,32 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
             onClick={onClose}
           >
             <motion.div
-              initial={{ scale: 0.96, opacity: 0 }}
+              initial={{ scale: 0.97, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.96, opacity: 0 }}
+              exit={{ scale: 0.97, opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="flex max-h-[90vh] w-full max-w-[520px] mx-3 flex-col rounded-lg border border-[var(--border)] bg-[var(--bg-base)] shadow-2xl"
+              className="flex max-h-[90vh] w-full max-w-[520px] mx-3 flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
-                <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">
-                  {isEdit ? t('common.edit') : t('list.new_entry')}
-                </h2>
+              <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
+                    {isEdit ? <FileText size={14} /> : <Plus size={14} />}
+                  </div>
+                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                    {isEdit ? t('common.edit') : t('list.new_entry')}
+                  </h2>
+                </div>
                 <button
                   onClick={onClose}
-                  className="rounded-md p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
-                  <X size={16} />
+                  <X size={15} />
                 </button>
               </div>
               {/* Form */}
-              <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-5 flex-1 min-h-0">
+              <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -667,10 +665,10 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                               applyTemplatePreset(p.fields);
                             }
                           }}
-                          className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all ${
+                          className={`rounded-[3px] px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
                             isMatch
-                              ? 'bg-[var(--text-primary)] text-[var(--bg-base)] shadow-sm'
-                              : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)]'
+                              ? 'bg-[var(--text-primary)] text-[var(--bg-base)] shadow-2xs'
+                              : 'bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)]'
                           }`}
                         >
                           {t(p.nameKey)}
@@ -691,7 +689,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                     value={form.title}
                     onChange={(e) => updateField('title', e.target.value)}
                     placeholder={deriveTitle('', form.url, form.email, form.username)}
-                    className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+                    className={`h-8 w-full rounded-[3px] border bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors ${
                       errors.title ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
                     }`}
                   />
@@ -720,7 +718,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                             value={form.username}
                             onChange={(e) => updateField('username', e.target.value)}
                             placeholder="john_doe"
-                            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                            className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                           />
                         );
                       } else if (id === 'email') {
@@ -732,7 +730,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                             value={form.email}
                             onChange={(e) => updateField('email', e.target.value)}
                             placeholder="john@example.com"
-                            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                            className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                           />
                         );
                       } else if (id === 'url') {
@@ -745,15 +743,15 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                               value={form.url}
                               onChange={(e) => updateField('url', e.target.value)}
                               placeholder={t('entry_modal.url_app_placeholder')}
-                              className="h-9 flex-1 min-w-0 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] font-mono text-[12px]"
+                              className="h-8 flex-1 min-w-0 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] font-mono text-[12px] transition-colors"
                             />
                             <ActionTooltip content={t('entry_modal.browse_apps_tooltip')}>
                               <button
                                 type="button"
                                 onClick={() => setShowAppPicker(true)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0 cursor-pointer"
                               >
-                                <FolderOpen size={15} />
+                                <FolderOpen size={14} />
                               </button>
                             </ActionTooltip>
                           </div>
@@ -777,15 +775,15 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   value={form.totpSecret || ''}
                                   onChange={(e) => updateField('totpSecret', e.target.value || undefined)}
                                   placeholder={t('entry.totp_placeholder')}
-                                  className="h-9 flex-1 min-w-0 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 font-mono text-[13px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                                  className="h-8 flex-1 min-w-0 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 font-mono text-[12px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                                 />
                                 <ActionTooltip content={t('entry_modal.scan_qr_tooltip')}>
                                   <button
                                     type="button"
                                     onClick={() => qrFileInputRef.current?.click()}
-                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0 cursor-pointer"
                                   >
-                                    <QrCode size={15} />
+                                    <QrCode size={14} />
                                   </button>
                                 </ActionTooltip>
                               </div>
@@ -802,7 +800,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 onChange={(e) => updateField('recoveryCodes', e.target.value || undefined)}
                                 placeholder={t('entry.recovery_placeholder')}
                                 rows={3}
-                                className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                                className="w-full resize-none rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                               />
                             </div>
                           </div>
@@ -816,7 +814,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                             onChange={(e) => updateField('notes', e.target.value)}
                             placeholder={t('entry.notes_placeholder')}
                             rows={2}
-                            className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                            className="w-full resize-none rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                           />
                         );
                       } else if (id === 'password') {
@@ -831,14 +829,14 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   value={form.password}
                                   onChange={(e) => updateField('password', e.target.value)}
                                   placeholder={t('entry.password_placeholder')}
-                                  className={`h-9 w-full rounded-md border bg-[var(--bg-elevated)] px-3 pr-9 font-mono text-[13px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+                                  className={`h-8 w-full rounded-[3px] border bg-[var(--bg-base)] px-3 pr-8 font-mono text-[12px] tracking-wide text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors ${
                                     errors.password ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
                                   }`}
                                 />
                                 <button
                                   type="button"
                                   onClick={() => setShowPassword(!showPassword)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer"
                                 >
                                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                                 </button>
@@ -847,10 +845,10 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 <button
                                   type="button"
                                   onClick={() => setShowGenerator(!showGenerator)}
-                                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] border transition-colors cursor-pointer ${
                                     showGenerator
                                       ? 'border-[var(--text-primary)] bg-[var(--bg-active)] text-[var(--text-primary)]'
-                                      : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                                      : 'border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                   }`}
                                 >
                                   <Wand2 size={15} />
@@ -883,7 +881,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   animate={{ height: 'auto', opacity: 1 }}
                                   exit={{ height: 0, opacity: 0 }}
                                   transition={{ duration: 0.2 }}
-                                  className="overflow-hidden rounded-md border border-[var(--border)] mt-1.5"
+                                  className="overflow-hidden rounded-[3px] border border-[var(--border)] mt-1.5"
                                 >
                                   <PasswordGenerator
                                     url={form.url}
@@ -926,7 +924,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   .map(att => (
                                     <div
                                       key={att.id}
-                                      className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
+                                      className="flex items-center justify-between rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
                                         {getAttachmentIcon(att.mime_type || att.mimeType, att.name)}
@@ -937,7 +935,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                         <button
                                           type="button"
                                           onClick={() => setDeleteAttachmentIds(prev => [...prev, att.id])}
-                                          className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                          className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"
                                         >
                                           <X size={13} />
                                         </button>
@@ -948,7 +946,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 {stagedAttachments.map((att, idx) => (
                                   <div
                                     key={`staged-${idx}`}
-                                    className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
+                                    className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px]"
                                   >
                                     <div
                                       onClick={() => setPreviewStagedAtt({
@@ -966,7 +964,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                       {getAttachmentIcon(att.mimeType, att.name)}
                                       <span className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors text-[12px]">{att.name}</span>
                                       <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
-                                      <span className="rounded bg-[var(--accent-bg)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--text-primary)] uppercase tracking-wider shrink-0">New</span>
+                                      <span className="rounded-[3px] bg-[var(--bg-elevated)] border border-[var(--border)] px-1.5 py-0.5 text-[9px] font-mono text-[var(--text-secondary)] uppercase tracking-wider shrink-0">New</span>
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                       <ActionTooltip content={t('entry.preview_file')}>
@@ -982,7 +980,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                             },
                                             data: att.data,
                                           })}
-                                          className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                                          className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                                         >
                                           <Eye size={13} />
                                         </button>
@@ -991,7 +989,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                         <button
                                           type="button"
                                           onClick={() => setStagedAttachments(prev => prev.filter((_, i) => i !== idx))}
-                                          className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors shrink-0"
+                                          className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"
                                         >
                                           <X size={13} />
                                         </button>
@@ -1003,7 +1001,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 <button
                                   type="button"
                                   onClick={() => fileInputRef.current?.click()}
-                                  className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border)] py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] mt-1"
+                                  className="flex items-center justify-center gap-1.5 rounded-[3px] border border-dashed border-[var(--border)] py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] mt-1"
                                 >
                                   <Upload size={12} /> Add More Files
                                 </button>
@@ -1018,7 +1016,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   e.stopPropagation();
                                   if (e.dataTransfer.files?.length) handleFileSelect(e.dataTransfer.files);
                                 }}
-                                className="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                                className="flex flex-col items-center justify-center gap-1 rounded-[3px] border border-dashed border-[var(--border)] p-3 text-center transition-all hover:border-[var(--border-focus)] hover:bg-[var(--bg-hover)] cursor-pointer"
                               >
                                 <Upload size={16} className="text-[var(--text-tertiary)]" />
                                 <span className="text-[11px] font-medium text-[var(--text-secondary)]">{t('entry_modal.drop_files')}</span>
@@ -1061,7 +1059,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                               updateCustomField(cf.id, { name: updatedName });
                             }}
                             placeholder={currentPrefix || suffix}
-                            className="h-9 w-[120px] rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-medium shrink-0"
+                            className="h-9 w-[120px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-medium shrink-0"
                           />
                           <select
                             value={cf.type || 'text'}
@@ -1074,7 +1072,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                               const updatedName = formatFullName(currentPrefix, newSuffix, defaultOrd);
                               updateCustomField(cf.id, { type: newType, name: updatedName });
                             }}
-                            className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--border-focus)] shrink-0"
+                            className="h-9 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--border-focus)] shrink-0"
                           >
                             <option value="password">{t('detail.password')}</option>
                             <option value="email">{t('detail.email')}</option>
@@ -1092,7 +1090,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   value={cf.value}
                                   onChange={(e) => updateCustomField(cf.id, { value: e.target.value })}
                                   placeholder={isPasswordType ? '••••••••' : 'Value'}
-                                  className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] pl-2.5 pr-8 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono"
+                                  className="h-9 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] pl-2.5 pr-8 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono"
                                 />
                                 {isPasswordType && (
                                   <ActionTooltip content={showCustomPasswords[cf.id] ? t('login.hide_password') : t('login.show_password')}>
@@ -1111,7 +1109,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   <button
                                     type="button"
                                     onClick={() => setCustomGeneratorId(customGeneratorId === cf.id ? null : cf.id)}
-                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border transition-colors ${
                                       customGeneratorId === cf.id
                                         ? 'border-[var(--text-primary)] bg-[var(--bg-active)] text-[var(--text-primary)]'
                                         : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
@@ -1130,7 +1128,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                   animate={{ height: 'auto', opacity: 1 }}
                                   exit={{ height: 0, opacity: 0 }}
                                   transition={{ duration: 0.2 }}
-                                  className="overflow-hidden rounded-md border border-[var(--border)] mt-1"
+                                  className="overflow-hidden rounded-[3px] border border-[var(--border)] mt-1"
                                 >
                                   <PasswordGenerator
                                     url={form.url}
@@ -1153,7 +1151,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                       <Reorder.Item
                         key={id}
                         value={id}
-                        className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3.5 shadow-sm hover:border-[var(--border)] transition-colors cursor-default select-none"
+                        className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 shadow-2xs hover:border-[var(--border)] transition-colors cursor-default select-none"
                       >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)]">
@@ -1168,9 +1166,9 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                             <button
                               type="button"
                               onClick={onRemove}
-                              className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+                              className="rounded-[3px] p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                             >
-                              <X size={12} />
+                              <X size={13} />
                             </button>
                           </ActionTooltip>
                         </div>
@@ -1192,17 +1190,17 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           key={tag.id}
                           type="button"
                           onClick={() => toggleTag(tag.name)}
-                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-all ${
+                          className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
                             active
-                              ? 'text-white shadow-sm opacity-100'
-                              : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] opacity-60'
+                              ? 'text-white shadow-2xs opacity-100'
+                              : 'bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] opacity-60'
                           }`}
                           style={{
                             backgroundColor: active ? tag.color : undefined,
                           }}
                         >
                           <span
-                            className="h-2 w-2 rounded-full"
+                            className="h-2 w-2 rounded-[2px]"
                             style={{ backgroundColor: active ? '#ffffff' : tag.color }}
                           />
                           {tag.name}
@@ -1212,7 +1210,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                     <button
                       type="button"
                       onClick={() => setShowCreateTagModal(true)}
-                      className="flex items-center gap-1.5 rounded-md border border-dashed border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-focus)] hover:text-[var(--text-primary)]"
+                      className="flex items-center gap-1.5 rounded-[3px] border border-dashed border-[var(--border)] bg-[var(--bg-base)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-focus)] hover:text-[var(--text-primary)] cursor-pointer"
                     >
                       <Plus size={12} />
                     </button>
@@ -1225,9 +1223,9 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        className="flex items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-1 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                       >
-                        <Plus size={14} />
+                        <Plus size={13} />
                         <span>{t('entry.add_field')}</span>
                       </button>
                     </DropdownMenuTrigger>
@@ -1238,16 +1236,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
                         >
                           <User size={13} />
-                          <span>{getDropdownLabel('username', t('detail.username'))}</span>
-                        </DropdownMenuItem>
-                      )}
-                      {!fieldsOrder.includes('password') && (
-                        <DropdownMenuItem
-                          onSelect={() => handleAddField('password')}
-                          className="flex items-center gap-2 text-[12px] cursor-pointer"
-                        >
-                          <Key size={13} />
-                          <span>{getDropdownLabel('password', t('detail.password'))}</span>
+                          <span>{t('detail.username')}</span>
                         </DropdownMenuItem>
                       )}
                       {!fieldsOrder.includes('email') && (
@@ -1256,7 +1245,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
                         >
                           <Mail size={13} />
-                          <span>{getDropdownLabel('email', t('detail.email'))}</span>
+                          <span>{t('detail.email')}</span>
                         </DropdownMenuItem>
                       )}
                       {!fieldsOrder.includes('url') && (
@@ -1265,16 +1254,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
                         >
                           <Globe size={13} />
-                          <span>{getDropdownLabel('url', t('detail.url'))}</span>
-                        </DropdownMenuItem>
-                      )}
-                      {!fieldsOrder.includes('totpSecret') && (
-                        <DropdownMenuItem
-                          onSelect={() => handleAddField('totpSecret')}
-                          className="flex items-center gap-2 text-[12px] cursor-pointer"
-                        >
-                          <ShieldCheck size={13} />
-                          <span>{getDropdownLabel('totpSecret', t('detail.totp'))}</span>
+                          <span>{t('detail.url')}</span>
                         </DropdownMenuItem>
                       )}
                       {!fieldsOrder.includes('notes') && (
@@ -1283,7 +1263,25 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
                         >
                           <FileText size={13} />
-                          <span>{getDropdownLabel('notes', t('preset.secure_note'))}</span>
+                          <span>{t('preset.secure_note')}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('totpSecret') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('totpSecret')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <ShieldCheck size={13} />
+                          <span>TOTP / 2FA</span>
+                        </DropdownMenuItem>
+                      )}
+                      {!fieldsOrder.includes('passkey') && (
+                        <DropdownMenuItem
+                          onSelect={() => handleAddField('passkey')}
+                          className="flex items-center gap-2 text-[12px] cursor-pointer"
+                        >
+                          <Key size={13} />
+                          <span>Passkey (FIDO2)</span>
                         </DropdownMenuItem>
                       )}
                       {!fieldsOrder.includes('attachments') && (
@@ -1292,23 +1290,32 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
                         >
                           <Paperclip size={13} />
-                          <span>Attachments</span>
+                          <span>File Attachments</span>
                         </DropdownMenuItem>
                       )}
+
                       <DropdownMenuSeparator />
+
                       <DropdownMenuItem
-                        onSelect={() => handleAddField('text')}
+                        onSelect={() => addCustomField('text')}
                         className="flex items-center gap-2 text-[12px] cursor-pointer"
                       >
                         <Plus size={13} />
-                        <span>{t('entry.custom_field')}</span>
+                        <span>Custom Text Field</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => addCustomField('password')}
+                        className="flex items-center gap-2 text-[12px] cursor-pointer"
+                      >
+                        <Plus size={13} />
+                        <span>Custom Hidden / PIN Field</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
 
                 {/* Actions */}
-                <div className="flex justify-between border-t border-[var(--border-subtle)] pt-4 mt-2">
+                <div className="flex justify-between border-t border-[var(--border-subtle)] pt-3 mt-1">
                   <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer select-none hover:text-[var(--text-primary)] transition-colors">
                     <input
                       type="checkbox"
@@ -1323,18 +1330,18 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                     <button
                       type="button"
                       onClick={onClose}
-                      className="h-9 rounded-md px-4 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                      className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                     >
                       {t('common.cancel')}
                     </button>
                     <button
                       type="submit"
                       disabled={loading}
-                      className="flex h-9 items-center gap-2 rounded-md bg-[var(--text-primary)] px-5 text-[13px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-50"
+                      className="flex h-8 items-center gap-2 rounded-[3px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-50 cursor-pointer"
                     >
                       {loading ? (
                         <>
-                          <Loader2 size={14} className="animate-spin" />
+                          <Loader2 size={13} className="animate-spin" />
                           {t('common.loading')}
                         </>
                       ) : isEdit ? (
@@ -1401,7 +1408,7 @@ const Field = React.forwardRef<HTMLInputElement, FieldProps>(
             <button
               type="button"
               onClick={onRemove}
-              className="rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors"
+              className="rounded-[3px] p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
             >
               <X size={12} />
             </button>
@@ -1414,7 +1421,7 @@ const Field = React.forwardRef<HTMLInputElement, FieldProps>(
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`h-9 rounded-md border bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] ${
+        className={`h-8 rounded-[3px] border bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors ${
           error ? 'border-[var(--destructive)]' : 'border-[var(--border)]'
         }`}
       />

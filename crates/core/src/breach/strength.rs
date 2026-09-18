@@ -41,7 +41,7 @@ pub fn analyze_password(password: &str) -> StrengthScore {
     let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
     let has_digit = password.chars().any(|c| c.is_ascii_digit());
     let has_symbol = password.chars().any(|c| !c.is_alphanumeric() && c.is_ascii());
-    let has_unicode = password.chars().any(|c| !c.is_ascii());
+    let has_unicode = !password.is_ascii();
 
     let mut charset_size: f64 = 0.0;
     if has_lower { charset_size += 26.0; }

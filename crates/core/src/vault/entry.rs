@@ -499,65 +499,56 @@ impl VaultManager {
                 }
             }
 
-            if let Some(title) = update.title {
-                if entry.title != title {
+            if let Some(title) = update.title
+                && entry.title != title {
                     entry.title = title;
                     content_changed = true;
                     search_index_changed = true;
                 }
-            }
-            if let Some(username) = update.username {
-                if entry.username != username {
+            if let Some(username) = update.username
+                && entry.username != username {
                     entry.username = username;
                     content_changed = true;
                     search_index_changed = true;
                 }
-            }
-            if let Some(url) = update.url {
-                if entry.url != url {
+            if let Some(url) = update.url
+                && entry.url != url {
                     entry.url = url;
                     content_changed = true;
                     search_index_changed = true;
                 }
-            }
-            if let Some(email) = update.email {
-                if entry.email != email {
+            if let Some(email) = update.email
+                && entry.email != email {
                     entry.email = email;
                     content_changed = true;
                     search_index_changed = true;
                 }
-            }
-            if let Some(notes) = update.notes {
-                if entry.notes != notes {
+            if let Some(notes) = update.notes
+                && entry.notes != notes {
                     entry.notes = notes;
                     content_changed = true;
                 }
-            }
-            if let Some(tags) = update.tags {
-                if entry.tags != tags {
+            if let Some(tags) = update.tags
+                && entry.tags != tags {
                     entry.tags = tags;
                     content_changed = true;
                     search_index_changed = true;
                 }
-            }
-            if let Some(fav) = update.favorite {
-                if entry.favorite != fav {
+            if let Some(fav) = update.favorite
+                && entry.favorite != fav {
                     entry.favorite = fav;
                     content_changed = true;
                 }
-            }
-            if let Some(pin) = update.pinned {
-                if entry.pinned != pin {
+            if let Some(pin) = update.pinned
+                && entry.pinned != pin {
                     entry.pinned = pin;
                     content_changed = true;
                 }
-            }
-            if let Some(fields) = update.custom_fields {
-                if entry.custom_fields != fields {
+            if let Some(fields) = update.custom_fields
+                && entry.custom_fields != fields {
                     entry.custom_fields = fields;
                     content_changed = true;
                 }
-            }
             if let Some(breach) = update.breach_status {
                 // Breach status updates are advisory metadata and do NOT count as content changes.
                 entry.breach_status = breach;
@@ -603,31 +594,29 @@ impl VaultManager {
                         )?);
                         entry.passkey_public_key = Some(pair.public_key);
                     }
-                    "remove" => {
-                        if entry.encrypted_passkey.is_some() || entry.passkey_public_key.is_some() {
+                    "remove"
+                        if (entry.encrypted_passkey.is_some() || entry.passkey_public_key.is_some()) => {
                             content_changed = true;
                             entry.encrypted_passkey = None;
                             entry.passkey_public_key = None;
                         }
-                    }
                     _ => {}
                 }
             }
 
             // Handle deleting attachments if requested
-            if let Some(ref del_ids) = update.delete_attachment_ids {
-                if !del_ids.is_empty() {
+            if let Some(ref del_ids) = update.delete_attachment_ids
+                && !del_ids.is_empty() {
                     let prev_len = entry.attachments.len();
                     entry.attachments.retain(|att| !del_ids.contains(&att.id));
                     if entry.attachments.len() != prev_len {
                         content_changed = true;
                     }
                 }
-            }
 
             // Handle adding new staged attachments if requested
-            if let Some(new_atts) = update.new_attachments {
-                if !new_atts.is_empty() {
+            if let Some(new_atts) = update.new_attachments
+                && !new_atts.is_empty() {
                     content_changed = true;
                     for att in new_atts {
                         let att_id = Uuid::new_v4();
@@ -649,7 +638,6 @@ impl VaultManager {
                         });
                     }
                 }
-            }
 
             if content_changed {
                 entry.updated_at = now;

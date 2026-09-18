@@ -155,7 +155,7 @@ export function KeybindsTab() {
 
         if (conflictAction) {
           addToast({
-            message: `Shortcut saved (Conflicts with "${conflictAction.label}")`,
+            message: t('toast.shortcut_conflict', { action: conflictAction.label }) || `Shortcut saved (Conflicts with "${conflictAction.label}")`,
             type: 'info',
           });
         } else {
@@ -236,13 +236,13 @@ export function KeybindsTab() {
                         {action.label}
                       </span>
                       {isModified && (
-                        <span className="rounded-[2px] bg-[var(--accent-hover)]/10 px-1.5 py-0.2 text-[10px] font-medium text-[var(--accent-hover)]">
+                        <span className="rounded-[2px] border border-[var(--border)] bg-[var(--bg-base)] px-1.5 py-0.2 text-[10px] font-medium text-[var(--text-tertiary)]">
                           {t('keybinds.custom_badge')}
                         </span>
                       )}
                       {conflictWith && !isRecording && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-500">
-                          <AlertTriangle size={12} />
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--text-secondary)]">
+                          <AlertTriangle size={12} className="text-[var(--text-tertiary)]" />
                           {t('keybinds.conflicts_with')} {conflictWith.label}
                         </span>
                       )}

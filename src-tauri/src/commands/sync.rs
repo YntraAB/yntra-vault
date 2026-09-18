@@ -60,8 +60,8 @@ pub async fn webdav_download(
                 _ => false,
             };
 
-        if is_same_vault {
-            if let Err(err) = mgr.reload() {
+        if is_same_vault
+            && let Err(err) = mgr.reload() {
                 // If reload fails (e.g. restored database has different credentials or salt),
                 // lock in-memory state to prevent stale data from overwriting the restored file.
                 mgr.lock();
@@ -73,7 +73,6 @@ pub async fn webdav_download(
                     err
                 ));
             }
-        }
     }
 
     Ok(())
@@ -323,11 +322,10 @@ pub async fn scan_p2p_discovery(
     .map_err(|e| e.to_string())?;
 
     // Filter out self-echo across all active network adapter IPs
-    if let Some(ref peer_addr) = res {
-        if peer_addr.ip().is_loopback() || local_lan_ips.iter().any(|lip| *lip == peer_addr.ip()) {
+    if let Some(ref peer_addr) = res
+        && (peer_addr.ip().is_loopback() || local_lan_ips.iter().any(|lip| *lip == peer_addr.ip())) {
             return Ok(None);
         }
-    }
 
     Ok(res.map(|addr| addr.to_string()))
 }
@@ -446,7 +444,7 @@ pub async fn start_pairing_client(
 
     let mode = match active_vault_path {
         Some(active_path) => {
-            if db_path.trim().is_empty() || std::path::PathBuf::from(&db_path) == active_path {
+            if db_path.trim().is_empty() || db_path == active_path {
                 ClientPairingMode::ExistingVault { path: active_path }
             } else {
                 let p = std::path::PathBuf::from(&db_path);

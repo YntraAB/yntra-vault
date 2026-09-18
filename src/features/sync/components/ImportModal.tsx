@@ -192,40 +192,48 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 select-none">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.96 }}
-        className="w-full max-w-[620px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 bg-[var(--bg-base)]">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-[3px] bg-[var(--accent-bg)] text-[var(--text-primary)] border border-[var(--border)]">
-              <FolderInput size={16} />
-            </div>
-            <div>
-              <h2 className="text-[15px] font-semibold text-[var(--text-primary)] tracking-tight">
-                Competitor Password Importer
-              </h2>
-              <p className="text-[11px] text-[var(--text-tertiary)]">
-                Migrate seamlessly from Bitwarden, 1Password, KeePass, Chrome & more
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleClose}
-            className="flex h-7 w-7 items-center justify-center rounded-[3px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 select-none p-4"
+          onClick={handleClose}
+        >
+          <motion.div
+            initial={{ scale: 0.97, opacity: 0, y: 6 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.97, opacity: 0, y: 6 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="w-full max-w-[620px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl overflow-hidden flex flex-col max-h-[85vh]"
+            onClick={(e) => e.stopPropagation()}
           >
-            <X size={15} />
-          </button>
-        </div>
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5 bg-[var(--bg-base)]">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
+                  <FolderInput size={14} />
+                </div>
+                <div>
+                  <h2 className="text-[14px] font-medium text-[var(--text-primary)] leading-tight">
+                    {t('settings.importer_title') || 'Password Importer'}
+                  </h2>
+                  <p className="text-[11px] text-[var(--text-tertiary)]">
+                    {t('onboarding.step_import_desc') || 'Migrate logins from Bitwarden, 1Password, KeePass, or Chrome in RAM'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleClose}
+                className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            </div>
 
         {/* Step Indicator Bar */}
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-base)]/50 px-6 py-2">
@@ -420,8 +428,8 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
 
                 {/* Empty / Invalid File Alert */}
                 {previewResult.total_found === 0 && (
-                  <div className="flex items-center gap-2.5 rounded-[3px] border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-400 font-medium">
-                    <AlertTriangle size={16} className="shrink-0" />
+                  <div className="flex items-center gap-2.5 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 text-[12px] text-[var(--text-secondary)] font-medium">
+                    <AlertTriangle size={15} className="shrink-0 text-[var(--text-tertiary)]" />
                     <span>
                       No valid password entries found in this file. Please ensure the file is an unencrypted export from {selectedBrand.name} or try selecting a different manager.
                     </span>
@@ -429,19 +437,19 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
                 )}
 
                 {/* Stats Summary Bar */}
-                <div className="flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-2 text-[12px]">
+                <div className="flex items-center justify-between rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[12px]">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-[var(--text-primary)]">
+                    <span className="font-medium text-[var(--text-primary)]">
                       Detected: {previewResult.format_detected}
                     </span>
-                    <span className="rounded bg-[var(--accent-bg)] border border-[var(--border)] px-2 py-0.5 text-[10px] font-bold text-[var(--text-primary)]">
+                    <span className="rounded-[3px] bg-[var(--bg-elevated)] border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-primary)]">
                       {previewResult.total_found} Items Found
                     </span>
                   </div>
 
                   {previewResult.duplicates_count > 0 && (
-                    <div className="flex items-center gap-1 text-amber-500 text-[11px] font-medium">
-                      <AlertTriangle size={13} />
+                    <div className="flex items-center gap-1 text-[var(--text-secondary)] text-[11px] font-medium">
+                      <AlertTriangle size={13} className="text-[var(--text-tertiary)]" />
                       <span>{previewResult.duplicates_count} Duplicates Detected</span>
                     </div>
                   )}
@@ -556,7 +564,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
                                   {item.title || 'Untitled'}
                                 </span>
                                 {item.is_duplicate && (
-                                  <span className="rounded bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 text-[9px] font-bold text-amber-500 shrink-0">
+                                  <span className="rounded-[3px] bg-[var(--bg-base)] border border-[var(--border)] px-1.5 py-0.5 text-[9px] font-mono text-[var(--text-secondary)] shrink-0">
                                     Duplicate
                                   </span>
                                 )}
@@ -570,12 +578,12 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
 
                           <div className="flex items-center gap-1 shrink-0 text-[10px]">
                             {item.totp_secret && (
-                              <span className="rounded bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 font-semibold text-emerald-500">
+                              <span className="rounded-[3px] bg-[var(--bg-base)] border border-[var(--border)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-secondary)]">
                                 TOTP
                               </span>
                             )}
                             {item.notes && (
-                              <span className="rounded bg-zinc-500/10 border border-zinc-500/20 px-1.5 py-0.2 text-[var(--text-tertiary)]">
+                              <span className="rounded-[3px] bg-[var(--bg-base)] border border-[var(--border)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-tertiary)]">
                                 Notes
                               </span>
                             )}
@@ -614,8 +622,8 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex flex-col items-center justify-center py-8 text-center gap-2"
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10 border border-green-500/20 text-green-500 mb-1">
-                  <CheckCircle2 size={24} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-primary)] mb-1">
+                  <CheckCircle2 size={20} />
                 </div>
                 <h3 className="text-[16px] font-semibold text-[var(--text-primary)]">
                   Import Successful!
@@ -670,12 +678,14 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
               onClick={handleClose}
               className="flex h-8 items-center gap-1 rounded-[3px] bg-[var(--text-primary)] px-5 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer ml-auto"
             >
-              Done
+              {t('common.done') || 'Done'}
             </button>
           )}
         </div>
-      </motion.div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

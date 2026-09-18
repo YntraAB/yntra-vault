@@ -352,8 +352,6 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     onClose();
   };
 
-  if (!isOpen) return null;
-
   const stepTitles = [
     t('pairing.step_password') || 'Password',
     t('pairing.step_code') || 'Pairing PIN',
@@ -364,13 +362,14 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 select-none p-4"
-        onClick={handleClose}
-      >
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 select-none p-4"
+          onClick={handleClose}
+        >
         <motion.div
           initial={{ scale: 0.97, opacity: 0, y: 6 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -548,7 +547,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                 </div>
 
                 {errorMsg && (
-                  <div className="rounded-[3px] border border-red-500/20 bg-red-500/10 px-3 py-2 text-[11px] text-red-400">
+                  <div className="rounded-[3px] border border-[var(--border)] bg-[var(--destructive)]/10 px-3 py-2 text-[11px] text-[var(--destructive)]">
                     {errorMsg}
                   </div>
                 )}
@@ -780,7 +779,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                 )}
 
                 {errorMsg && (
-                  <div className="rounded-[3px] border border-red-500/20 bg-red-500/10 px-3 py-2 text-[11px] text-red-400">
+                  <div className="rounded-[3px] border border-[var(--border)] bg-[var(--destructive)]/10 px-3 py-2 text-[11px] text-[var(--destructive)]">
                     {errorMsg}
                   </div>
                 )}
@@ -904,6 +903,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           </div>
         </motion.div>
       </motion.div>
+      )}
     </AnimatePresence>
   );
 };

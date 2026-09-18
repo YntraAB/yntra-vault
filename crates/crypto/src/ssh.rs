@@ -188,20 +188,20 @@ pub fn parse_openssh_private_key(text: &str) -> Option<ParsedSshKey> {
 
     // Check if it's a 64-character hex string (32-byte raw Ed25519 seed)
     // Check if it's a 64 or 128 character hex string (32-byte seed or 64-byte keypair)
-    if (trimmed.len() == 64 || trimmed.len() == 128) && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-        if let Ok(seed_bytes) = data_encoding::HEXLOWER.decode(trimmed[..64].to_lowercase().as_bytes()) {
-            if seed_bytes.len() == 32 {
-                let mut seed = [0u8; 32];
-                seed.copy_from_slice(&seed_bytes);
-                let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
-                let pubkey_bytes = signing_key.verifying_key().to_bytes();
-                let pubkey_blob = encode_ed25519_pubkey(&pubkey_bytes);
-                return Some(ParsedSshKey::Ed25519 {
-                    pubkey_blob,
-                    seed: Zeroizing::new(seed),
-                });
-            }
-        }
+    if (trimmed.len() == 64 || trimmed.len() == 128)
+        && trimmed.chars().all(|c| c.is_ascii_hexdigit())
+        && let Ok(seed_bytes) = data_encoding::HEXLOWER.decode(trimmed[..64].to_lowercase().as_bytes())
+        && seed_bytes.len() == 32
+    {
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&seed_bytes);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let pubkey_bytes = signing_key.verifying_key().to_bytes();
+        let pubkey_blob = encode_ed25519_pubkey(&pubkey_bytes);
+        return Some(ParsedSshKey::Ed25519 {
+            pubkey_blob,
+            seed: Zeroizing::new(seed),
+        });
     }
 
     // Check for single-line public key

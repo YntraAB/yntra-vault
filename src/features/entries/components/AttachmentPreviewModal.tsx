@@ -202,22 +202,25 @@ export function AttachmentPreviewModal({
       }}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
+        initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.12 }}
-        className="relative flex flex-col w-full max-w-3xl h-[80vh] rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden select-text"
+        exit={{ opacity: 0, scale: 0.98 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className="relative flex flex-col w-full max-w-3xl h-[80vh] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden select-text"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-base)] shrink-0 select-none">
-          <div className="flex items-center gap-3 min-w-0">
-            {category === 'image' && <ImageIcon size={18} className="text-[var(--text-secondary)] shrink-0" />}
-            {category === 'text' && <FileText size={18} className="text-[var(--text-secondary)] shrink-0" />}
-            {category === 'zip' && <FileArchive size={18} className="text-[var(--text-secondary)] shrink-0" />}
-            {category === 'other' && <Paperclip size={18} className="text-[var(--text-secondary)] shrink-0" />}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--bg-surface)] shrink-0 select-none">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] shrink-0">
+              {category === 'image' && <ImageIcon size={14} />}
+              {category === 'text' && <FileText size={14} />}
+              {category === 'zip' && <FileArchive size={14} />}
+              {category === 'other' && <Paperclip size={14} />}
+            </div>
 
             <div className="flex flex-col min-w-0">
-              <span className="truncate text-[14px] font-semibold text-[var(--text-primary)]">
+              <span className="truncate text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
                 {attachment.name}
               </span>
               <span className="text-[11px] text-[var(--text-tertiary)] font-mono">
@@ -232,9 +235,9 @@ export function AttachmentPreviewModal({
                 <button
                   type="button"
                   onClick={handleCopyText}
-                  className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                  className="flex items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
-                  {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
+                  {copied ? <Check size={12} className="text-[var(--text-primary)]" /> : <Copy size={12} />}
                   {copied ? t('common.copied') : t('common.copy')}
                 </button>
               </ActionTooltip>
@@ -245,9 +248,9 @@ export function AttachmentPreviewModal({
                 <button
                   type="button"
                   onClick={onDownload}
-                  className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                  className="flex items-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
-                  <Download size={13} /> {t('common.download')}
+                  <Download size={12} /> {t('common.download')}
                 </button>
               </ActionTooltip>
             )}
@@ -256,9 +259,9 @@ export function AttachmentPreviewModal({
               type="button"
               onClick={handleClose}
               onPointerDown={handleClose}
-              className="rounded-md p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+              className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           </div>
         </div>
@@ -286,11 +289,11 @@ export function AttachmentPreviewModal({
           {/* Image Preview */}
           {data && category === 'image' && imageUrl && (
             <div className="flex flex-col h-full items-center justify-center relative group">
-              <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-[var(--bg-elevated)]/90 backdrop-blur-md rounded-md p-1 border border-[var(--border)] shadow-md select-none">
+              <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-[var(--bg-surface)]/90 backdrop-blur-md rounded-[3px] p-1 border border-[var(--border)] shadow-md select-none">
                 <button
                   type="button"
                   onClick={() => setZoom(prev => Math.min(prev + 0.25, 3))}
-                  className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded"
+                  className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[3px]"
                 >
                   <ZoomIn size={14} />
                 </button>
@@ -300,14 +303,14 @@ export function AttachmentPreviewModal({
                 <button
                   type="button"
                   onClick={() => setZoom(prev => Math.max(prev - 0.25, 0.5))}
-                  className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded"
+                  className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[3px]"
                 >
                   <ZoomOut size={14} />
                 </button>
                 <button
                   type="button"
                   onClick={() => setZoom(1)}
-                  className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded"
+                  className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[3px]"
                 >
                   <RotateCcw size={14} />
                 </button>
@@ -316,7 +319,7 @@ export function AttachmentPreviewModal({
                   <button
                     type="button"
                     onClick={() => setContrastBg(prev => !prev)}
-                    className={`p-1 rounded transition-colors ${
+                    className={`p-1 rounded-[3px] transition-colors ${
                       contrastBg
                         ? 'text-[var(--text-primary)] bg-[var(--bg-hover)]'
                         : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -332,7 +335,7 @@ export function AttachmentPreviewModal({
                   src={imageUrl}
                   alt={attachment.name}
                   style={{ transform: `scale(${zoom})`, transition: 'transform 0.15s ease-out' }}
-                  className="max-h-full max-w-full object-contain rounded-md shadow-lg"
+                  className="max-h-full max-w-full object-contain rounded-[3px] shadow-lg"
                 />
               </div>
             </div>
@@ -340,7 +343,7 @@ export function AttachmentPreviewModal({
 
           {/* Text Preview */}
           {data && category === 'text' && (
-            <div className="h-full flex flex-col rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] overflow-hidden font-mono text-[12.5px]">
+            <div className="h-full flex flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] overflow-hidden font-mono text-[12px]">
               <div className="overflow-auto p-4 space-y-1 text-[var(--text-primary)] selection:bg-[var(--accent-bg)]">
                 <pre className="whitespace-pre-wrap break-words leading-relaxed font-mono">
                   {textContent}
@@ -352,7 +355,7 @@ export function AttachmentPreviewModal({
           {/* ZIP Archive Inspector */}
           {data && category === 'zip' && (
             <div className="h-full flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3 bg-[var(--bg-elevated)] p-2.5 rounded-lg border border-[var(--border)]">
+              <div className="flex items-center justify-between gap-3 bg-[var(--bg-surface)] p-2.5 rounded-[3px] border border-[var(--border)]">
                 <div className="relative flex-1">
                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
                   <input
@@ -360,21 +363,21 @@ export function AttachmentPreviewModal({
                     value={zipSearch}
                     onChange={(e) => setZipSearch(e.target.value)}
                     placeholder={t('preview.search_archive')}
-                    className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--bg-base)] pl-8 pr-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"
+                    className="h-8 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] pl-8 pr-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                   />
                 </div>
-                <span className="text-[11px] text-[var(--text-tertiary)] font-medium shrink-0 select-none">
+                <span className="text-[11px] text-[var(--text-tertiary)] font-mono shrink-0 select-none">
                   {filteredZipEntries.length} items
                 </span>
               </div>
 
-              <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] divide-y divide-[var(--border-subtle)]">
+              <div className="flex-1 overflow-y-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] divide-y divide-[var(--border)]">
                 {filteredZipEntries.length > 0 ? (
                   filteredZipEntries.map((entry, idx) => (
                     <div key={idx} className="flex items-center justify-between px-3.5 py-2 hover:bg-[var(--bg-hover)] transition-colors text-[12px]">
                       <div className="flex items-center gap-2.5 min-w-0">
                         {entry.isDir ? (
-                          <Folder size={14} className="text-amber-400 shrink-0" />
+                          <Folder size={14} className="text-[var(--text-secondary)] shrink-0" />
                         ) : (
                           <File size={14} className="text-[var(--text-tertiary)] shrink-0" />
                         )}
@@ -401,14 +404,14 @@ export function AttachmentPreviewModal({
           {/* Other / Generic Binary File */}
           {data && category === 'other' && (
             <div className="flex flex-col items-center justify-center h-full text-center gap-3 p-6 select-none">
-              <div className="rounded-full bg-[var(--accent-bg)] p-4 text-[var(--text-secondary)] border border-[var(--border)]">
-                <Paperclip size={32} />
+              <div className="rounded-[3px] bg-[var(--bg-surface)] p-3.5 text-[var(--text-secondary)] border border-[var(--border)]">
+                <Paperclip size={28} />
               </div>
               <div className="flex flex-col gap-1 max-w-sm">
-                <span className="text-[14px] font-semibold text-[var(--text-primary)]">
+                <span className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
                   Preview Not Available
                 </span>
-                <span className="text-[12px] text-[var(--text-tertiary)]">
+                <span className="text-[11px] text-[var(--text-tertiary)]">
                   This file format ({attachment.name.split('.').pop()?.toUpperCase() || 'binary'}) cannot be rendered inline. Download the file to view it on your system.
                 </span>
               </div>
@@ -416,9 +419,9 @@ export function AttachmentPreviewModal({
                 <button
                   type="button"
                   onClick={onDownload}
-                  className="mt-2 flex items-center gap-2 rounded-md bg-[var(--text-primary)] text-[var(--bg-base)] px-4 py-2 text-[12.5px] font-medium shadow-sm hover:opacity-90 transition-opacity"
+                  className="mt-2 flex items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] text-[var(--bg-base)] px-3.5 py-1.5 text-[11px] font-medium hover:opacity-90 transition-opacity"
                 >
-                  <Download size={14} /> Download File ({formatBytes(attachment.size)})
+                  <Download size={13} /> Download File ({formatBytes(attachment.size)})
                 </button>
               )}
             </div>

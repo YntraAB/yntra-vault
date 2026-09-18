@@ -149,12 +149,12 @@ mod win_detection {
                     if val_status.is_ok() {
                         let len = (buf_size / 2) as usize;
                         let len = if len > 0 && buf[len - 1] == 0 { len - 1 } else { len };
-                        if let Ok(dev_path) = String::from_utf16(&buf[..len]) {
-                            if let Some(key_info) = parse_device_instance(&dev_path) {
-                                if !keys.iter().any(|existing: &HardwareKeyInfo| existing.id == key_info.id) {
-                                    keys.push(key_info);
-                                }
-                            }
+                        if let Some(key_info) = String::from_utf16(&buf[..len])
+                            .ok()
+                            .and_then(|dev_path| parse_device_instance(&dev_path))
+                            .filter(|key_info| !keys.iter().any(|existing: &HardwareKeyInfo| existing.id == key_info.id))
+                        {
+                            keys.push(key_info);
                         }
                     }
                 }
@@ -231,13 +231,7 @@ mod win_detection {
     }
 
     fn parse_serial(upper: &str) -> Option<u32> {
-        let parts: Vec<&str> = upper.split('\\').collect();
-        if let Some(last) = parts.last() {
-            if let Ok(num) = last.parse::<u32>() {
-                return Some(num);
-            }
-        }
-        None
+        upper.split('\\').next_back().and_then(|last| last.parse::<u32>().ok())
     }
 }
 
@@ -633,13 +627,12 @@ mod win_yubikey_hid {
             let mut start = 0;
             for i in 0..buf.len() {
                 if buf[i] == 0 {
-                    if i > start {
-                        if let Ok(s) = String::from_utf16(&buf[start..i]) {
-                            let upper = s.to_uppercase();
-                            if upper.contains("VID_1050") {
-                                paths.push(s);
-                            }
-                        }
+                    if i > start
+                        && let Some(s) = String::from_utf16(&buf[start..i])
+                            .ok()
+                            .filter(|s| s.to_uppercase().contains("VID_1050"))
+                    {
+                        paths.push(s);
                     }
                     start = i + 1;
                 }
@@ -1108,18 +1101,18 @@ mod tests {
         ).unwrap();
 
         // 1. Success with correct password and hardware response
-        let restored = unlock_from_embedded_hardware2fa_headers(&[hw_header.clone()], aad, password, None, &hw_resp).unwrap();
+        let restored = unlock_from_embedded_hardware2fa_headers(std::slice::from_ref(&hw_header), aad, password, None, &hw_resp).unwrap();
         assert_eq!(subkeys.vault_key.bytes, restored.vault_key.bytes);
         assert_eq!(subkeys.entry_key.bytes, restored.entry_key.bytes);
 
         // 2. Incorrect master password fails AEAD decryption (True 2FA enforcement)
         let wrong_password = b"wrong_password_123";
-        let err_pass = unlock_from_embedded_hardware2fa_headers(&[hw_header.clone()], aad, wrong_password, None, &hw_resp);
+        let err_pass = unlock_from_embedded_hardware2fa_headers(std::slice::from_ref(&hw_header), aad, wrong_password, None, &hw_resp);
         assert!(err_pass.is_err());
 
         // 3. Incorrect hardware response fails (Factor 2 enforcement)
         let invalid_resp = vec![0xFFu8; 20];
-        let err_hw = unlock_from_embedded_hardware2fa_headers(&[hw_header.clone()], aad, password, None, &invalid_resp);
+        let err_hw = unlock_from_embedded_hardware2fa_headers(std::slice::from_ref(&hw_header), aad, password, None, &invalid_resp);
         assert!(err_hw.is_err());
     }
 

@@ -123,7 +123,7 @@ impl VaultManager {
             let tokens = generate_index_tokens(&text_to_hash);
             for token in tokens {
                 let hashed = hash_trigram(&token, &keys.search_key.bytes);
-                self.search_index.entry(hashed).or_insert_with(Vec::new).push(id);
+                self.search_index.entry(hashed).or_default().push(id);
             }
         }
     }

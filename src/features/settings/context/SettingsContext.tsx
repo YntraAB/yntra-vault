@@ -136,6 +136,16 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [settings.externalFaviconsEnabled]);
 
+  // Apply font size & density globally to document root
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (settings.fontSize) {
+        document.documentElement.style.fontSize = `${settings.fontSize}px`;
+      }
+      document.documentElement.setAttribute('data-density', settings.density || 'normal');
+    }
+  }, [settings.fontSize, settings.density]);
+
   const value = useMemo(() => ({ settings, updateSettings }), [settings, updateSettings]);
 
   return (

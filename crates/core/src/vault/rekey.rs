@@ -157,8 +157,8 @@ impl VaultManager {
         self.hardware2fa = None;
 
         // Invalidate active emergency kit shares derived from the old master password
-        if let Some(ref mut audit) = self.data.settings.emergency_kit_audit {
-            if !audit.active_fingerprint.is_empty() {
+        if let Some(ref mut audit) = self.data.settings.emergency_kit_audit
+            && !audit.active_fingerprint.is_empty() {
                 audit.history.push(crate::vault::types::EmergencyKitAuditEntry {
                     timestamp: chrono::Utc::now(),
                     fingerprint: audit.active_fingerprint.clone(),
@@ -166,7 +166,6 @@ impl VaultManager {
                 });
                 audit.active_fingerprint.clear();
             }
-        }
 
         if self.biometric.is_some() {
             let temp_header = FileHeader {

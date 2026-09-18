@@ -383,6 +383,12 @@ fn test_key_file_safely_size_limit_and_zeroization() {
     // Test non-existent file
     let missing_path = temp_dir.path().join("missing.key");
     assert!(read_key_file_safely(&missing_path).is_err());
+
+    // Test empty (0-byte) keyfile rejection
+    let empty_path = temp_dir.path().join("empty.key");
+    std::fs::write(&empty_path, b"").unwrap();
+    let empty_res = read_key_file_safely(&empty_path);
+    assert!(empty_res.is_err(), "Empty keyfile must be rejected");
 }
 
 #[test]

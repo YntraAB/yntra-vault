@@ -79,7 +79,7 @@ export default function SmartLoginModal({
         return (
           <motion.div
             key={i}
-            className={`flex items-start gap-2 py-[3px] px-1.5 rounded ${
+            className={`flex items-start gap-2 py-[3px] px-1.5 rounded-[3px] ${
               compact ? '' : 'hover:bg-[var(--bg-hover)]'
             } group`}
             initial={compact ? {} : { opacity: 0, y: 3 }}
@@ -90,7 +90,7 @@ export default function SmartLoginModal({
               {isLast && !isTerminal ? (
                 <Loader2 size={10} className="text-[var(--text-tertiary)] animate-spin" />
               ) : state === 'Success' ? (
-                <CheckCircle2 size={10} className="text-green-500" />
+                <CheckCircle2 size={10} className="text-[var(--text-primary)]" />
               ) : (
                 <div className="w-[4px] h-[4px] rounded-full bg-[var(--text-tertiary)] opacity-30" />
               )}
@@ -120,40 +120,46 @@ export default function SmartLoginModal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.12 }}
         >
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
 
           <motion.div
-            className="relative w-full max-w-[400px] mx-4 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] shadow-xl overflow-hidden"
-            initial={{ scale: 0.97, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.97, opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            className="relative w-full max-w-[420px] mx-4 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
+            initial={{ scale: 0.98, opacity: 0, y: 4 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.98, opacity: 0, y: 4 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-              <div className="flex items-center gap-2 min-w-0">
-                <Zap size={13} className="text-[var(--text-secondary)] shrink-0" />
-                <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
-                  Smart Login
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)] truncate">
-                  · {entryTitle}
-                </span>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--bg-surface)]">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] shrink-0">
+                  <Zap size={13} />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight truncate">
+                    Smart Login
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)] truncate">
+                    {entryTitle}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-1 shrink-0 ml-2">
                 {/* Copy button — shown when there are events */}
                 {events.length > 0 && (
                   <button
+                    type="button"
                     onClick={handleCopyLog}
-                    className="p-1 rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] transition-colors"
+                    className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                     title="Copy log"
                   >
-                    {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
+                    {copied ? <Check size={13} className="text-[var(--text-primary)]" /> : <Copy size={13} />}
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="p-1 rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] transition-colors"
+                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                 >
                   <X size={14} />
                 </button>
@@ -162,16 +168,16 @@ export default function SmartLoginModal({
 
             {/* ───── Phase: Confirm browser close ───── */}
             {phase === 'confirm' && (
-              <div className="px-4 py-4">
+              <div className="px-4 py-4 bg-[var(--bg-elevated)]">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 p-1.5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border)]">
-                    <MonitorX size={16} className="text-[var(--text-secondary)]" />
+                  <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] shrink-0 mt-0.5">
+                    <MonitorX size={14} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13px] text-[var(--text-primary)] font-medium">
+                    <p className="text-[13px] text-[var(--text-primary)] font-semibold tracking-tight">
                       Close {browserName}?
                     </p>
-                    <p className="text-[12px] text-[var(--text-tertiary)] mt-1 leading-relaxed">
+                    <p className="text-[11px] text-[var(--text-tertiary)] mt-1 leading-relaxed">
                       Smart Login needs to restart {browserName} with debug access to use your profile and cookies. All open tabs will be closed.
                     </p>
                   </div>
@@ -184,7 +190,7 @@ export default function SmartLoginModal({
                     role="checkbox"
                     aria-checked={dontAskAgain}
                     onClick={() => onDontAskAgainChange(!dontAskAgain)}
-                    className={`w-3.5 h-3.5 rounded border transition-colors flex items-center justify-center shrink-0 ${
+                    className={`w-3.5 h-3.5 rounded-[3px] border transition-colors flex items-center justify-center shrink-0 ${
                       dontAskAgain
                         ? 'bg-[var(--text-secondary)] border-[var(--text-secondary)]'
                         : 'border-[var(--border)] group-hover:border-[var(--text-tertiary)]'
@@ -205,16 +211,18 @@ export default function SmartLoginModal({
                 </label>
 
                 {/* Actions */}
-                <div className="flex justify-end gap-2 mt-4">
+                <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-[var(--border)]">
                   <button
+                    type="button"
                     onClick={onClose}
-                    className="px-3 py-1.5 text-[12px] rounded-md text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] transition-colors"
+                    className="h-7 px-3 text-[11px] font-medium rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={onConfirmClose}
-                    className="flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium rounded-md bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] transition-colors"
+                    className="flex h-7 items-center gap-1 px-3 text-[11px] font-medium rounded-[3px] bg-[var(--text-primary)] text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer"
                   >
                     Close & continue
                     <ChevronRight size={12} />
@@ -225,24 +233,25 @@ export default function SmartLoginModal({
 
             {/* ───── Phase: Preparing / Running ───── */}
             {(phase === 'preparing' || phase === 'running') && (
-              <div className="px-4 py-3">
+              <div className="px-4 py-3 bg-[var(--bg-elevated)]">
                 <div
                   ref={scrollRef}
                   className="max-h-[260px] overflow-y-auto scrollbar-thin"
                 >
                   {events.length === 0 && (
                     <div className="flex items-center gap-2 py-5 justify-center">
-                      <Loader2 size={14} className="text-[var(--text-tertiary)] animate-spin" />
-                      <span className="text-[12px] text-[var(--text-tertiary)]">Preparing...</span>
+                      <Loader2 size={13} className="text-[var(--text-tertiary)] animate-spin" />
+                      <span className="text-[11px] text-[var(--text-tertiary)]">Preparing...</span>
                     </div>
                   )}
                   {events.length > 0 && renderEventList(events)}
                 </div>
 
-                <div className="flex justify-end mt-3 pt-2 border-t border-[var(--border)]">
+                <div className="flex justify-end mt-3 pt-2.5 border-t border-[var(--border)]">
                   <button
+                    type="button"
                     onClick={onCancel}
-                    className="px-3 py-1.5 text-[12px] rounded-md text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] transition-colors"
+                    className="h-7 px-3 text-[11px] font-medium rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -252,26 +261,24 @@ export default function SmartLoginModal({
 
             {/* ───── Phase: Done ───── */}
             {phase === 'done' && (
-              <div className="px-4 py-3">
+              <div className="px-4 py-3 bg-[var(--bg-elevated)]">
                 {/* Event log — collapsed, scrollable, selectable */}
                 {events.length > 0 && (
-                  <div className="max-h-[180px] overflow-y-auto mb-3 scrollbar-thin">
+                  <div className="max-h-[180px] overflow-y-auto mb-3 scrollbar-thin rounded-[3px] border border-[var(--border)] p-2 bg-[var(--bg-base)]">
                     {renderEventList(events, true)}
                   </div>
                 )}
 
                 {/* Result */}
-                <div className={`flex items-start gap-2.5 px-3 py-2.5 rounded-md border ${
-                  isSuccess ? 'bg-[var(--bg-elevated)] border-green-500/20' : 'bg-[var(--bg-elevated)] border-[var(--border)]'
-                }`}>
+                <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)]">
                   {isSuccess ? (
                     <>
-                      <CheckCircle2 size={15} className="text-green-500 shrink-0 mt-[1px]" />
+                      <CheckCircle2 size={14} className="text-[var(--text-primary)] shrink-0 mt-[1px]" />
                       <span className="text-[12px] text-[var(--text-primary)] font-medium select-text">Login successful</span>
                     </>
                   ) : isCaptcha ? (
                     <>
-                      <AlertTriangle size={15} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
+                      <AlertTriangle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
                       <div>
                         <p className="text-[12px] text-[var(--text-primary)] font-medium">CAPTCHA required</p>
                         <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 select-text">Complete it in the browser window.</p>
@@ -279,7 +286,7 @@ export default function SmartLoginModal({
                     </>
                   ) : isMfa ? (
                     <>
-                      <AlertTriangle size={15} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
+                      <AlertTriangle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
                       <div>
                         <p className="text-[12px] text-[var(--text-primary)] font-medium">Two-factor authentication</p>
                         <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 select-text">Complete 2FA in the browser window.</p>
@@ -287,12 +294,12 @@ export default function SmartLoginModal({
                     </>
                   ) : isCancelled ? (
                     <>
-                      <XCircle size={15} className="text-[var(--text-tertiary)] shrink-0 mt-[1px]" />
+                      <XCircle size={14} className="text-[var(--text-tertiary)] shrink-0 mt-[1px]" />
                       <span className="text-[12px] text-[var(--text-tertiary)] select-text">Cancelled</span>
                     </>
                   ) : (
                     <>
-                      <XCircle size={15} className="text-red-400 shrink-0 mt-[1px]" />
+                      <XCircle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
                       <div className="min-w-0">
                         <p className="text-[12px] text-[var(--text-primary)] font-medium">Login failed</p>
                         {error && (
@@ -303,10 +310,11 @@ export default function SmartLoginModal({
                   )}
                 </div>
 
-                <div className="flex justify-end mt-3 pt-2 border-t border-[var(--border)]">
+                <div className="flex justify-end mt-3 pt-2.5 border-t border-[var(--border)]">
                   <button
+                    type="button"
                     onClick={onClose}
-                    className="px-3 py-1.5 text-[12px] font-medium rounded-md bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] transition-colors"
+                    className="h-7 px-3 text-[11px] font-medium rounded-[3px] bg-[var(--text-primary)] text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer"
                   >
                     Close
                   </button>

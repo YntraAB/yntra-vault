@@ -14,7 +14,7 @@ pub fn bench_kdf(c: &mut Criterion) {
     let salt = generate_salt();
 
     group.bench_function("Salt Generation (32 bytes)", |b| {
-        b.iter(|| generate_salt());
+        b.iter(generate_salt);
     });
 
     let master_key = derive_master_key(password, &salt).expect("Master key derivation");

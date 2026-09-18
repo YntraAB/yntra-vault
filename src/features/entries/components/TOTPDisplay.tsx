@@ -65,15 +65,15 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-[var(--bg-elevated)] select-none"
+          className="flex items-center gap-1.5 rounded-[3px] px-2 py-1 transition-colors hover:bg-[var(--bg-elevated)] select-none"
         >
           <CountdownRing progress={progress} size={14} urgent={isUrgent} />
           <span className={`font-mono text-[13px] font-semibold ${
-            isUrgent ? 'text-red-400' : 'text-[var(--text-primary)]'
+            isUrgent ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
           }`}>
             {formattedCode}
           </span>
-          {copied && <Check size={12} className="text-green-500" />}
+          {copied && <Check size={12} className="text-[var(--text-primary)]" />}
         </button>
       </ActionTooltip>
     );
@@ -85,7 +85,7 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
 
       <div className="flex items-baseline gap-2">
         <span className={`font-mono text-[16px] font-bold tracking-wider select-all ${
-          isUrgent ? 'text-red-400 animate-pulse' : 'text-[var(--text-primary)]'
+          isUrgent ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'
         }`}>
           {formattedCode}
         </span>
@@ -101,7 +101,7 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
           className="ml-auto rounded-[3px] p-1 transition-colors hover:bg-[var(--bg-active)] select-none"
         >
           {copied
-            ? <Check size={13} className="text-green-500" />
+            ? <Check size={13} className="text-[var(--text-primary)]" />
             : <Copy size={13} className="text-[var(--text-secondary)]" />
           }
         </button>
@@ -120,7 +120,7 @@ const CountdownRing: React.FC<{
   const r = size / 2 - 2;
   const circumference = 2 * Math.PI * r;
   const strokeDashoffset = circumference * (1 - progress);
-  const color = urgent ? '#ef4444' : 'var(--accent, #e8e8e8)';
+  const color = urgent ? 'var(--text-secondary)' : 'var(--accent, #e8e8e8)';
 
   return (
     <svg width={size} height={size} className="shrink-0 -rotate-90">

@@ -49,6 +49,7 @@ pub enum IpcRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum IpcResponse {
     Pong,
     ListEntries(Vec<EntryPreview>),
@@ -89,16 +90,22 @@ pub fn get_ipc_pipe_name() -> String {
             }
             return format!("{}/yntra-session.sock", user_dir);
         }
-        format!("/tmp/yntra-session-{}.sock", username)
+        let fallback_dir = format!("/tmp/yntra-{}-run", username);
+        let _ = std::fs::create_dir_all(&fallback_dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&fallback_dir, std::fs::Permissions::from_mode(0o700));
+        }
+        format!("{}/yntra-session.sock", fallback_dir)
     }
 }
 
 pub fn get_session_token_from_env() -> String {
-    if let Ok(env_token) = std::env::var("YNTRA_SESSION") {
-        if !env_token.is_empty() {
+    if let Ok(env_token) = std::env::var("YNTRA_SESSION")
+        && !env_token.is_empty() {
             return env_token;
         }
-    }
     crate::keychain::load_session_token().unwrap_or_default()
 }
 
@@ -202,6 +209,9 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
     println!("  Use 'yntra lock' to terminate session.\n");
 
     let manager_clone = manager.clone();
+    let manager_for_timeout = manager.clone();
+    #[cfg(not(windows))]
+    let pipe_name_for_timeout = pipe_name.clone();
     let last_act_clone = last_activity.clone();
     let valid_token = Arc::new(session_token);
 
@@ -212,7 +222,13 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
             let elapsed = last_act_clone.lock().unwrap().elapsed();
             if elapsed > Duration::from_secs(900) { // 15 minutes
                 println!("\n{} Inactivity timeout reached (15m). Locking vault session...", "⌛".yellow().bold());
+                if let Ok(mut mgr) = manager_for_timeout.lock() {
+                    mgr.lock();
+                }
+                let _ = yntra_vault_core::crypto::clear_clipboard();
                 let _ = crate::keychain::clear_session_token();
+                #[cfg(not(windows))]
+                let _ = std::fs::remove_file(&pipe_name_for_timeout);
                 std::process::exit(0);
             }
         }
@@ -239,8 +255,8 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
                     let req_len = u32::from_le_bytes(len_bytes) as usize;
                     if req_len <= 16 * 1024 * 1024 { // 16MB OOM guard
                         let mut req_buf = vec![0u8; req_len];
-                        if tokio::time::timeout(timeout_dur, server.read_exact(&mut req_buf)).await.ok().and_then(|r| r.ok()).is_some() {
-                            if let Ok(envelope) = serde_json::from_slice::<IpcEnvelope>(&req_buf) {
+                        if tokio::time::timeout(timeout_dur, server.read_exact(&mut req_buf)).await.ok().and_then(|r| r.ok()).is_some()
+                            && let Ok(envelope) = serde_json::from_slice::<IpcEnvelope>(&req_buf) {
                                 use subtle::ConstantTimeEq;
                                 let is_authorized = !valid_token.is_empty()
                                     && !envelope.session_token.is_empty()
@@ -262,11 +278,14 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
 
                                 if should_exit {
                                     println!("{} Received lock command. Session terminated.", "🔒".yellow().bold());
+                                    if let Ok(mut mgr) = manager_clone.lock() {
+                                        mgr.lock();
+                                    }
+                                    let _ = yntra_vault_core::crypto::clear_clipboard();
                                     let _ = crate::keychain::clear_session_token();
                                     std::process::exit(0);
                                 }
                             }
-                        }
                     }
                 }
             }
@@ -325,6 +344,10 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
 
                                 if should_exit {
                                     println!("{} Received lock command. Session terminated.", "🔒".yellow().bold());
+                                    if let Ok(mut mgr) = manager_clone.lock() {
+                                        mgr.lock();
+                                    }
+                                    let _ = yntra_vault_core::crypto::clear_clipboard();
                                     let _ = std::fs::remove_file(&pipe_name);
                                     let _ = crate::keychain::clear_session_token();
                                     std::process::exit(0);
@@ -440,8 +463,8 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                         }
 
                         // 2. OpenSSH private key in password
-                        if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.password) {
-                            if parsed.can_sign() {
+                        if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.password)
+                            && parsed.can_sign() {
                                 let blob = parsed.pubkey_blob().to_vec();
                                 if !identities.iter().any(|i| i.key_blob == blob) {
                                     identities.push(SshIdentityPayload {
@@ -450,11 +473,10 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                                     });
                                 }
                             }
-                        }
 
                         // 3. OpenSSH private key in notes
-                        if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.notes) {
-                            if parsed.can_sign() {
+                        if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.notes)
+                            && parsed.can_sign() {
                                 let blob = parsed.pubkey_blob().to_vec();
                                 if !identities.iter().any(|i| i.key_blob == blob) {
                                     identities.push(SshIdentityPayload {
@@ -463,12 +485,11 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                                     });
                                 }
                             }
-                        }
 
                         // 4. Custom fields
                         for cf in &full_entry.custom_fields {
-                            if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&cf.value) {
-                                if parsed.can_sign() {
+                            if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&cf.value)
+                                && parsed.can_sign() {
                                     let blob = parsed.pubkey_blob().to_vec();
                                     if !identities.iter().any(|i| i.key_blob == blob) {
                                         identities.push(SshIdentityPayload {
@@ -477,17 +498,16 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                                         });
                                     }
                                 }
-                            }
                         }
 
                         // 5. File attachments (e.g. id_ed25519 attached)
                         for att in &full_entry.attachments {
                             let lower = att.name.to_ascii_lowercase();
-                            if lower.contains("id_") || lower.ends_with(".pem") || lower.ends_with(".key") || lower.contains("ssh") {
-                                if let Ok(att_bytes) = mgr.get_attachment_data(full_entry.id, att.id) {
-                                    if let Ok(text) = std::str::from_utf8(&att_bytes) {
-                                        if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(text) {
-                                            if parsed.can_sign() {
+                            if (lower.contains("id_") || lower.ends_with(".pem") || lower.ends_with(".key") || lower.contains("ssh"))
+                                && let Ok(att_bytes) = mgr.get_attachment_data(full_entry.id, att.id)
+                                    && let Ok(text) = std::str::from_utf8(&att_bytes)
+                                        && let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(text)
+                                            && parsed.can_sign() {
                                                 let blob = parsed.pubkey_blob().to_vec();
                                                 if !identities.iter().any(|i| i.key_blob == blob) {
                                                     identities.push(SshIdentityPayload {
@@ -496,10 +516,6 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                                                     });
                                                 }
                                             }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -519,11 +535,11 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                 };
 
                 // 1. Check passkey
-                if preview.has_passkey {
-                    if let Some(ref pubkey_bytes) = full_entry.passkey_public_key {
+                if preview.has_passkey
+                    && let Some(ref pubkey_bytes) = full_entry.passkey_public_key {
                         let wire_blob = yntra_crypto::ssh::encode_p256_pubkey(pubkey_bytes);
-                        if wire_blob == pubkey_blob {
-                            if let Ok(priv_bytes) = mgr.get_passkey_private_key(preview.id) {
+                        if wire_blob == pubkey_blob
+                            && let Ok(priv_bytes) = mgr.get_passkey_private_key(preview.id) {
                                 let parsed = yntra_crypto::ssh::ParsedSshKey::P256 {
                                     pubkey_blob: wire_blob,
                                     private_key: Zeroizing::new(priv_bytes),
@@ -533,55 +549,46 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
                                     Err(e) => return IpcResponse::Error(e.to_string()),
                                 }
                             }
-                        }
                     }
-                }
 
                 // 2. Check full entry password, notes, custom fields
-                if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.password) {
-                    if parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
+                if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.password)
+                    && parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
                         match parsed.sign(&data) {
                             Ok(sig) => return IpcResponse::SshSignSuccess(sig),
                             Err(e) => return IpcResponse::Error(e.to_string()),
                         }
                     }
-                }
-                if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.notes) {
-                    if parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
+                if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&full_entry.notes)
+                    && parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
                         match parsed.sign(&data) {
                             Ok(sig) => return IpcResponse::SshSignSuccess(sig),
                             Err(e) => return IpcResponse::Error(e.to_string()),
                         }
                     }
-                }
                 for cf in &full_entry.custom_fields {
-                    if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&cf.value) {
-                        if parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
+                    if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(&cf.value)
+                        && parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
                             match parsed.sign(&data) {
                                 Ok(sig) => return IpcResponse::SshSignSuccess(sig),
                                 Err(e) => return IpcResponse::Error(e.to_string()),
                             }
                         }
-                    }
                 }
 
                 // 3. Check attachments
                 for att in &full_entry.attachments {
                     let lower = att.name.to_ascii_lowercase();
-                    if lower.contains("id_") || lower.ends_with(".pem") || lower.ends_with(".key") || lower.contains("ssh") {
-                        if let Ok(att_bytes) = mgr.get_attachment_data(full_entry.id, att.id) {
-                            if let Ok(text) = std::str::from_utf8(&att_bytes) {
-                                if let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(text) {
-                                    if parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
+                    if (lower.contains("id_") || lower.ends_with(".pem") || lower.ends_with(".key") || lower.contains("ssh"))
+                        && let Ok(att_bytes) = mgr.get_attachment_data(full_entry.id, att.id)
+                            && let Ok(text) = std::str::from_utf8(&att_bytes)
+                                && let Some(parsed) = yntra_crypto::ssh::parse_openssh_private_key(text)
+                                    && parsed.pubkey_blob() == pubkey_blob.as_slice() && parsed.can_sign() {
                                         match parsed.sign(&data) {
                                             Ok(sig) => return IpcResponse::SshSignSuccess(sig),
                                             Err(e) => return IpcResponse::Error(e.to_string()),
                                         }
                                     }
-                                }
-                            }
-                        }
-                    }
                 }
             }
             IpcResponse::Error("Matching SSH signing key not found in vault".into())

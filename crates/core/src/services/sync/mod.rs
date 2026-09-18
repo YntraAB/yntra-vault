@@ -114,8 +114,8 @@ pub fn merge_vault_data(local: &mut crate::vault::types::VaultData, remote: crat
     // 2. Merge Tags by UUID
     let mut tag_map: HashMap<Uuid, Tag> = local.tags.drain(..).map(|t| (t.id, t)).collect();
     for remote_tag in remote.tags {
-        if !tag_map.contains_key(&remote_tag.id) {
-            tag_map.insert(remote_tag.id, remote_tag);
+        if let std::collections::hash_map::Entry::Vacant(e) = tag_map.entry(remote_tag.id) {
+            e.insert(remote_tag);
             stats.tags_merged += 1;
         }
     }
@@ -155,7 +155,7 @@ fn merge_password_histories(
             dest.push(item);
         }
     }
-    dest.sort_by(|a, b| b.changed_at.cmp(&a.changed_at));
+    dest.sort_by_key(|b| std::cmp::Reverse(b.changed_at));
     if dest.len() > MAX_PASSWORD_HISTORY {
         dest.truncate(MAX_PASSWORD_HISTORY);
     }
@@ -221,16 +221,14 @@ pub async fn webdav_get_etag(
         req = req.basic_auth(username, password);
     }
 
-    if let Ok(response) = req.send().await {
-        if response.status().is_success() {
-            if let Some(etag) = response.headers().get("ETag").and_then(|h| h.to_str().ok()) {
+    if let Ok(response) = req.send().await
+        && response.status().is_success()
+            && let Some(etag) = response.headers().get("ETag").and_then(|h| h.to_str().ok()) {
                 let trimmed = normalize_etag(etag);
                 if !trimmed.is_empty() {
                     return Ok(Some(trimmed));
                 }
             }
-        }
-    }
 
     // Fallback: WebDAV PROPFIND (Depth: 0) for servers that don't return ETag on HEAD
     let propfind_method = reqwest::Method::from_bytes(b"PROPFIND").unwrap_or(reqwest::Method::GET);
@@ -241,16 +239,16 @@ pub async fn webdav_get_etag(
         pf_req = pf_req.basic_auth(username, password);
     }
 
-    if let Ok(pf_resp) = pf_req.send().await {
-        if pf_resp.status().is_success() || pf_resp.status().as_u16() == 207 {
+    if let Ok(pf_resp) = pf_req.send().await
+        && (pf_resp.status().is_success() || pf_resp.status().as_u16() == 207) {
             if let Some(etag) = pf_resp.headers().get("ETag").and_then(|h| h.to_str().ok()) {
                 let trimmed = normalize_etag(etag);
                 if !trimmed.is_empty() {
                     return Ok(Some(trimmed));
                 }
             }
-            if let Ok(body) = pf_resp.text().await {
-                if let Some(start) = body.find("<getetag>") {
+            if let Ok(body) = pf_resp.text().await
+                && let Some(start) = body.find("<getetag>") {
                     let rest = &body[start + 9..];
                     if let Some(end) = rest.find("</getetag>") {
                         let etag_val = normalize_etag(&rest[..end]);
@@ -259,9 +257,7 @@ pub async fn webdav_get_etag(
                         }
                     }
                 }
-            }
         }
-    }
 
     Ok(None)
 }
@@ -462,13 +458,12 @@ pub fn decrypt_remote_vault_bytes_checked(
 
     let vault_file = VaultFile::from_bytes(bytes)?;
 
-    if let Some(expected) = expected_salt {
-        if &vault_file.header.salt != expected {
+    if let Some(expected) = expected_salt
+        && &vault_file.header.salt != expected {
             return Err(crate::error::VaultError::SyncError(
                 "Remote vault originates from a different root salt. Synchronizing two independently created vaults is not supported; use the same vault file across devices.".into(),
             ));
         }
-    }
 
     if vault_file.header.version <= 2 {
         if let Some(expected_hmac) = &vault_file.hmac {
@@ -657,8 +652,10 @@ fn apply_and_save_remote_vault(
         fs::rename(&tmp_path, db_filepath)
             .map_err(|e| crate::error::VaultError::SerializationError(format!("Failed to rename sync file: {}", e)))?;
 
-        let mut stats = MergeStats::default();
-        stats.entries_added = remote_data.entries.len();
+        let stats = MergeStats {
+            entries_added: remote_data.entries.len(),
+            ..Default::default()
+        };
         (stats, remote_data, remote_bytes.to_vec())
     };
 
@@ -713,8 +710,8 @@ pub fn get_local_lan_ips() -> Vec<IpAddr> {
     let mut seen = std::collections::HashSet::new();
 
     // 1. Hostname DNS resolution (resolves adapters configured on local host via OS)
-    if let Ok(hostname) = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")) {
-        if let Ok(addrs) = format!("{}:0", hostname).to_socket_addrs() {
+    if let Ok(hostname) = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME"))
+        && let Ok(addrs) = format!("{}:0", hostname).to_socket_addrs() {
             for addr in addrs {
                 let ip = addr.ip();
                 if is_valid_lan_ip(&ip) && seen.insert(ip) {
@@ -726,7 +723,6 @@ pub fn get_local_lan_ips() -> Vec<IpAddr> {
                 }
             }
         }
-    }
 
     // 2. Gateway and route socket probes across standard subnets
     let probes = [
@@ -742,9 +738,9 @@ pub fn get_local_lan_ips() -> Vec<IpAddr> {
     ];
 
     for probe in probes {
-        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect(probe).is_ok() {
-                if let Ok(local_addr) = socket.local_addr() {
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect(probe).is_ok()
+                && let Ok(local_addr) = socket.local_addr() {
                     let ip = local_addr.ip();
                     if is_valid_lan_ip(&ip) && seen.insert(ip) {
                         if ip.is_ipv4() {
@@ -754,8 +750,6 @@ pub fn get_local_lan_ips() -> Vec<IpAddr> {
                         }
                     }
                 }
-            }
-        }
     }
 
     v4_ips.extend(v6_ips);
@@ -830,7 +824,7 @@ pub fn listen_discovery_beacon(
     while start.elapsed() < timeout {
         match socket.recv_from(&mut buf) {
             Ok((len, peer_addr)) => {
-                if len >= 38 && &buf[..4] == &DISCOVERY_BEACON_MAGIC {
+                if len >= 38 && buf[..4] == DISCOVERY_BEACON_MAGIC {
                     let received_id = &buf[4..36];
                     if received_id.ct_eq(expected_discovery_id).into() {
                         // Skip self-echo from our own local network adapters and loopback

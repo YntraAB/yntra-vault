@@ -268,13 +268,13 @@ async fn test_autotype_lock_release_invariant() {
     drop(lock_attempt2);
 
     // 3. Verify that focus loss handler can lock vault concurrently without deadlock
-    if state.lock_on_focus_loss.load(Ordering::Relaxed) {
-        if let Ok(mut vault) = state.vault.lock() {
-            if let Some(ref mut mgr) = *vault {
-                mgr.lock();
-            }
-            *vault = None;
+    if state.lock_on_focus_loss.load(Ordering::Relaxed)
+        && let Ok(mut vault) = state.vault.lock()
+    {
+        if let Some(ref mut mgr) = *vault {
+            mgr.lock();
         }
+        *vault = None;
     }
     assert!(state.vault.lock().unwrap().is_none());
 }

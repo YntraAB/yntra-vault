@@ -297,9 +297,9 @@ pub async fn wait_for_page_ready(page: &Page, max_wait_ms: u64) -> bool {
             return false;
         }
 
-        if let Ok(result) = page.evaluate(POLL_JS).await {
-            if let Ok(json_str) = result.into_value::<String>() {
-                if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json_str) {
+        if let Ok(result) = page.evaluate(POLL_JS).await
+            && let Ok(json_str) = result.into_value::<String>()
+                && let Ok(state) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     let inputs = state["inputs"].as_u64().unwrap_or(0);
                     let buttons = state["buttons"].as_u64().unwrap_or(0);
                     let ready = state["ready"].as_str().unwrap_or("");
@@ -309,8 +309,6 @@ pub async fn wait_for_page_ready(page: &Page, max_wait_ms: u64) -> bool {
                         return true;
                     }
                 }
-            }
-        }
 
         tokio::time::sleep(interval).await;
     }
@@ -346,9 +344,7 @@ pub fn build_button_selector(button: &ButtonInfo) -> String {
         );
     }
     // Use XPath-like text match via JS instead
-    format!(
-        "button, input[type=\"submit\"], [role=\"button\"]"
-    )
+    "button, input[type=\"submit\"], [role=\"button\"]".to_string()
 }
 
 /// Minimal CSS escape for IDs

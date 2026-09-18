@@ -106,7 +106,7 @@ impl VaultManager {
             }
         }
         // Append any remaining tags that were not in tag_ids
-        new_tags.extend(self.data.tags.drain(..));
+        new_tags.append(&mut self.data.tags);
         self.data.tags = new_tags;
         self.save()?;
         Ok(())

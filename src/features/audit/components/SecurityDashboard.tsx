@@ -199,43 +199,43 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
               </ActionTooltip>
             </div>
 
-            {/* Issue Summary Cards - Colored Accents */}
+            {/* Issue Summary Cards */}
             <div className="grid grid-cols-2 gap-2">
               <StatCard
                 icon={<ShieldAlert size={14} />}
                 label={t('security.stat_breached')}
                 count={audit.breached_count}
-                iconClass="bg-red-500/10 text-red-400"
+                iconClass="border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
               />
               <StatCard
                 icon={<Key size={14} />}
                 label={t('security.stat_weak')}
                 count={audit.weak_count}
-                iconClass="bg-amber-500/10 text-amber-400"
+                iconClass="border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
               />
               <StatCard
                 icon={<Copy size={14} />}
                 label={t('security.stat_reused')}
                 count={audit.reused_count}
-                iconClass="bg-purple-500/10 text-purple-400"
+                iconClass="border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
               />
               <StatCard
                 icon={<Clock size={14} />}
                 label={t('security.stat_old')}
                 count={audit.old_count}
-                iconClass="bg-blue-500/10 text-blue-400"
+                iconClass="border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
               />
               <StatCard
                 icon={<Lock size={14} />}
                 label={t('security.stat_missing_2fa')}
                 count={audit.no_2fa_count}
-                iconClass="bg-zinc-500/15 text-zinc-300"
+                iconClass="border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
               />
               <StatCard
                 icon={<ShieldCheck size={14} />}
                 label={t('security.stat_secure')}
                 count={audit.total_entries - audit.breached_count - audit.weak_count}
-                iconClass="bg-emerald-500/10 text-emerald-400"
+                iconClass="border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
               />
             </div>
 
@@ -359,15 +359,15 @@ const IssueRow: React.FC<{
   const { t } = useTranslation();
   const description = getLocalizedIssueDescription(issue, t);
 
-  let dotColor = 'bg-zinc-400';
+  let dotColor = 'bg-[var(--text-tertiary)]';
   if (issue.issue_type === 'Breached') {
-    dotColor = 'bg-red-500';
+    dotColor = 'bg-[var(--text-primary)]';
   } else if (issue.issue_type === 'WeakPassword') {
-    dotColor = 'bg-amber-500';
+    dotColor = 'bg-[var(--text-secondary)]';
   } else if (issue.issue_type === 'ReusedPassword') {
-    dotColor = 'bg-purple-500';
+    dotColor = 'bg-[var(--text-secondary)]';
   } else if (issue.issue_type === 'OldPassword') {
-    dotColor = 'bg-blue-500';
+    dotColor = 'bg-[var(--text-tertiary)]';
   }
 
   const tooltipTitle = issue.is_group && issue.group_entries
@@ -380,7 +380,7 @@ const IssueRow: React.FC<{
         <div className="flex flex-col gap-0.5 max-w-xs text-left py-0.5">
           <span className="font-medium text-white">{tooltipTitle}</span>
           <span className="text-[11px] text-zinc-300 leading-snug">{description}</span>
-          <span className="text-[10px] text-emerald-400 mt-0.5 font-medium">
+          <span className="text-[10px] text-[var(--text-primary)] mt-0.5 font-medium">
             {t('security.click_to_view_entry', { entry: tooltipTitle })}
           </span>
         </div>

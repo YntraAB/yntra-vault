@@ -54,21 +54,18 @@ pub async fn check_biometric_available() -> Result<yntra_vault_core::crypto::bio
 #[tauri::command]
 pub async fn is_biometric_enabled(path: String, state: State<'_, AppState>) -> Result<bool, String> {
     let vault_path = PathBuf::from(&path);
-    if let Ok(vault_lock) = state.vault.lock() {
-        if let Some(ref manager) = *vault_lock {
-            if manager.is_biometric_enabled() {
+    if let Ok(vault_lock) = state.vault.lock()
+        && let Some(ref manager) = *vault_lock
+            && manager.is_biometric_enabled() {
                 return Ok(true);
             }
-        }
-    }
     if VaultManager::is_biometric_enabled_file(&vault_path) {
         return Ok(true);
     }
-    if let Ok(canonical) = vault_path.canonicalize() {
-        if VaultManager::is_biometric_enabled_file(&canonical) {
+    if let Ok(canonical) = vault_path.canonicalize()
+        && VaultManager::is_biometric_enabled_file(&canonical) {
             return Ok(true);
         }
-    }
     Ok(false)
 }
 
@@ -148,21 +145,18 @@ pub async fn list_hardware_keys() -> Result<Vec<yntra_vault_core::crypto::hardwa
 #[tauri::command]
 pub async fn is_hardware2fa_enabled(path: String, state: State<'_, AppState>) -> Result<bool, String> {
     let vault_path = PathBuf::from(&path);
-    if let Ok(vault_lock) = state.vault.lock() {
-        if let Some(ref manager) = *vault_lock {
-            if manager.is_hardware2fa_enabled() {
+    if let Ok(vault_lock) = state.vault.lock()
+        && let Some(ref manager) = *vault_lock
+            && manager.is_hardware2fa_enabled() {
                 return Ok(true);
             }
-        }
-    }
     if VaultManager::is_hardware2fa_enabled_file(&vault_path) {
         return Ok(true);
     }
-    if let Ok(canonical) = vault_path.canonicalize() {
-        if VaultManager::is_hardware2fa_enabled_file(&canonical) {
+    if let Ok(canonical) = vault_path.canonicalize()
+        && VaultManager::is_hardware2fa_enabled_file(&canonical) {
             return Ok(true);
         }
-    }
     Ok(false)
 }
 
@@ -215,6 +209,7 @@ pub async fn perform_hardware2fa_challenge(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn enable_hardware2fa(
     mut password: String,
     key_file_path: Option<String>,

@@ -64,11 +64,10 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
     }
 
     // Check in-memory cache first
-    if let Ok(guard) = get_cache().lock() {
-        if let Some(cached) = guard.get(&clean_domain) {
+    if let Ok(guard) = get_cache().lock()
+        && let Some(cached) = guard.get(&clean_domain) {
             return Ok(cached.clone());
         }
-    }
 
     // Offline-first invariant: do not query external third parties unless explicitly enabled
     if !is_external_favicons_enabled() {
