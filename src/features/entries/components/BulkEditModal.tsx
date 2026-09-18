@@ -104,7 +104,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 select-none"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 overflow-y-auto touch-pan-y overscroll-contain"
           onClick={onClose}
         >
           <motion.div
@@ -134,7 +134,7 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
             </div>
 
             {/* Form Content */}
-            <div className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0">
+            <div className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0 touch-pan-y overscroll-contain">
               {/* Title Card */}
               <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-3 shadow-2xs">
                 <div className="flex items-center justify-between">

@@ -463,7 +463,7 @@ export function PasswordDetail() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6 touch-pan-y">
+    <div className="flex flex-1 h-full w-full min-h-0 flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6 touch-pan-y overscroll-contain">
       {isLoadingDetail ? (
         <div className="flex flex-col">
           {/* Header */}
@@ -503,7 +503,7 @@ export function PasswordDetail() {
           </div>
         </div>
       ) : !data ? null : (
-        <div className="flex flex-col">
+        <div className="flex flex-col shrink-0 w-full">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-3.5 sm:p-4 select-none">
               <div className="flex items-start gap-3 min-w-0 flex-1">

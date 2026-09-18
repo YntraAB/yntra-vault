@@ -279,7 +279,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 select-none p-3 sm:p-4 touch-pan-y"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 p-3 sm:p-4 touch-pan-y overscroll-contain"
           onClick={onClose}
         >
           <motion.div
@@ -343,7 +343,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
             </div>
 
             {/* Form Body with Animated Steps */}
-            <div className="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto touch-pan-y">
+            <div className="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
               <AnimatePresence mode="wait">
                 {/* STEP 0: CURRENT PASSWORD & CURRENT KEYFILE */}
                 {step === 0 && (

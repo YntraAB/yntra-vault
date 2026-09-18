@@ -67,8 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Mobile Touch Scrolling & Momentum Gestures**:
-  - Resolved missing, clipped, and unresponsive touch scrolling across mobile and Android release builds.
-  - Replaced global `* { touch-action: manipulation; }` with targeted interactive element selectors, enabling unhindered touch gesture panning throughout the application.
+  - Resolved missing, clipped, and unresponsive touch scrolling across mobile and Android release builds, specifically fixing the entry list in `PasswordList`.
+  - Fixed parent flex container height collapse in `AppLayout.tsx` on mobile where `PasswordList`'s `h-full` was treated as indefinite and clipped by `overflow: hidden`.
+  - Removed synthetic `onTouchStart`, `onTouchMove`, and `onTouchEnd` event hijacking on `ListItem`, allowing the Android WebView touch compositor thread to immediately recognise vertical kinetic scroll gestures without dead zones.
+  - Added `shrink-0` to list sections and items, preventing flexbox compression from collapsing the scrollable boundary.
+  - Replaced global `* { touch-action: manipulation; }` with targeted interactive element selectors, and added `.overflow-y-auto * { touch-action: pan-y; }` to guarantee buttons inside lists never block kinetic scrolling.
+  - Removed `user-select: none` (`select-none`) from scrollable root containers and modal backdrops, preventing Chromium WebView from misinterpreting touch drags as text selection intents.
   - Added `-webkit-overflow-scrolling: touch`, `overscroll-behavior: contain`, and `touch-action: pan-y / pan-x` across all scrollable views (`PasswordList`, `PasswordDetail`, `SettingsPanel`, `Login`, `VaultSelect`, `Onboarding`).
   - Added flex-column `min-h-0` constraints and eliminated double-nested scroll collisions on mobile detail views.
   - Standardized all 13 application modals with responsive overlay scrolling, viewport height clamping (`max-h-[calc(100dvh-1.5rem)]`), and safe-area insets to prevent clipping on mobile screens and when virtual keyboards open.

@@ -72,7 +72,7 @@ export function DeleteTrashModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 select-none p-3 sm:p-4 touch-pan-y"
+          className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 p-3 sm:p-4 touch-pan-y overscroll-contain"
           onClick={onClose}
         >
           <motion.div
@@ -110,7 +110,7 @@ export function DeleteTrashModal({
             </div>
 
             {/* Body */}
-            <div className="p-5 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto touch-pan-y">
+            <div className="p-5 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
               {isSingle ? (
                 <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
                   {t('delete.confirm_before')}{' '}

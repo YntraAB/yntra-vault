@@ -367,7 +367,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 select-none p-3 sm:p-4 touch-pan-y"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 p-3 sm:p-4 touch-pan-y overscroll-contain"
           onClick={handleClose}
         >
         <motion.div
@@ -435,7 +435,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           )}
 
           {/* Body Content */}
-          <div className="flex flex-col gap-4 p-5 flex-1 min-h-0 overflow-y-auto touch-pan-y">
+          <div className="flex flex-col gap-4 p-5 flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
             {/* Step 0: Role Selection */}
             {step === 'role' && (
               <div className="flex flex-col gap-3">

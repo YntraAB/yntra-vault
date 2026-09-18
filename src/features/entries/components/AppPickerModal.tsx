@@ -155,7 +155,7 @@ export function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalPro
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-xs p-3 sm:p-4 select-none touch-pan-y" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-xs p-3 sm:p-4 touch-pan-y overscroll-contain" onClick={onClose}>
           <motion.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -258,7 +258,7 @@ export function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalPro
               </div>
 
               {/* Apps List */}
-              <div className="mt-3 flex-1 min-h-0 overflow-y-auto pr-1 space-y-1 touch-pan-y">
+              <div className="mt-3 flex-1 min-h-0 overflow-y-auto pr-1 space-y-1 touch-pan-y overscroll-contain">
                 {loading ? (
                   <div className="flex h-40 items-center justify-center text-[12px] text-[var(--text-tertiary)]">
                     {t('app_picker.scanning')}

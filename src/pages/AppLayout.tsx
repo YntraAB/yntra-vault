@@ -228,7 +228,7 @@ export default function AppLayout() {
                 onToggleSearch={() => setMobileSearchVisible(!mobileSearchVisible)}
                 isSearchVisible={mobileSearchVisible}
               />
-              <div className="flex-1 min-h-0 overflow-hidden w-full [&>div]:!w-full [&>div]:!border-r-0">
+              <div className="flex flex-1 min-h-0 flex-col overflow-hidden w-full [&>div]:!w-full [&>div]:!h-full [&>div]:!flex-1 [&>div]:!border-r-0">
                 <PasswordList onResizeStart={() => {}} />
               </div>
             </motion.div>
@@ -254,7 +254,7 @@ export default function AppLayout() {
                   </button>
                 </div>
               </header>
-              <main className="min-w-0 flex-1 min-h-0 overflow-hidden">
+              <main className="min-w-0 flex flex-1 min-h-0 flex-col overflow-hidden w-full h-full">
                 <PasswordDetail />
               </main>
             </motion.div>

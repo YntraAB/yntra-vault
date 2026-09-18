@@ -249,7 +249,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
+      className="relative flex flex-1 h-full w-full min-h-0 flex-col border-r-0 md:border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]"
       style={{ width: 'var(--passwordlist-width)' }}
     >
       {/* Desktop Header */}
@@ -322,7 +322,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
       {/* List */}
       <div
-        className="flex flex-1 min-h-0 flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0 touch-pan-y"
+        className="flex flex-1 min-h-0 flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0 touch-pan-y overscroll-contain"
         onContextMenu={handleListAreaContextMenu}
       >
         <AnimatePresence mode="wait">
@@ -354,15 +354,12 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
               <p className="text-[13px] text-[var(--text-tertiary)]">{t('list.empty_title')}</p>
             </motion.div>
           ) : (
-            <motion.div
+            <div
               key="populated-list"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.1, ease: 'easeInOut' }}
-              className="flex flex-1 min-h-0 flex-col w-full"
+              className="w-full shrink-0 flex flex-col"
             >
               {sections.map((section) => (
-                <div key={section.title}>
+                <div key={section.title} className="w-full">
                   <div className="sticky top-0 z-10 flex h-7 items-center bg-[var(--bg-surface)] px-3">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
                       {section.title}
@@ -382,14 +379,14 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
                   ))}
                 </div>
               ))}
-            </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* Resize handle */}
+      {/* Resize handle (desktop only) */}
       <div
-        className="absolute right-0 top-0 z-10 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
+        className="hidden md:block absolute right-0 top-0 z-10 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
         onMouseDown={onResizeStart}
         role="slider"
         aria-label={t('common.resize_password_list')}
@@ -480,37 +477,12 @@ function ListItem({
     subTextClass = 'text-[13px]';
   }
 
-  // Long press timer for mobile touch viewports
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    longPressTimerRef.current = setTimeout(() => {
-      onContextMenu({
-        preventDefault: () => {},
-        stopPropagation: () => {},
-        clientX: e.touches[0].clientX,
-        clientY: e.touches[0].clientY,
-      } as any);
-    }, 500);
-  };
-
-  const handleTouchEnd = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-    }
-  };
-
   return (
-    <motion.button
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.1 }}
+    <button
+      type="button"
       onClick={onClick}
       onContextMenu={onContextMenu}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onTouchMove={handleTouchEnd}
-      className={`group flex ${itemHeightClass} w-full items-center gap-3 border-b border-[var(--border-subtle)] px-3.5 text-left transition-all active:bg-[var(--bg-hover)] ${
+      className={`group flex ${itemHeightClass} w-full shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-3.5 text-left transition-colors active:bg-[var(--bg-hover)] cursor-pointer touch-pan-y ${
         selected
           ? 'border-l-3 border-l-[var(--text-primary)] bg-[var(--bg-active)]'
           : 'border-l-3 border-l-transparent hover:bg-[var(--bg-hover)]'
@@ -608,7 +580,7 @@ function ListItem({
           </ActionTooltip>
         )}
       </div>
-    </motion.button>
+    </button>
   );
 }
 

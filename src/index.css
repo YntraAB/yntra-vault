@@ -86,6 +86,12 @@
     color-scheme: dark;
   }
 
+  @media (max-width: 767px) {
+    :root {
+      --passwordlist-width: 100% !important;
+    }
+  }
+
   .light {
     --bg-base: #fafafa;
     --bg-surface: #f0f0f0;
@@ -152,16 +158,30 @@
   /* Smooth momentum touch scrolling & overscroll containment for mobile containers */
   .overflow-y-auto,
   [class*="overflow-y-auto"] {
-    -webkit-overflow-scrolling: touch;
+    -webkit-overflow-scrolling: touch !important;
     overscroll-behavior-y: contain;
+    touch-action: pan-y !important;
+  }
+
+  /* Allow vertical touch panning on all children within vertical scroll containers so buttons and items don't block scroll */
+  .overflow-y-auto *,
+  [class*="overflow-y-auto"] * {
     touch-action: pan-y;
+  }
+
+  /* Text inputs within scroll containers still require full manipulation */
+  .overflow-y-auto input,
+  .overflow-y-auto textarea,
+  [class*="overflow-y-auto"] input,
+  [class*="overflow-y-auto"] textarea {
+    touch-action: manipulation;
   }
 
   .overflow-x-auto,
   [class*="overflow-x-auto"] {
-    -webkit-overflow-scrolling: touch;
+    -webkit-overflow-scrolling: touch !important;
     overscroll-behavior-x: contain;
-    touch-action: pan-x;
+    touch-action: pan-x !important;
   }
 
   html {

@@ -121,7 +121,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
     <AnimatePresence>
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm select-none p-3 sm:p-4 touch-pan-y"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm p-3 sm:p-4 touch-pan-y overscroll-contain"
           onClick={onClose}
         >
           <motion.div
@@ -158,7 +158,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
             </div>
 
             {/* Content */}
-            <div className="p-4 flex-1 min-h-0 overflow-y-auto touch-pan-y">
+            <div className="p-4 flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
               {step === 'select' && (
                 <div className="flex flex-col gap-3.5">
                   <div>

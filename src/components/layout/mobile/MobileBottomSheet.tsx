@@ -20,7 +20,7 @@ export function MobileBottomSheet({
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end select-none">
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -46,7 +46,7 @@ export function MobileBottomSheet({
               onClose();
             }
           }}
-          className="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-[20px] border-t border-[var(--border)] bg-[var(--bg-elevated)] pb-[calc(env(safe-area-inset-bottom,0px)+16px)] text-[var(--text-primary)] shadow-2xl select-none"
+          className="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-[20px] border-t border-[var(--border)] bg-[var(--bg-elevated)] pb-[calc(env(safe-area-inset-bottom,0px)+16px)] text-[var(--text-primary)] shadow-2xl"
         >
           {/* Drag Handle Indicator */}
           <div
@@ -70,7 +70,7 @@ export function MobileBottomSheet({
           )}
 
           {/* Sheet Body */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 touch-pan-y">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 touch-pan-y overscroll-contain">
             {children}
           </div>
         </motion.div>

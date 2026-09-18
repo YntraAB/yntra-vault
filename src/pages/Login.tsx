@@ -406,7 +406,7 @@ export default function Login() {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut' }}
-      className="flex min-h-dvh w-full justify-center bg-[var(--bg-base)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] overflow-y-auto select-none touch-pan-y"
+      className="flex min-h-dvh w-full justify-center bg-[var(--bg-base)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] overflow-y-auto touch-pan-y overscroll-contain"
     >
       <div className="w-full max-w-[380px] py-6 my-auto">
         {/* Header */}

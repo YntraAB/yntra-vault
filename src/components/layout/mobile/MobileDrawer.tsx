@@ -25,7 +25,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex select-none">
+        <div className="fixed inset-0 z-50 flex">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -41,7 +41,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
           animate={{ x: 0 }}
           exit={{ x: '-100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 280 }}
-          className="relative z-10 flex h-full w-[280px] max-w-[85vw] flex-col border-r border-[var(--border)] bg-[var(--bg-surface)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] text-[var(--text-primary)] shadow-2xl select-none"
+          className="relative z-10 flex h-full w-[280px] max-w-[85vw] flex-col border-r border-[var(--border)] bg-[var(--bg-surface)] px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] text-[var(--text-primary)] shadow-2xl"
         >
           {/* Header */}
           <div className="flex h-14 items-center justify-between border-b border-[var(--border-subtle)]">
@@ -117,7 +117,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
               </button>
             </div>
 
-            <div className="flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto pr-1 touch-pan-y">
+            <div className="flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto pr-1 touch-pan-y overscroll-contain">
               {tags.map((tag) => (
                 <button
                   key={tag.id}

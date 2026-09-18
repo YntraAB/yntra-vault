@@ -55,7 +55,7 @@ export function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEntryModal
     <AnimatePresence>
       {entry && (
         <div
-          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-xs select-none p-3 sm:p-4 touch-pan-y"
+          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-xs p-3 sm:p-4 touch-pan-y overscroll-contain"
           onClick={onClose}
         >
           <motion.div

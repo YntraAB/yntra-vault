@@ -160,7 +160,7 @@ export function SettingsPanel() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed right-0 top-0 z-50 flex h-full w-full sm:w-[480px] max-w-full flex-col border-l border-[var(--border)] bg-[var(--bg-base)] pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] select-none"
+            className="fixed right-0 top-0 z-50 flex h-full w-full sm:w-[480px] max-w-full flex-col border-l border-[var(--border)] bg-[var(--bg-base)] pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"
           >
             {/* Header */}
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4">
@@ -203,7 +203,7 @@ export function SettingsPanel() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.15, delay: 0.1 }}
-              className="flex-1 min-h-0 overflow-y-auto p-4 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] touch-pan-y"
+              className="flex-1 min-h-0 overflow-y-auto p-4 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] touch-pan-y overscroll-contain"
             >
               {activeTab === 'general' && (
                 <GeneralTab
