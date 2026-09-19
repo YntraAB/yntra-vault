@@ -11,7 +11,6 @@ import android.webkit.WebView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import app.tauri.plugin.TauriActivity
 
 class MainActivity : TauriActivity() {
     private var pendingPermissionRequest: PermissionRequest? = null

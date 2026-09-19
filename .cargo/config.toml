@@ -1,6 +1,12 @@
 [build]
 rustflags = [
     "--remap-path-prefix=./=/yntra-vault/",
+    "-C", "codegen-units=1"
+]
+
+[target.'cfg(target_arch = "x86_64")']
+rustflags = [
+    "--remap-path-prefix=./=/yntra-vault/",
     "-C", "codegen-units=1",
     "-C", "target-cpu=x86-64"
 ]
