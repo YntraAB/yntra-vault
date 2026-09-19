@@ -18,12 +18,14 @@ import {
   QrCode,
   Camera,
   Fingerprint,
+  HelpCircle,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth';
 import { useSettings, Toggle } from '@/features/settings';
 import { useEntries } from '@/features/entries';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
+import { ActionTooltip } from '@/components/ui/tooltip';
 import type { PairingStats, QrSessionInfo } from '@/lib/backend';
 import { formatIpv4Input } from '../utils/formatIpv4';
 import { QrCodeView } from './QrCodeView';
@@ -53,7 +55,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   const { t } = useTranslation();
 
   const [step, setStep] = useState<WizardStep>(
-    defaultRole ? 'password' : 'role'
+    defaultRole === 'client' ? 'code' : defaultRole ? 'password' : 'role'
   );
   const [selectedRole, setSelectedRole] = useState<'host' | 'client'>(defaultRole || 'host');
   const [pairingMode, setPairingMode] = useState<'qr' | 'pin'>('qr');
@@ -132,7 +134,10 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
       setIsManualPasswordAdoption(false);
       setBiometricEnrolled(false);
       setIsEnrollingBiometric(false);
-      if (defaultRole) {
+      if (defaultRole === 'client') {
+        setSelectedRole('client');
+        setStep('code');
+      } else if (defaultRole) {
         setSelectedRole(defaultRole);
         setStep('password');
       } else {
@@ -362,7 +367,6 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     if (!backend) return;
     if (!password) {
       setErrorMsg(t('pairing.err_enter_password') || 'Please enter Master Password.');
-      setStep('password');
       return;
     }
     const fullCode = inputDigits.join('');
@@ -531,13 +535,22 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     onClose();
   };
 
-  const stepTitles = [
-    t('pairing.step_password') || 'Lösenord',
-    pairingMode === 'qr' ? (t('pairing.step_qr') || 'QR-kod') : (t('pairing.step_code') || 'PIN-kod'),
-    t('pairing.step_sync') || 'Synkronisera',
-  ];
+  const isClientFlow = selectedRole === 'client' && !isManualPasswordAdoption;
 
-  const currentStepIdx = step === 'password' ? 0 : step === 'code' ? 1 : 2;
+  const stepTitles = isClientFlow
+    ? [
+        pairingMode === 'qr' ? (t('pairing.step_qr') || 'QR-kod') : (t('pairing.step_code') || 'PIN-kod'),
+        t('pairing.step_sync') || 'Synkronisera',
+      ]
+    : [
+        t('pairing.step_password') || 'Lösenord',
+        pairingMode === 'qr' ? (t('pairing.step_qr') || 'QR-kod') : (t('pairing.step_code') || 'PIN-kod'),
+        t('pairing.step_sync') || 'Synkronisera',
+      ];
+
+  const currentStepIdx = isClientFlow
+    ? (step === 'code' ? 0 : 1)
+    : (step === 'password' ? 0 : step === 'code' ? 1 : 2);
 
   return (
     <>
@@ -601,8 +614,8 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
               {/* Stepper Progress Bar */}
               {step !== 'role' && (
                 <div className="flex items-center justify-between gap-2 px-5 pt-3 pb-2 border-b border-[var(--border-subtle)] bg-[var(--bg-base)]/40">
-                  {['password', 'code', 'connecting', 'success'].map((s, idx) => (
-                    <div key={s} className="flex flex-1 flex-col items-center gap-1.5 min-w-0">
+                  {stepTitles.map((title, idx) => (
+                    <div key={idx} className="flex flex-1 flex-col items-center gap-1.5 min-w-0">
                       <div
                         className={`h-1 w-full rounded-full transition-colors ${
                           idx <= currentStepIdx ? 'bg-[var(--text-primary)]' : 'bg-[var(--border-subtle)]'
@@ -613,7 +626,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                           idx === currentStepIdx ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'
                         }`}
                       >
-                        {stepTitles[idx] || ''}
+                        {title}
                       </span>
                     </div>
                   ))}
@@ -701,9 +714,27 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <label className="text-[11px] font-medium text-[var(--text-secondary)]">
-                        {t('pairing.master_password_label') || 'Master Password'}
-                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-[11px] font-medium text-[var(--text-secondary)]">
+                          {t('pairing.master_password_label') || 'Master Password'}
+                        </label>
+                        <ActionTooltip
+                          content={
+                            isManualPasswordAdoption
+                              ? (t('pairing.manual_adopt_password_desc') || 'Värddatorn inkluderade inte valvlösenordet i överföringen. Ange valvlösenordet för att kryptera och spara valvet på denna enhet.')
+                              : selectedRole === 'host'
+                                ? (t('pairing.host_password_desc') || 'Ange ditt master-lösenord för att bekräfta parkopplingen.')
+                                : (t('pairing.client_password_desc') || 'Ange samma master-lösenord som används på värddatorn.')
+                          }
+                        >
+                          <button
+                            type="button"
+                            className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors p-0.5 rounded cursor-pointer"
+                          >
+                            <HelpCircle size={12} />
+                          </button>
+                        </ActionTooltip>
+                      </div>
                       <div className="relative">
                         <input
                           ref={passwordInputRef}
@@ -718,17 +749,18 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                               handlePasswordSubmit();
                             }
                           }}
-                          placeholder={t('pairing.master_password_ph') || 'Ange Master Password...'}
-                          className="h-9 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 pr-9 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                          placeholder="••••••••••••"
+                          className="h-9 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 pr-9 font-mono text-[12px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1 cursor-pointer"
-                          title={showPassword ? 'Hide password' : 'Show password'}
-                        >
-                          {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
+                        <ActionTooltip content={showPassword ? (t('login.hide_password') || 'Dölj lösenord') : (t('login.show_password') || 'Visa lösenord')}>
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1 cursor-pointer transition-colors"
+                          >
+                            {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </ActionTooltip>
                       </div>
                       <span className="text-[10px] text-[var(--text-tertiary)] leading-tight mt-0.5">
                         {t('pairing.password_security_note') || 'Används endast i flyktigt minne för att upprätta en krypterad tunnel.'}
@@ -899,14 +931,16 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                             </div>
 
                             <div className="flex justify-between items-center w-full pt-1">
-                              <button
-                                type="button"
-                                onClick={() => setStep(defaultRole ? 'password' : 'role')}
-                                className="flex items-center gap-1 h-8 rounded-[3px] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                              >
-                                <ArrowLeft size={13} />
-                                <span>{t('common.back') || 'Tillbaka'}</span>
-                              </button>
+                              {!defaultRole ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setStep('role')}
+                                  className="flex items-center gap-1 h-8 rounded-[3px] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                                >
+                                  <ArrowLeft size={13} />
+                                  <span>{t('common.back') || 'Tillbaka'}</span>
+                                </button>
+                              ) : <div />}
                               <button
                                 type="button"
                                 onClick={handleClose}
@@ -1012,6 +1046,52 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                               </div>
                             </div>
 
+                            {/* Master Password Input for PIN mode */}
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-[11px] font-medium text-[var(--text-secondary)]">
+                                  {t('pairing.master_password_label') || 'Valvets Master Password'}
+                                </label>
+                                <ActionTooltip content={t('pairing.client_password_desc') || 'Ange samma master-lösenord som används på värddatorn för att auktorisera överföringen.'}>
+                                  <button
+                                    type="button"
+                                    className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors p-0.5 rounded cursor-pointer"
+                                  >
+                                    <HelpCircle size={12} />
+                                  </button>
+                                </ActionTooltip>
+                              </div>
+                              <div className="relative">
+                                <input
+                                  type={showPassword ? 'text' : 'password'}
+                                  value={password}
+                                  onChange={(e) => {
+                                    setPassword(e.target.value);
+                                    if (errorMsg) setErrorMsg(null);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && inputDigits.join('').length === 6 && password) {
+                                      startClientConnecting();
+                                    }
+                                  }}
+                                  placeholder="••••••••••••"
+                                  className="h-9 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 pr-9 font-mono text-[12px] text-[var(--text-primary)] outline-none placeholder:font-sans placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                                />
+                                <ActionTooltip content={showPassword ? (t('login.hide_password') || 'Dölj lösenord') : (t('login.show_password') || 'Visa lösenord')}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1 cursor-pointer transition-colors"
+                                  >
+                                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                                  </button>
+                                </ActionTooltip>
+                              </div>
+                              <span className="text-[10px] text-[var(--text-tertiary)] leading-tight mt-0.5">
+                                {t('pairing.pin_password_hint') || 'Krävs för att verifiera PIN-koden och kryptera överföringen.'}
+                              </span>
+                            </div>
+
                             {/* Manual IP Toggle */}
                             <div className="flex flex-col gap-1 pt-0.5">
                               <button
@@ -1039,11 +1119,17 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                             <div className="flex justify-between items-center pt-1">
                               <button
                                 type="button"
-                                onClick={() => setStep('password')}
+                                onClick={() => {
+                                  if (!defaultRole) {
+                                    setStep('role');
+                                  } else {
+                                    handleClose();
+                                  }
+                                }}
                                 className="flex items-center gap-1 h-8 rounded-[3px] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
                               >
                                 <ArrowLeft size={13} />
-                                <span>{t('pairing.change_password') || 'Ändra lösenord'}</span>
+                                <span>{!defaultRole ? (t('common.back') || 'Tillbaka') : (t('common.cancel') || 'Avbryt')}</span>
                               </button>
                               <button
                                 type="button"

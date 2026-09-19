@@ -5,6 +5,49 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-09-19
+
+### Added
+- **Multi-Tier Favicon Resolution Pipeline**:
+  - Implemented 4-tier fallback resolution in `crates/core/src/services/favicon.rs`: (1) DuckDuckGo Favicon CDN (`https://icons.duckduckgo.com/ip3/{domain}.ico`) for fast, crisp ICOs, (2) Google s2 API (`https://www.google.com/s2/favicons?domain={domain}&sz=64`) for broad global coverage, (3) Direct host fallback (`https://{domain}/favicon.ico`), and (4) Parent/base domain fallback for subdomains without dedicated root icons (e.g. `login.live.com` -> `live.com`, `app.slack.com` -> `slack.com`).
+- **Two-Tier Persistent Favicon Caching**:
+  - Frontend persistent storage in `localStorage` (`yntra-favicons-cache`) caching up to 250 data URIs for instant 0ms startup rendering without IPC or network overhead.
+  - Backend persistent disk caching in OS local cache directories (`LOCALAPPDATA/Yntra Vault/cache/favicons` on Windows, `~/.cache/yntra-vault/favicons` on Unix/macOS) storing fetched data URIs across application restarts.
+- **Intelligent Title Fallback for Domains**:
+  - Added domain parser fallback extracting domains from entry `title` when the `url` field is empty or missing (e.g. entries titled `github.com` or `reddit.com`).
+- **Network Recovery Auto-Retry**:
+  - Registered window `online` event listener to automatically clear failure cooldowns and re-fetch missing favicons as soon as poor network connectivity recovers.
+
+### Changed
+- **Concurrency Throttling & Socket Starvation Prevention**:
+  - Enforced bounded concurrency on both frontend (`MAX_CONCURRENT_FETCHES = 4`) and backend (`tokio::sync::Semaphore::new(6)`), preventing network socket exhaustion, DNS timeouts, and UI freezes when rendering vaults with large numbers of items.
+- **Streamlined Client P2P Adoption on Login Screen**:
+  - Clicking "Link via P2P" from the vault selection / login screen starts directly at the connection step with the optical QR scanner mode active by default, removing redundant navigation steps.
+  - In manual PIN mode on the login screen, integrated the master password field directly on the same screen alongside the 6-digit PIN input for seamless adoption.
+- **Password Input Hygiene & Discrete Tooltips**:
+  - Replaced overflowing sentence placeholder text with standard masked dots (`••••••••••••`).
+  - Added accessible `ActionTooltip`s to password visibility toggle buttons and helper icons in `DevicePairingWizard`.
+
+### Fixed
+- **Favicon Startup Race Condition & Permanent Failure Poisoning**:
+  - Resolved race condition where initial entry rendering queried favicons before `set_external_favicons_enabled` completed IPC synchronization with Rust, which previously caused `null` to be permanently cached for all initial entries.
+  - Eliminated permanent `null` caching: replaced permanent in-memory failure markers with a 30-second transient cooldown (`failedCooldowns`).
+  - Synced cache invalidation with settings: toggling `externalFaviconsEnabled` off immediately purges both in-memory and disk/localStorage caches, while toggling on dispatches reset events to re-fetch.
+- **Device Pairing Wizard Progress Stepper Misalignment**:
+  - Corrected wizard stepper progress bar to dynamically map over `stepTitles`, eliminating the 4th orphaned blank bar and fixing off-center horizontal alignment.
+- **Sidebar Tag Drag-and-Drop Gesture State**:
+  - Eliminated stuck shadow and scale artifacts caused by unbacked inline `whileDrag` styles on Framer Motion `<Reorder.Item>`.
+  - Guarded tag drop commit with initial-vs-final order diffing and deferred backend persistence to prevent mid-gesture layout interruption.
+  - Replaced global body drag attributes with scoped CSS grab cursor states.
+
+### Security
+- **Favicon Concurrency, MIME Validation & SSRF Shield (Invariant 31)**:
+  - External favicon downloads strictly respect the `EXTERNAL_FAVICONS_ENABLED` gate (disabled by default in Rust core).
+  - Rate-limited socket usage (`tokio::sync::Semaphore::new(6)` in Rust, `MAX_CONCURRENT_FETCHES = 4` in React) prevents remote denial of service / TCP starvation under high vault entry counts.
+  - Image MIME & magic signature validation: enforces image MIME types and magic headers (PNG, ICO, SVG, WebP, GIF, JPEG) capped at 512 KB, rejecting non-image payloads (such as SPA HTML 200 OK pages) and preventing cache poisoning.
+  - SSRF & Local Network Shield: drops and rejects loopback, private LAN (`10/8`, `172.16/12`, `192.168/16`), cloud metadata (`169.254.169.254`), and internal/anonymity TLDs (`.local`, `.lan`, `.internal`, `.home`, `.corp`, `.onion`, `.i2p`) from external resolution.
+  - BLAKE3 Cache Key Isolation: hashes domain keys via BLAKE3 for on-disk persistence, eliminating Windows DOS device name collisions (`CON`, `PRN`, `AUX`, `NUL`) and avoiding filesystem path traversal.
+
 ## [0.2.0] - 2026-09-19
 
 ### Added

@@ -45,32 +45,36 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
 
   const [orderedTagIds, setOrderedTagIds] = useState<string[]>(() => sortedTags.map((t) => t.id));
   const orderedTagIdsRef = useRef<string[]>(orderedTagIds);
-  const [isDraggingTag, setIsDraggingTag] = useState(false);
+  const initialDragOrderRef = useRef<string[]>([]);
+  const isDraggingRef = useRef(false);
+  const lastReorderTimeRef = useRef(0);
+  const tagMapRef = useRef(tagMap);
 
   useEffect(() => {
-    if (isDraggingTag) {
-      document.body.setAttribute('data-dragging-tag', 'true');
-      const handleMouseUp = () => {
-        setIsDraggingTag(false);
-      };
-      window.addEventListener('mouseup', handleMouseUp);
-      return () => {
-        document.body.removeAttribute('data-dragging-tag');
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-    } else {
-      document.body.removeAttribute('data-dragging-tag');
+    tagMapRef.current = tagMap;
+  }, [tagMap]);
+
+  // Synchronize tag IDs from sortedTags when not actively dragging and not recently reordered locally
+  useEffect(() => {
+    const next = sortedTags.map((t) => t.id);
+    const current = orderedTagIdsRef.current;
+    const tagCountChanged = current.length !== next.length;
+    const tagIdsChanged = tagCountChanged || !next.every((id) => current.includes(id));
+
+    // If tags were added, deleted, or vault changed, always synchronize immediately
+    if (!tagIdsChanged) {
+      if (isDraggingRef.current) return;
+      if (Date.now() - lastReorderTimeRef.current < 2000) return;
     }
-  }, [isDraggingTag]);
 
-  // Synchronize tag IDs directly from sortedTags when not actively dragging
-  useEffect(() => {
-    if (!isDraggingTag) {
-      const next = sortedTags.map((t) => t.id);
+    const isSameOrder =
+      !tagCountChanged &&
+      current.every((id, idx) => id === next[idx]);
+    if (!isSameOrder) {
       orderedTagIdsRef.current = next;
       setOrderedTagIds(next);
     }
-  }, [sortedTags, isDraggingTag]);
+  }, [sortedTags]);
 
   const displayTags = useMemo(() => {
     if (!isCustomSort) return sortedTags;
@@ -80,19 +84,45 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
   }, [isCustomSort, sortedTags, orderedTagIds, tagMap]);
 
   const handleReorder = useCallback((newIds: string[]) => {
+    lastReorderTimeRef.current = Date.now();
     orderedTagIdsRef.current = newIds;
     setOrderedTagIds(newIds);
   }, []);
 
   const handleDragEnd = useCallback(() => {
+    lastReorderTimeRef.current = Date.now();
+    const map = tagMapRef.current;
+    const currentIds = orderedTagIdsRef.current;
+    const initialIds = initialDragOrderRef.current;
+    const hasOrderChanged =
+      initialIds.length === currentIds.length &&
+      initialIds.length > 0 &&
+      initialIds.some((id, idx) => id !== currentIds[idx]);
+
+    if (!hasOrderChanged) {
+      return;
+    }
+
     if (settings.tagSortOrder !== 'custom') {
       updateSettings({ tagSortOrder: 'custom' });
     }
-    const newOrderTags = orderedTagIdsRef.current
-      .map((id) => tagMap.get(id))
+    const newOrderTags = currentIds
+      .map((id) => map.get(id))
       .filter((t): t is Tag => Boolean(t));
-    reorderTags(newOrderTags);
-  }, [settings.tagSortOrder, updateSettings, reorderTags, tagMap]);
+    if (newOrderTags.length > 0) {
+      setTimeout(() => {
+        reorderTags(newOrderTags);
+      }, 50);
+    }
+  }, [settings.tagSortOrder, updateSettings, reorderTags]);
+
+  const handleTagClick = useCallback((tagName: string) => {
+    // Prevent accidental tag selection upon releasing a drag
+    if (isDraggingRef.current || Date.now() - lastReorderTimeRef.current < 250) {
+      return;
+    }
+    setFilterCategory(tagName);
+  }, [setFilterCategory]);
 
   // Modal state
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
@@ -226,32 +256,30 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
             axis="y"
             values={orderedTagIds}
             onReorder={handleReorder}
-            className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0"
+            className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-1"
           >
             {displayTags.map((tag: Tag) => (
               <Reorder.Item
                 key={tag.id}
                 value={tag.id}
-                onDragStart={() => setIsDraggingTag(true)}
+                onDragStart={() => {
+                  initialDragOrderRef.current = [...orderedTagIdsRef.current];
+                  isDraggingRef.current = true;
+                  lastReorderTimeRef.current = Date.now();
+                }}
                 onDragEnd={() => {
-                  setIsDraggingTag(false);
+                  isDraggingRef.current = false;
+                  lastReorderTimeRef.current = Date.now();
                   handleDragEnd();
                 }}
-                whileDrag={{
-                  scale: 1.02,
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
-                  zIndex: 50,
-                  cursor: 'grabbing',
-                }}
-                transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-                className="relative select-none"
+                className="relative select-none rounded-[3px] bg-[var(--bg-surface)] cursor-grab active:cursor-grabbing"
               >
                 <TagItem
                   tag={tag}
                   active={filterCategory === tag.name}
                   density={settings.density}
                   showCount={settings.showTagCounts !== false}
-                  onClick={() => setFilterCategory(tag.name)}
+                  onClick={() => handleTagClick(tag.name)}
                   onContextMenu={(e) => handleTagContextMenu(e, tag)}
                   onDoubleClick={() => {
                     setEditingTag(tag);
@@ -262,7 +290,7 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
             ))}
           </Reorder.Group>
         ) : (
-          <div className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-0">
+          <div className="flex flex-1 flex-col gap-[2px] overflow-y-auto p-2 pt-1">
             {displayTags.map((tag: Tag) => (
               <div key={tag.id} className="relative select-none">
                 <TagItem
@@ -270,7 +298,7 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
                   active={filterCategory === tag.name}
                   density={settings.density}
                   showCount={settings.showTagCounts !== false}
-                  onClick={() => setFilterCategory(tag.name)}
+                  onClick={() => handleTagClick(tag.name)}
                   onContextMenu={(e) => handleTagContextMenu(e, tag)}
                   onDoubleClick={() => {
                     setEditingTag(tag);

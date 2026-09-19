@@ -126,13 +126,27 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [settings.lockOnSystemLock]);
 
-  // Sync externalFaviconsEnabled setting to backend
+  // Sync externalFaviconsEnabled setting to backend and notify UI cache
   useEffect(() => {
+    const isEnabled = settings.externalFaviconsEnabled !== false;
+    if (typeof window !== 'undefined') {
+      if (isEnabled) {
+        window.dispatchEvent(new CustomEvent('yntra-favicons-reset'));
+      } else {
+        window.dispatchEvent(new CustomEvent('yntra-favicons-cleared'));
+      }
+    }
     if (isTauri()) {
       getBackend().then((b) => {
-        b.setExternalFaviconsEnabled(settings.externalFaviconsEnabled !== false).catch((err) => {
-          console.error('Failed to sync externalFaviconsEnabled setting:', err);
-        });
+        b.setExternalFaviconsEnabled(isEnabled)
+          .then(() => {
+            if (isEnabled && typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('yntra-favicons-reset'));
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to sync externalFaviconsEnabled setting:', err);
+          });
       }).catch(() => {});
     }
   }, [settings.externalFaviconsEnabled]);

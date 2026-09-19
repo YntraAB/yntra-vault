@@ -137,6 +137,18 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 | `ToastContainer` | Global — stackable notifications (top-right) |
 | `TagContextMenu` | Sidebar — right-click edit/delete on tags |
 
+### Favicon Resolution & Caching Engine (`Favicon.tsx` / `crates/core/src/services/favicon.rs`)
+- **Offline-First Gate**: External favicon resolution is disabled by default (`EXTERNAL_FAVICONS_ENABLED = false`), adhering to Rule 5.
+- **Two-Tier Persistent Caching**:
+  - *Frontend LRU*: Up to 250 data URIs stored in `localStorage` (`yntra-favicons-cache`) for instant 0ms rendering across restarts.
+  - *Backend Disk Cache*: Raw base64 data URIs saved to `%LOCALAPPDATA%/Yntra Vault/cache/favicons` (or `~/.cache/yntra-vault/favicons` on Unix/macOS) keyed via BLAKE3 domain hashes to prevent Windows DOS device collisions (`CON`, `PRN`, `AUX`, `NUL`) and path traversal.
+- **Image MIME & Signature Validation**: Responses capped at 512 KB and validated against image MIME types and binary magic headers (PNG, ICO, SVG, WebP, GIF, JPEG), rejecting HTML/JSON error or fallback pages.
+- **SSRF & Private Network Shield**: Strictly drops resolution attempts for loopback, private LAN (`10/8`, `172.16/12`, `192.168/16`), cloud metadata (`169.254.169.254`), and internal/anonymity TLDs (`.local`, `.lan`, `.internal`, `.home`, `.corp`, `.onion`, `.i2p`).
+- **Concurrency Throttling**: Frontend queue bounds active IPC fetches to `MAX_CONCURRENT_FETCHES = 4`; Rust uses `tokio::sync::Semaphore::new(6)` to eliminate TCP socket starvation on large entry counts.
+- **4-Tier Fallback Chain**: (1) DuckDuckGo ICO CDN, (2) Google s2 API, (3) Direct host `https://{domain}/favicon.ico`, (4) Parent/base domain fallback for subdomains with no root icon.
+- **Transient Failure Cooldowns & Auto-Recovery**: Failed resolutions trigger a 30-second cooldown (`failedCooldowns`) rather than permanent `null` caching. Cooldowns are reset automatically upon browser `online` events or when toggling the setting.
+- **Title Fallback**: Automatically extracts domains from entry titles when the URL field is blank.
+
 ---
 
 ## State Management

@@ -161,6 +161,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     selectedEntryRef.current = selectedEntry;
   }, [selectedEntry]);
 
+  const rawTagsRef = useRef<Tag[]>(rawTags);
+  useEffect(() => {
+    rawTagsRef.current = rawTags;
+  }, [rawTags]);
+
   const isLockedRef = useRef(isLocked);
   useEffect(() => {
     isLockedRef.current = isLocked;
@@ -1118,7 +1123,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
   const reorderTags = useCallback(
     async (newTags: Tag[]) => {
-      const prevTags = rawTags;
+      const prevTags = rawTagsRef.current;
       setRawTags(newTags);
 
       if (backend) {
@@ -1131,7 +1136,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, rawTags, addToast, triggerAutoSync]
+    [backend, addToast, triggerAutoSync]
   );
 
   // Silent background vault-wide breach check on vault unlock

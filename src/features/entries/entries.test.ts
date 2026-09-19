@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import type { PasswordEntry } from '@/types';
 import { entryPreviewToPasswordEntry, decryptedEntryToPasswordEntry, isRecoveryField } from './context/EntriesContext';
+import { extractDomain } from './components/Favicon';
 import type { EntryPreview, DecryptedEntry } from '@/lib/backend';
 
 describe('Entries Feature Slice', () => {
@@ -420,5 +421,63 @@ describe('Entries Feature Slice', () => {
     expect(sorted[1].title).toBe('New');
     expect(sorted[2].title).toBe('Old');
   });
+
+  it('extractDomain correctly extracts domains from URL or title fallback', () => {
+    expect(extractDomain('https://github.com/login', 'GitHub')).toBe('github.com');
+    expect(extractDomain('https://sub.domain.co.uk/page', 'Sub')).toBe('sub.domain.co.uk');
+    expect(extractDomain('', 'reddit.com')).toBe('reddit.com');
+    expect(extractDomain(undefined, 'amazon.com')).toBe('amazon.com');
+    expect(extractDomain(undefined, 'Just Some Note')).toBe(null);
+  });
+
+  it('synchronizes tag order properly without overwriting active drags and adopting external changes', () => {
+    let orderedTagIds = ['tag-1', 'tag-2', 'tag-3'];
+    let isDragging = false;
+    let lastReorderTime = 0;
+
+    const syncFromSorted = (sortedTags: { id: string }[], now = Date.now()) => {
+      const next = sortedTags.map((t) => t.id);
+      const tagCountChanged = orderedTagIds.length !== next.length;
+      const tagIdsChanged = tagCountChanged || !next.every((id) => orderedTagIds.includes(id));
+
+      if (!tagIdsChanged) {
+        if (isDragging) return;
+        if (now - lastReorderTime < 1500) return;
+      }
+
+      const isSameOrder =
+        !tagCountChanged &&
+        orderedTagIds.every((id, idx) => id === next[idx]);
+      if (!isSameOrder) {
+        orderedTagIds = next;
+      }
+    };
+
+    // 1. Simulating drag start and in-progress reorder
+    isDragging = true;
+    lastReorderTime = 1000;
+    orderedTagIds = ['tag-3', 'tag-1', 'tag-2'];
+
+    // Sorted tags still in old order from parent during drag
+    syncFromSorted([{ id: 'tag-1' }, { id: 'tag-2' }, { id: 'tag-3' }], 1050);
+    // Must NOT overwrite orderedTagIds while dragging
+    expect(orderedTagIds).toEqual(['tag-3', 'tag-1', 'tag-2']);
+
+    // 2. Drag ends (drop settle window before backend save propagates)
+    isDragging = false;
+    // Parent still emits old order during the 120ms drop settle
+    syncFromSorted([{ id: 'tag-1' }, { id: 'tag-2' }, { id: 'tag-3' }], 1100);
+    // Must NOT revert orderedTagIds during drop settle window
+    expect(orderedTagIds).toEqual(['tag-3', 'tag-1', 'tag-2']);
+
+    // 3. New tag added externally during settle window -> must sync immediately
+    syncFromSorted([{ id: 'tag-1' }, { id: 'tag-2' }, { id: 'tag-3' }, { id: 'tag-4' }], 1200);
+    expect(orderedTagIds).toEqual(['tag-1', 'tag-2', 'tag-3', 'tag-4']);
+
+    // 4. External sync arrives after settle window (e.g. from P2P or database reload with new order)
+    syncFromSorted([{ id: 'tag-2' }, { id: 'tag-3' }, { id: 'tag-1' }, { id: 'tag-4' }], 3000);
+    expect(orderedTagIds).toEqual(['tag-2', 'tag-3', 'tag-1', 'tag-4']);
+  });
 });
+
 
