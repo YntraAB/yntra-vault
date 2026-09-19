@@ -118,6 +118,7 @@ export interface AppSettings {
   tagSortOrder?: 'name' | 'count' | 'custom';
   showTagCounts?: boolean;
   entrySortOrder?: 'title' | 'updated' | 'created';
+  groupByDate?: boolean;
   keybinds?: KeybindsConfig;
   forceMobileView?: boolean;
   windowCaptureProtection?: boolean;

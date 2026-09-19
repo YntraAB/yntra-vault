@@ -33,7 +33,7 @@ graph TD
 ```
 
 * **Single-Pass Authenticated Header**: Header metadata (magic, version, salt, KDF params) is bound as AAD into `XChaCha20-Poly1305`, authenticating header and payload before deserialization.
-* **Zero-Knowledge P2P LAN Sync & 6-Digit Device Pairing**: Direct local network synchronization over dedicated port 5324 using ephemeral Argon2id-derived transit subkeys, active UDP query-response discovery (`YQRY`), mutual HMAC challenge-response pre-authentication, strict adopt mode isolation, progressive two-step pairing wizard, and native desktop notifications.
+* **Zero-Knowledge P2P LAN Sync & Optical QR Device Pairing**: Direct local network synchronization over dedicated port 5324 using air-gapped optical QR pairing (`YQR2`) with out-of-band Short Authentication String (SAS) visual verification, dynamic session AAD binding, and zero-IPC credential isolation, alongside 6-digit PIN pairing with ephemeral Argon2id-derived transit subkeys, active UDP query-response discovery (`YQRY`), mutual HMAC challenge-response pre-authentication, strict adopt mode isolation, progressive two-step pairing wizard, and native desktop notifications.
 * **Hardware Envelopes (TPM 2.0 & App-Bound DPAPI)**: Sensitive secrets and biometric session tokens are hardware-bound using Windows TPM 2.0 RSA encryption and BLAKE3 installation-bound DPAPI envelopes.
 * **Passkey Support**: Native ES256 (ECDSA P-256) keypair generation and signing per entry.
 * **Zeroize Memory Protection**: Critical keys and decrypted fields implement `zeroize::ZeroizeOnDrop` alongside guard-paged locked buffers (`PAGE_NOACCESS` / `mlock` + `MADV_DONTDUMP`).
@@ -96,6 +96,7 @@ Yntra Vault is localized into 24 languages with 100% string coverage (824 transl
 | Hardware Envelopes (TPM 2.0 / DPAPI) | `crypto::tpm` | `Login.tsx` | Windows, macOS | ✅ Complete |
 | Shamir Secret Sharing & Emergency Kit | `core::vault::emergency` | `SecurityTab.tsx` | Cross-Platform | ✅ Complete |
 | WebDAV Cloud & Zero-Knowledge P2P Sync | `core::sync` | `DevicePairingWizard.tsx`, `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
+| Optical QR-Code Device Pairing (YQR2) | `core::sync` | `QrScannerModal.tsx`, `DevicePairingWizard.tsx` | Cross-Platform | ✅ Complete |
 | Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
 | 24 Locales & RTL Support | — | `src/i18n/` | Cross-Platform | ✅ Complete |
 

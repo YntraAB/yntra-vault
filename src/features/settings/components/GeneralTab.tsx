@@ -142,6 +142,23 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
       </SettingRow>
 
       <SettingRow
+        label={t('settings.group_by_date')}
+        description={t('settings.group_by_date_desc')}
+        tooltip={t('settings.tooltip_group_by_date')}
+      >
+        <Toggle
+          checked={settings.groupByDate !== false}
+          onChange={(v) => {
+            if (v && settings.entrySortOrder === 'title') {
+              updateSettings({ groupByDate: true, entrySortOrder: 'updated' });
+            } else {
+              updateSettings({ groupByDate: v });
+            }
+          }}
+        />
+      </SettingRow>
+
+      <SettingRow
         label={t('settings.favicons_label')}
         description={t('settings.favicons_desc')}
         tooltip={t('settings.tooltip_favicons')}

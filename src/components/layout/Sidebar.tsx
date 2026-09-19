@@ -63,18 +63,14 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
     }
   }, [isDraggingTag]);
 
-  // Synchronize string IDs when tags are added, removed, or reordered
+  // Synchronize tag IDs directly from sortedTags when not actively dragging
   useEffect(() => {
-    const currentTagIds = new Set(sortedTags.map((t) => t.id));
-    setOrderedTagIds((prev) => {
-      const existing = prev.filter((id) => currentTagIds.has(id));
-      const existingSet = new Set(existing);
-      const newlyAdded = sortedTags.filter((t) => !existingSet.has(t.id)).map((t) => t.id);
-      const next = [...existing, ...newlyAdded];
+    if (!isDraggingTag) {
+      const next = sortedTags.map((t) => t.id);
       orderedTagIdsRef.current = next;
-      return next;
-    });
-  }, [sortedTags]);
+      setOrderedTagIds(next);
+    }
+  }, [sortedTags, isDraggingTag]);
 
   const displayTags = useMemo(() => {
     if (!isCustomSort) return sortedTags;

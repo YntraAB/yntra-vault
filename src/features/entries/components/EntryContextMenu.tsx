@@ -75,13 +75,21 @@ export function EntryContextMenu({
 
   if (!entry) return null;
 
-  const canAutotype = Boolean(
+  const hasUrlOrApp = Boolean(entry.url && entry.url.trim());
+  const hasCredentials = Boolean(
     (entry.username && entry.username.trim()) ||
     (entry.email && entry.email.trim()) ||
     (entry.password && entry.password.trim() && entry.password !== '••••••••') ||
     (entry.totpSecret && entry.totpSecret !== 'has-totp') ||
     (entry.customFields && entry.customFields.some(f => f.name !== '_field_order' && f.value && f.value.trim()))
   );
+  const canAutotype = hasUrlOrApp && hasCredentials;
+
+  const autotypeTooltip = !hasUrlOrApp
+    ? t('context_menu.autotype_no_url_tooltip')
+    : !hasCredentials
+    ? t('context_menu.autotype_disabled_tooltip')
+    : undefined;
 
   // Adjust position to keep menu in viewport
   const adjustedPosition = () => {
@@ -155,7 +163,7 @@ export function EntryContextMenu({
                     ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer'
                     : 'text-[var(--text-tertiary)] opacity-40 cursor-not-allowed'
                 }`}
-                title={canAutotype ? undefined : t('context_menu.autotype_disabled_tooltip')}
+                title={canAutotype ? undefined : autotypeTooltip}
               >
                 <Zap size={13} />
                 {t('menu.autotype')}

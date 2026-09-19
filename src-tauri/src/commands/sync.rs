@@ -515,3 +515,195 @@ pub async fn scan_pairing_discovery(
     Ok(res.map(|addr| addr.to_string()))
 }
 
+#[tauri::command]
+pub fn generate_qr_pairing_session(
+    device_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::services::sync::QrSessionInfo, String> {
+    let local_ips: Vec<String> = yntra_vault_core::services::sync::get_local_lan_ips()
+        .into_iter()
+        .filter_map(|ip| {
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                if !ipv4.is_loopback() {
+                    Some(ipv4.to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let (session, info) = yntra_vault_core::services::sync::generate_qr_pairing_session(
+        local_ips,
+        yntra_vault_core::services::sync::DEFAULT_PAIRING_PORT,
+        device_name,
+    );
+
+    let mut guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
+    *guard = Some(session);
+
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn start_qr_pairing_host(
+    password: String,
+    include_password: bool,
+    device_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    let session = {
+        let guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
+        guard.as_ref().cloned().ok_or("Ingen aktiv QR-parningssession hittades. Generera en QR-kod först.")?
+    };
+
+    let host_db_path = {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        let manager = vault.as_mut().ok_or("Valvet är låst")?;
+        manager.save().map_err(|e| e.to_string())?;
+        manager.path.clone()
+    };
+
+    state.pairing_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+    let cancel_flag = state.pairing_cancel.clone();
+
+    let (stats, merged_data) = tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::run_p2p_qr_pairing_host(
+            &session,
+            &host_db_path,
+            &password,
+            include_password,
+            std::time::Duration::from_secs(90),
+            device_name,
+            Some(cancel_flag),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if let Some(manager) = vault.as_mut() {
+            manager.data = merged_data;
+            manager.rebuild_search_index();
+        }
+    }
+
+    if let Ok(mut guard) = state.qr_pairing_session.lock() {
+        *guard = None;
+    }
+
+    Ok(stats)
+}
+
+#[tauri::command]
+pub fn cancel_qr_pairing_host(state: State<'_, AppState>) -> Result<(), String> {
+    state.pairing_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut guard) = state.qr_pairing_session.lock() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = state.pending_adopted_vault.lock() {
+        *guard = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_qr_pairing_client(
+    app: tauri::AppHandle,
+    qr_payload: String,
+    device_name: Option<String>,
+    password: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::services::sync::QrClientPairingResult, String> {
+    use tauri::Manager;
+    use yntra_vault_core::services::sync::pairing::ClientPairingMode;
+
+    let base_dir = app.path().document_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    let vault_dir = base_dir.join("YntraVault");
+    let _ = std::fs::create_dir_all(&vault_dir);
+
+    // QR pairing adopts into a dedicated collision-free file in vault_dir to avoid destroying existing open vaults
+    let mode = ClientPairingMode::AdoptIntoDir { target_dir: vault_dir };
+
+    let mut res = tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::run_p2p_qr_pairing_client(
+            &qr_payload,
+            mode,
+            device_name,
+            password,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    // If a master password was provisioned in-transit, unlock the vault in AppState immediately
+    if let Some(ref saved_path_str) = res.stats.vault_path
+        && let Some(ref pwd) = res.master_password {
+            let saved_path = std::path::PathBuf::from(saved_path_str);
+            let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+            if let Some(manager) = vault.as_mut() {
+                if manager.path == saved_path {
+                    let _ = manager.reload();
+                }
+            } else if let Ok(manager) = yntra_vault_core::vault::manager::VaultManager::open(&saved_path, pwd) {
+                *vault = Some(manager);
+            }
+        }
+
+    // If the host did not provide a master password, store the pending vault in memory for manual completion
+    if let Some(pending) = res.pending_vault.take() {
+        let mut guard = state.pending_adopted_vault.lock().map_err(|e| e.to_string())?;
+        *guard = Some(pending);
+    }
+
+    // Zeroize and strip master password so it NEVER leaves Rust or serializes to webview JS
+    res.master_password = None;
+
+    Ok(res)
+}
+
+#[tauri::command]
+pub async fn complete_adopted_vault(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    let pending = {
+        let mut guard = state.pending_adopted_vault.lock().map_err(|e| e.to_string())?;
+        guard.take().ok_or("Ingen väntande valvadoption hittades.")?
+    };
+
+    let dest_path = pending.dest_path.clone();
+    let entries_count = pending.data.entries.len();
+
+    let pwd_clone = password.clone();
+    tokio::task::spawn_blocking(move || {
+        yntra_vault_core::services::sync::pairing::complete_adopted_vault_save(&pending, &pwd_clone)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        let manager = yntra_vault_core::vault::manager::VaultManager::open(&dest_path, &password)
+            .map_err(|e| e.to_string())?;
+        *vault = Some(manager);
+    }
+
+    Ok(yntra_vault_core::services::sync::PairingStats {
+        entries_sent: 0,
+        entries_received: entries_count,
+        entries_merged: entries_count,
+        total_entries: entries_count,
+        vault_path: Some(dest_path.to_string_lossy().to_string()),
+        peer_addr: None,
+    })
+}
+

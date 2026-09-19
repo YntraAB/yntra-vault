@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Zap } from 'lucide-react';
 import { getBackend, isTauri } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
+import { useTranslation } from '@/contexts/LanguageContext';
 import SmartLoginModal from './SmartLoginModal';
 
 const STORAGE_KEY = 'yntra.smartlogin.skipCloseWarning';
@@ -20,6 +21,7 @@ interface SmartLoginButtonProps {
 }
 
 export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartLoginButtonProps) {
+  const { t } = useTranslation();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [events, setEvents] = useState<SmartLoginEvent[]>([]);
   const [result, setResult] = useState<unknown | null>(null);
@@ -145,15 +147,32 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
     };
   }, [isModalOpen]);
 
-  if (!isTauri() || !hasUrl) return null;
+  if (!isTauri()) return null;
+
+  if (!hasUrl) {
+    return (
+      <ActionTooltip content={t('smart_login.disabled_tooltip')}>
+        <button
+          type="button"
+          disabled
+          className="p-1.5 rounded-md text-[var(--text-tertiary)] opacity-40 cursor-not-allowed select-none"
+          aria-label={t('detail.smart_login')}
+          id="smart-login-button"
+        >
+          <Zap size={15} />
+        </button>
+      </ActionTooltip>
+    );
+  }
 
   return (
     <>
-      <ActionTooltip content="Smart Login">
+      <ActionTooltip content={t('detail.smart_login')}>
         <button
+          type="button"
           onClick={handleOpen}
           className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-all duration-150 select-none cursor-pointer"
-          aria-label="Smart Login"
+          aria-label={t('detail.smart_login')}
           id="smart-login-button"
         >
           <Zap size={15} />

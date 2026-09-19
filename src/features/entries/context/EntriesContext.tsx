@@ -1358,9 +1358,13 @@ export function useFilteredEntries(): PasswordEntry[] {
       if (sortOrder === 'title') {
         return a.title.localeCompare(b.title);
       } else if (sortOrder === 'created') {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        const timeA = new Date(a.createdAt || a.updatedAt).getTime() || 0;
+        const timeB = new Date(b.createdAt || b.updatedAt).getTime() || 0;
+        return timeB - timeA;
       }
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      const timeA = new Date(a.updatedAt || a.createdAt).getTime() || 0;
+      const timeB = new Date(b.updatedAt || b.createdAt).getTime() || 0;
+      return timeB - timeA;
     });
 
     return result;

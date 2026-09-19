@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tagSortOrder: 'custom',
   showTagCounts: true,
   entrySortOrder: 'updated',
+  groupByDate: true,
   keybinds: DEFAULT_KEYBINDS,
   forceMobileView: false,
   windowCaptureProtection: true,

@@ -26,6 +26,7 @@ export const sv = {
   'common.next': 'Nästa',
   'common.hide': 'Dölj',
   'common.show': 'Visa',
+  'common.retry': 'Försök igen',
 
   // Sidebar
   'sidebar.vaults': 'Valv',
@@ -218,6 +219,9 @@ export const sv = {
   'settings.breach_desc': 'Kontrollera automatiskt lösenordssäkerhet mot databasen över kända dataläckor',
   'settings.show_breach_in_list': 'Visa läckagevarningar i listan',
   'settings.show_breach_in_list_desc': 'Visa varningsbrickor bredvid komprometterade objekt',
+  'settings.group_by_date': 'Gruppera efter datum',
+  'settings.group_by_date_desc': 'Gruppera poster i sektionerna Idag, Igår och Tidigare vid datumsortering',
+  'settings.tooltip_group_by_date': 'Slå på eller av datumgruppering i postlistan',
 
   'settings.favicons_label': 'Hämta webbplatsikoner (Favicons)',
   'settings.favicons_desc': 'Hämtar automatiskt logotyper och ikoner för webbplatser. Inaktivera för ett helt slutet och strikt offline-system.',
@@ -486,6 +490,7 @@ export const sv = {
   'menu.sort_title': 'Sortera efter titel (A–Z)',
   'menu.sort_updated': 'Sortera efter senast ändrad',
   'menu.sort_created': 'Sortera efter skapad datum',
+  'menu.group_by_date': 'Gruppera efter datum',
   'menu.density_compact': 'Kompakt täthet',
   'menu.density_normal': 'Normal täthet',
   'menu.density_comfortable': 'Bekväm täthet',
@@ -645,7 +650,9 @@ export const sv = {
 
   // Hardware 2FA Modal
   'hw.enroll_title': 'Registrera hårdvarunyckel',
+  'hw.enroll_desc': 'Anslut och konfigurera en hårdvarusäkerhetsnyckel för tvåfaktorsautentisering.',
   'hw.test_title': 'Testa hårdvaru-2FA',
+  'hw.test_desc': 'Verifiera autentiseringsutmaningen för din hårdvarusäkerhetsnyckel.',
   'hw.protocol_label': 'Hårdvaruprotokoll',
   'hw.key_nickname': 'Smeknamn för säkerhetsnyckel',
   'hw.detected_authenticators': 'Upptäckta hårdvaruautentiserare',
@@ -660,6 +667,7 @@ export const sv = {
 
   // Context Menu
   'context_menu.autotype_disabled_tooltip': 'Inga inloggningsuppgifter tillgängliga för automatisk skrivning',
+  'context_menu.autotype_no_url_tooltip': 'Autoinmatning kräver en webbplatsadress eller app',
 
   // Entry Modal Extra
   'entry_modal.scan_qr_tooltip': 'Skanna QR-kodsbild eller skärmdump',
@@ -711,6 +719,7 @@ export const sv = {
   'smart_login.dont_show_again': 'Visa inte denna varning igen',
   'smart_login.i_understand': 'Jag förstår',
   'smart_login.i_understand_timer': 'Jag förstår ({seconds}s)',
+  'smart_login.disabled_tooltip': 'Smart inloggning kräver en webbplatsadress',
 
   // Toast Notifications
   'toast.autotyped_success': 'Automatisk skrivning slutförd',
@@ -1121,6 +1130,39 @@ export const sv = {
   'pairing.host_code_sub': 'Mata in koden nedan på din andra enhet för att koppla ihop dem.',
   'pairing.sync_again': 'Synka igen',
   'common.done': 'Klar',
+
+  // QR Pairing
+  'pairing.mode_qr': 'QR-kod (Snabbast)',
+  'pairing.mode_pin': '6-siffrig PIN',
+  'pairing.step_qr': 'Skanna QR',
+  'pairing.include_password_label': 'Inkludera lösenordsöverföring',
+  'pairing.include_password_desc': 'Krypteras säkert i transit med optisk QR-nyckel så klienten slipper skriva in huvudlösenordet.',
+  'pairing.qr_host_instruction': 'Skanna QR-koden med kameran på din mobil eller andra enhet för att koppla ihop direkt.',
+  'pairing.scan_prompt_title': 'Skanna QR-kod från värden',
+  'pairing.scan_prompt_desc': 'Öppna kameran för att skanna QR-koden som visas på värddatorns skärm.',
+  'pairing.open_scanner_btn': 'Öppna QR-skanner',
+  'pairing.sas_label': 'Säkerhetskod (SAS)',
+  'pairing.qr_valid_for': 'Giltig i',
+  'pairing.qr_expired': 'QR-koden har löpt ut',
+  'pairing.qr_refresh': 'Generera ny QR-kod',
+  'pairing.scan_qr_title': 'Skanna QR-kod',
+  'pairing.scan_qr_subtitle': 'Rikta kameran mot QR-koden på din andra enhet',
+  'pairing.switch_camera': 'Byt kamera',
+  'pairing.pick_qr_image': 'Välj bild med QR-kod',
+  'pairing.err_camera_unsupported': 'Kamera stöds inte i denna miljö eller saknar behörighet',
+  'pairing.err_camera_permission': 'Kunde inte komma åt kameran. Kontrollera behörigheter.',
+  'pairing.err_camera_init': 'Ett fel uppstod vid initiering av kameran',
+  'pairing.err_no_qr_found': 'Ingen giltig QR-kod hittades i den valda bilden',
+  'pairing.connecting_qr': 'Ansluter och överför valv via krypterad QR-session...',
+  'pairing.enroll_biometric_title': 'Aktivera biometrisk inloggning',
+  'pairing.enroll_biometric_desc': 'Eftersom lösenordet överfördes säkert kan du nu aktivera Touch ID, Face ID eller Windows Hello med ett klick.',
+  'pairing.enroll_biometric_btn': 'Aktivera biometri nu',
+  'pairing.biometric_enrolled_badge': 'Biometri aktiverad',
+  'pairing.biometric_enrolled_success': 'Biometrisk upplåsning har aktiverats för detta valv!',
+  'pairing.manual_adopt_title': 'Ange master-lösenord',
+  'pairing.manual_adopt_password_desc': 'Värddatorn inkluderade inte valvlösenordet i överföringen. Ange valvlösenordet för att kryptera och spara valvet på denna enhet.',
+  'pairing.saving_adopted_vault': 'Krypterar och sparar valvet lokalt...',
+  'pairing.save_vault_btn': 'Spara & Öppna',
 };
 
 

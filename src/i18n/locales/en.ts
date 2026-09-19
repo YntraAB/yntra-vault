@@ -26,6 +26,7 @@ export const en = {
   'common.next': 'Next',
   'common.hide': 'Hide',
   'common.show': 'Show',
+  'common.retry': 'Retry',
 
   // Sidebar
   'sidebar.vaults': 'Vaults',
@@ -242,6 +243,9 @@ export const en = {
   'settings.breach_desc': 'Automatically verify password safety on the web check database',
   'settings.show_breach_in_list': 'Show breach alerts in list',
   'settings.show_breach_in_list_desc': 'Display warning badges next to compromised items in the sidebar list',
+  'settings.group_by_date': 'Group by Date',
+  'settings.group_by_date_desc': 'Group entries into Today, Yesterday, and Earlier sections when sorting by date',
+  'settings.tooltip_group_by_date': 'Toggle date section grouping in the entry list',
 
   'settings.favicons_label': 'Fetch website icons (Favicons)',
   'settings.favicons_desc': 'Automatically retrieves website logos and icons. Disable for a completely closed, offline air-gapped system.',
@@ -525,6 +529,7 @@ export const en = {
   'menu.sort_title': 'Sort by Title (A–Z)',
   'menu.sort_updated': 'Sort by Last Modified',
   'menu.sort_created': 'Sort by Date Created',
+  'menu.group_by_date': 'Group by Date',
   'menu.density_compact': 'Compact Density',
   'menu.density_normal': 'Normal Density',
   'menu.density_comfortable': 'Comfortable Density',
@@ -684,7 +689,9 @@ export const en = {
 
   // Hardware 2FA Modal
   'hw.enroll_title': 'Enroll Hardware Key',
+  'hw.enroll_desc': 'Connect and configure a hardware security key for two-factor authentication.',
   'hw.test_title': 'Test Hardware 2FA',
+  'hw.test_desc': 'Verify your hardware security key authentication challenge.',
   'hw.protocol_label': 'Hardware Protocol',
   'hw.key_nickname': 'Security Key Nickname',
   'hw.detected_authenticators': 'Detected Hardware Authenticators',
@@ -699,6 +706,7 @@ export const en = {
 
   // Context Menu
   'context_menu.autotype_disabled_tooltip': 'No credentials available to autotype',
+  'context_menu.autotype_no_url_tooltip': 'Autotype requires a website URL or application',
 
   // Entry Modal Extra
   'entry_modal.scan_qr_tooltip': 'Scan QR Code image or screenshot',
@@ -750,6 +758,7 @@ export const en = {
   'smart_login.dont_show_again': "Don't show this warning again",
   'smart_login.i_understand': 'I Understand',
   'smart_login.i_understand_timer': 'I Understand ({seconds}s)',
+  'smart_login.disabled_tooltip': 'Smart Login requires a website URL',
 
   // Toast Notifications
   'toast.autotyped_success': 'Autotyped successfully',
@@ -1117,6 +1126,39 @@ export const en = {
   'pairing.host_code_sub': 'Enter the code below on your other device to pair them securely.',
   'pairing.sync_again': 'Sync Again',
   'common.done': 'Done',
+
+  // QR Pairing
+  'pairing.mode_qr': 'QR Code (Fastest)',
+  'pairing.mode_pin': '6-digit PIN',
+  'pairing.step_qr': 'Scan QR',
+  'pairing.include_password_label': 'Include Password Transfer',
+  'pairing.include_password_desc': 'Securely transit-encrypted via optical QR key so the client never needs to type the master password.',
+  'pairing.qr_host_instruction': 'Scan this QR code with the camera on your phone or other device to pair instantly.',
+  'pairing.scan_prompt_title': 'Scan QR Code from Host',
+  'pairing.scan_prompt_desc': 'Open the camera to scan the QR code displayed on the host screen.',
+  'pairing.open_scanner_btn': 'Open QR Scanner',
+  'pairing.sas_label': 'Verification Code (SAS)',
+  'pairing.qr_valid_for': 'Valid for',
+  'pairing.qr_expired': 'QR code has expired',
+  'pairing.qr_refresh': 'Generate New QR Code',
+  'pairing.scan_qr_title': 'Scan QR Code',
+  'pairing.scan_qr_subtitle': 'Point your camera at the QR code on your other device',
+  'pairing.switch_camera': 'Switch Camera',
+  'pairing.pick_qr_image': 'Select Image with QR Code',
+  'pairing.err_camera_unsupported': 'Camera is not supported in this environment or lacks permission',
+  'pairing.err_camera_permission': 'Could not access camera. Please check permissions.',
+  'pairing.err_camera_init': 'An error occurred while initializing the camera',
+  'pairing.err_no_qr_found': 'No valid QR code was found in the selected image',
+  'pairing.connecting_qr': 'Connecting and transferring vault over encrypted QR session...',
+  'pairing.enroll_biometric_title': 'Enable Biometric Unlock',
+  'pairing.enroll_biometric_desc': 'Because the password was transferred securely, you can now enable Touch ID, Face ID, or Windows Hello with 1 click.',
+  'pairing.enroll_biometric_btn': 'Enable Biometrics Now',
+  'pairing.biometric_enrolled_badge': 'Biometrics Enrolled',
+  'pairing.biometric_enrolled_success': 'Biometric unlock has been enabled for this vault!',
+  'pairing.manual_adopt_title': 'Enter Master Password',
+  'pairing.manual_adopt_password_desc': 'The host device did not include the vault password in transit. Enter the vault password to encrypt and save the vault on this device.',
+  'pairing.saving_adopted_vault': 'Encrypting and saving vault locally...',
+  'pairing.save_vault_btn': 'Save & Unlock',
 };
 
 

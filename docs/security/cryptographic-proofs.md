@@ -236,6 +236,24 @@ All discovery traffic is strictly restricted to local administrative boundaries 
 2. **Atomic Pairing Socket Release & Instant Cancellation**: Host pairing listeners on port 5324 poll an atomic cancellation flag (`pairing_cancel: Arc<AtomicBool>`) every 40ms via the Tauri IPC command `cancel_pairing_host`. Listening sockets are released immediately upon user cancellation or modal dismissal, preventing port lockups on TCP 5324 and UDP 5323 and eliminating dangling connection acceptances after session termination.
 3. **Windows DOS Reserved Device Name Sanitization**: Filenames derived during vault adoption (`ClientPairingMode::AdoptIntoDir`) are sanitized against reserved Windows DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) in `sanitize_vault_filename`, preventing filesystem namespace collisions and denial-of-service conditions during initial pairing.
 
+### 5.14 Ephemeral QR-Code Optical Pairing & Out-of-Band Transit Isolation (Protocol `YQR2`)
+Zero-knowledge optical QR-code pairing establishes a single-use authenticated transit tunnel between devices using an air-gapped optical pre-shared secret:
+1. **Optical Secret Generation**: The host creates a 256-bit CSPRNG secret $S_{\text{optical}} \leftarrow \{0,1\}^{256}$ and a UUIDv4 session identifier $\text{ID}_{\text{session}}$. The optical payload encodes `yntrapair://v2?id=<session_id>&s=<secret_hex>&ip=<ip>&p=<port>&sas=<sas>&name=<name>`. Master passwords and database blobs are never encoded in the optical image.
+2. **Deterministic Short Authentication String (SAS)**:
+   $$\text{SAS} = \text{BLAKE3}_{\text{keyed}}\left(S_{\text{optical}}, \text{"yntra-qr-sas-v2"}\right)[0..8] \pmod{10000}$$
+   Formatted as a 4-digit decimal number (`0000`–`9999`) displayed simultaneously on both host display and client viewfinder, providing out-of-band visual MitM resistance.
+3. **Transit Key Derivation**:
+   $$(K_{\text{c2h}}, K_{\text{h2c}}, K_{\text{auth}}) = \text{HKDF-SHA512}\left(\text{IKM}=S_{\text{optical}}, \text{salt}=\text{"yntra-qr-transit-v2"}\right)$$
+4. **Mutual Pre-Authentication Handshake (`YQR2`)**:
+   - Client sends 68-byte frame: $[\text{"YQR2"} \mathbin{\Vert} \text{ID}_{\text{session}} \mathbin{\Vert} C_{\text{client}} \mathbin{\Vert} \text{HMAC}(K_{\text{c2h}}, C_{\text{client}})]$.
+   - Host validates $\text{ID}_{\text{session}}$ and evaluates HMAC in constant time (`subtle::ConstantTimeEq`).
+   - Host responds with 48-byte frame: $[C_{\text{host}} \mathbin{\Vert} \text{HMAC}(K_{\text{h2c}}, C_{\text{host}})]$, verified in constant time by the client before continuing.
+5. **Dynamic Session AAD Binding**:
+   $$\text{AAD}_{\text{transit}} = \text{"yntra-qr-transit-v2:"} \mathbin{\Vert} \text{ID}_{\text{session}}$$
+   Ciphertext is encrypted using $K_{\text{h2c}}$ with `XChaCha20-Poly1305` and a 24-byte random nonce, cryptographically binding every transit packet to the unique session ID.
+6. **Zero-IPC Plaintext Isolation**:
+   Provisioned master passwords are held exclusively within `zeroize::Zeroizing` buffers in Rust `AppState.pending_adopted_vault`. Plaintext credentials never cross the Tauri IPC boundary into webview JavaScript, preventing memory retention in V8 heap or browser snapshots. Biometric envelopes are wrapped directly into platform hardware (TPM 2.0 / DPAPI / Secure Enclave).
+
 ---
 
 ## 6. Audit Verification & Compliance Checklist
@@ -268,3 +286,6 @@ All discovery traffic is strictly restricted to local administrative boundaries 
 | Settings Memory Scrubbing | Reset `self.data.settings` on `lock()` | `crates/core/src/vault/manager.rs` |
 | Keyfile Factor Isolation | Strict exclusion from browser `localStorage` | `src/pages/Login.tsx` & `CreateVaultModal.tsx` |
 | Atomic Wrap Key Creation | `OpenOptionsExt::mode(0o600)` on Unix | `crates/crypto/src/tpm.rs` |
+| QR Zero-Knowledge Pairing | Optical CSPRNG secret + YQR2 mutual HMAC | `crates/core/src/services/sync/pairing.rs` |
+| Transit Dynamic AAD | `format!("yntra-qr-transit-v2:{}", session_id)` | `crates/core/src/services/sync/pairing.rs` |
+| Zero-IPC Secret Isolation | `PendingAdoptedVault` zeroized in native state | `src-tauri/src/commands/sync.rs` |

@@ -7,6 +7,7 @@ export interface PasswordStrengthProps {
   password: string;
   compact?: boolean;
   showWarnings?: boolean;
+  showEntropy?: boolean;
 }
 
 const LEVEL_CONFIG: Record<StrengthLevel, { color: string; labelKey: string; width: string }> = {
@@ -21,6 +22,7 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
   password,
   compact = false,
   showWarnings = true,
+  showEntropy = true,
 }) => {
   const { analyzeStrength } = usePasswordGenerator();
   const { t } = useTranslation();
@@ -57,9 +59,16 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
             style={{ width: config.width, backgroundColor: config.color }}
           />
         </div>
-        <span className="text-[11px] font-medium" style={{ color: config.color }}>
-          {label}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] font-medium" style={{ color: config.color }}>
+            {label}
+          </span>
+          {showEntropy && (
+            <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+              · {t('strength.bits_entropy', { bits: score.entropy_bits.toFixed(0) })}
+            </span>
+          )}
+        </div>
       </div>
     );
   }

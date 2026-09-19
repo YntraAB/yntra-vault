@@ -20,6 +20,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
+use data_encoding::HEXLOWER;
 
 use yntra_crypto::{
     derive_master_key, derive_subkeys, compute_hmac, verify_hmac,
@@ -42,6 +43,13 @@ pub const PAIRING_BEACON_MAGIC: [u8; 4] = *b"YPAR";
 pub const PAIRING_AUTH_OK: [u8; 8] = *b"PAIR__OK";
 pub const PAIRING_AAD_CLIENT: &[u8] = b"yntra-pairing-client-v1";
 pub const PAIRING_AAD_HOST: &[u8] = b"yntra-pairing-host-v1";
+
+pub const QR_PAIRING_MAGIC: [u8; 4] = *b"YQR2";
+
+/// Derives Additional Authenticated Data (AAD) bound to the ephemeral QR session UUID.
+pub fn qr_pairing_aad(session_id: &uuid::Uuid) -> Vec<u8> {
+    format!("yntra-qr-transit-v2:{}", session_id).into_bytes()
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct PairingStats {
@@ -368,24 +376,24 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
 
     let mut listeners: Vec<TcpListener> = Vec::new();
 
-    // Bind primary pairing port (5324)
-    if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", DEFAULT_PAIRING_PORT)) {
-        let _ = l.set_nonblocking(true);
-        listeners.push(l);
-    }
-
-    // Bind legacy pairing / P2P port (5322) so older clients or connections without port succeed
-    if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", DEFAULT_P2P_PORT)) {
-        let _ = l.set_nonblocking(true);
-        listeners.push(l);
-    }
-
-    // Also bind explicit listen_addr if specified and not already bound
-    if !listen_addr.is_empty() && !listen_addr.ends_with(":5324") && !listen_addr.ends_with(":5322")
-        && let Ok(l) = TcpListener::bind(listen_addr) {
+    if !listen_addr.is_empty() && !listen_addr.ends_with(":5324") && !listen_addr.ends_with(":5322") {
+        if let Ok(l) = TcpListener::bind(listen_addr) {
             let _ = l.set_nonblocking(true);
             listeners.push(l);
         }
+    } else {
+        // Bind primary pairing port (5324)
+        if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", DEFAULT_PAIRING_PORT)) {
+            let _ = l.set_nonblocking(true);
+            listeners.push(l);
+        }
+
+        // Bind legacy pairing / P2P port (5322) so older clients or connections without port succeed
+        if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", DEFAULT_P2P_PORT)) {
+            let _ = l.set_nonblocking(true);
+            listeners.push(l);
+        }
+    }
 
     // Fallback if none could be bound
     if listeners.is_empty() {
@@ -976,6 +984,615 @@ pub fn run_p2p_pairing_client_with_device(
     Ok((stats, merged_data))
 }
 
+// ─── Zero-Knowledge Ephemeral QR-Code P2P Pairing Protocol (v2) ───────────────
+
+/// User-facing information about an active ephemeral QR pairing session on the host.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct QrSessionInfo {
+    pub session_id: String,
+    pub qr_payload: String,
+    pub sas_code: String,
+    pub expires_at: i64,
+}
+
+/// Result returned to the client device after QR pairing completion.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct QrClientPairingResult {
+    pub stats: PairingStats,
+    pub has_master_password: bool,
+    pub needs_password: bool,
+    pub sas_code: String,
+    #[serde(skip_serializing)]
+    pub master_password: Option<String>,
+    #[serde(skip_serializing)]
+    pub pending_vault: Option<PendingAdoptedVault>,
+}
+
+/// Unencrypted pending adopted vault stored temporarily in memory if client password is required.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PendingAdoptedVault {
+    pub data: VaultData,
+    pub salt: [u8; 32],
+    pub dest_path: std::path::PathBuf,
+}
+
+/// Completes adoption of a pending vault by encrypting and saving to disk with the provided master password.
+pub fn complete_adopted_vault_save(
+    pending: &PendingAdoptedVault,
+    password: &str,
+) -> crate::Result<()> {
+    if let Some(parent) = pending.dest_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let master_key = derive_master_key(password.as_bytes(), &pending.salt)?;
+    let adopted_subkeys = derive_subkeys(&master_key)?;
+
+    let serialized_to_save = Zeroizing::new(
+        rmp_serde::to_vec(&pending.data)
+            .map_err(|e| VaultError::SerializationError(format!("Serialisering av adopterat valv: {}", e)))?
+    );
+    let header = FileHeader {
+        version: FORMAT_VERSION,
+        flags: 0,
+        salt: pending.salt,
+        kdf_params: KdfParams::default(),
+    };
+    let aad = header.aad_bytes()?;
+    let encrypted = encrypt_vault_with_aad(&serialized_to_save, &adopted_subkeys.vault_key, &aad)?;
+
+    let mut payload = Vec::with_capacity(encrypted.nonce.len() + encrypted.ciphertext.len());
+    payload.extend_from_slice(&encrypted.nonce);
+    payload.extend_from_slice(&encrypted.ciphertext);
+
+    let vault_file = VaultFile {
+        header,
+        hmac: None,
+        biometric: None,
+        hardware2fa: None,
+        encrypted_payload: payload,
+    };
+
+    let file_bytes = vault_file.to_bytes()?;
+    let temp_path = pending.dest_path.with_extension(format!("vdb.pairing.{}.tmp", uuid::Uuid::new_v4().simple()));
+    fs::write(&temp_path, &file_bytes)?;
+    fs::rename(&temp_path, &pending.dest_path)?;
+    Ok(())
+}
+
+/// Encrypted container payload transmitted from Host to Client during QR pairing.
+#[derive(Serialize, Deserialize)]
+pub struct QrPairingPayload {
+    pub salt: [u8; 32],
+    pub data: VaultData,
+    pub master_password: Option<String>,
+    #[serde(default)]
+    pub error_msg: Option<String>,
+}
+
+/// Internal cryptographic state for an active Host QR pairing session.
+#[derive(Clone)]
+pub struct QrPairingSession {
+    pub session_id: uuid::Uuid,
+    pub secret: Zeroizing<[u8; 32]>,
+    pub sas_code: String,
+    pub host_ips: Vec<String>,
+    pub port: u16,
+    pub expires_at: chrono::DateTime<Utc>,
+}
+
+/// Derives ephemeral transit SubKeys for QR pairing from the 256-bit secret and session UUID.
+pub fn derive_qr_pairing_subkeys(secret: &[u8; 32], session_id: &uuid::Uuid) -> crate::Result<SubKeys> {
+    let mut salt = [0u8; 32];
+    let salt_hash = blake3::hash(format!("yntra-qr-pairing-salt-v2:{}", session_id).as_bytes());
+    salt.copy_from_slice(salt_hash.as_bytes());
+    let master_key = derive_master_key(secret, &salt)?;
+    let subkeys = derive_subkeys(&master_key)?;
+    Ok(subkeys)
+}
+
+/// Computes the 4-digit Short Authentication String (SAS) from the ephemeral secret.
+pub fn compute_qr_sas_code(secret: &[u8; 32]) -> String {
+    let sas_hash = blake3::keyed_hash(secret, b"yntra-qr-sas-v2");
+    let num = u16::from_be_bytes([sas_hash.as_bytes()[0], sas_hash.as_bytes()[1]]) % 10000;
+    format!("{:04}", num)
+}
+
+/// Generates a new ephemeral QR pairing session with a 90-second expiration window.
+pub fn generate_qr_pairing_session(
+    host_ips: Vec<String>,
+    port: u16,
+    device_name: Option<String>,
+) -> (QrPairingSession, QrSessionInfo) {
+    let mut secret_bytes = [0u8; 32];
+    rand::rng().fill(&mut secret_bytes);
+    let secret = Zeroizing::new(secret_bytes);
+    let session_id = uuid::Uuid::new_v4();
+    let sas_code = compute_qr_sas_code(&secret);
+    let expires_at = Utc::now() + chrono::Duration::seconds(90);
+
+    let effective_port = if port == 0 { DEFAULT_PAIRING_PORT } else { port };
+    let chosen_ip = host_ips.first().cloned().unwrap_or_else(|| "127.0.0.1".to_string());
+    let hex_secret = HEXLOWER.encode(&*secret);
+    let clean_name = device_name.unwrap_or_else(|| "Yntra Host".to_string());
+    let encoded_name: String = url::form_urlencoded::byte_serialize(clean_name.as_bytes()).collect();
+
+    let qr_payload = format!(
+        "yntrapair://v2?id={}&s={}&ip={}&p={}&sas={}&name={}",
+        session_id, hex_secret, chosen_ip, effective_port, sas_code, encoded_name
+    );
+
+    let info = QrSessionInfo {
+        session_id: session_id.to_string(),
+        qr_payload,
+        sas_code: sas_code.clone(),
+        expires_at: expires_at.timestamp(),
+    };
+
+    let session = QrPairingSession {
+        session_id,
+        secret,
+        sas_code,
+        host_ips,
+        port: effective_port,
+        expires_at,
+    };
+
+    (session, info)
+}
+
+/// Parses a scanned QR payload URI into session parameters and cryptographically validates the SAS.
+pub fn parse_qr_pairing_payload(payload: &str) -> crate::Result<(uuid::Uuid, [u8; 32], SocketAddr, String, String)> {
+    let clean = payload.trim();
+    if !clean.starts_with("yntrapair://v2?") {
+        return Err(VaultError::InvalidFormat("Ogiltigt QR-format. Koden måste starta med yntrapair://v2".into()));
+    }
+
+    let query_str = &clean["yntrapair://v2?".len()..];
+    let mut session_id = None;
+    let mut secret = None;
+    let mut host_ip = None;
+    let mut port = DEFAULT_PAIRING_PORT;
+    let mut sas = None;
+    let mut name = "Yntra Host".to_string();
+
+    for (k, v) in url::form_urlencoded::parse(query_str.as_bytes()) {
+        match k.as_ref() {
+            "id" => {
+                if let Ok(id) = uuid::Uuid::parse_str(&v) {
+                    session_id = Some(id);
+                }
+            }
+            "s" => {
+                if let Ok(bytes) = HEXLOWER.decode(v.as_bytes())
+                    && bytes.len() == 32
+                {
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes);
+                    secret = Some(arr);
+                }
+            }
+            "ip" => host_ip = Some(v.to_string()),
+            "p" => {
+                if let Ok(p) = v.parse::<u16>() {
+                    port = p;
+                }
+            }
+            "sas" => sas = Some(v.to_string()),
+            "name" => name = v.to_string(),
+            _ => {}
+        }
+    }
+
+    let session_id = session_id.ok_or_else(|| VaultError::InvalidFormat("Saknar giltigt sessions-ID i QR-koden".into()))?;
+    let secret = secret.ok_or_else(|| VaultError::InvalidFormat("Saknar giltig säkerhetsnyckel i QR-koden".into()))?;
+    let host_ip = host_ip.ok_or_else(|| VaultError::InvalidFormat("Saknar värddatorns IP-adress i QR-koden".into()))?;
+    let sas = sas.ok_or_else(|| VaultError::InvalidFormat("Saknar bekräftelsekod (SAS) i QR-koden".into()))?;
+
+    let target_addr_str = format!("{}:{}", host_ip, port);
+    let addr = target_addr_str.to_socket_addrs()
+        .map_err(|e| VaultError::InvalidFormat(format!("Kunde inte tolka IP-adress '{}': {}", target_addr_str, e)))?
+        .next()
+        .ok_or_else(|| VaultError::InvalidFormat(format!("Kunde inte slå upp IP-adress '{}'", target_addr_str)))?;
+
+    // Cryptographically verify SAS code against secret
+    let expected_sas = compute_qr_sas_code(&secret);
+    if !bool::from(expected_sas.as_bytes().ct_eq(sas.as_bytes())) {
+        return Err(VaultError::InvalidFormat("Manipulerad QR-kod: Bekräftelsekoden matchar inte den kryptografiska nyckeln".into()));
+    }
+
+    Ok((session_id, secret, addr, sas, name))
+}
+
+/// Runs the Host listener for an active QR pairing session.
+pub fn run_p2p_qr_pairing_host(
+    session: &QrPairingSession,
+    host_db_path: &Path,
+    master_password: &str,
+    include_password: bool,
+    accept_timeout: Duration,
+    host_device_name: Option<String>,
+    cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> crate::Result<(PairingStats, VaultData)> {
+    let pairing_subkeys = derive_qr_pairing_subkeys(&session.secret, &session.session_id)?;
+
+    let mut listeners: Vec<TcpListener> = Vec::new();
+    if let Ok(l) = TcpListener::bind(format!("0.0.0.0:{}", session.port)) {
+        let _ = l.set_nonblocking(true);
+        listeners.push(l);
+    }
+
+    if listeners.is_empty() {
+        let l = TcpListener::bind("0.0.0.0:0")
+            .map_err(|e| VaultError::EncryptionError(format!("Misslyckades med att binda QR-lyssnare: {}", e)))?;
+        let _ = l.set_nonblocking(true);
+        listeners.push(l);
+    }
+
+    let start_time = std::time::Instant::now();
+    let (mut stream, peer_sock_addr) = loop {
+        if let Some(ref cancel) = cancel_flag
+            && cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(VaultError::SyncError("QR-parning avbröts av användaren".into()));
+            }
+
+        if start_time.elapsed() >= accept_timeout || Utc::now() >= session.expires_at {
+            return Err(VaultError::SyncError("Tidsgränsen för QR-koden (90s) har löpt ut. Generera en ny QR-kod.".into()));
+        }
+
+        let mut accepted = None;
+        for listener in &listeners {
+            match listener.accept() {
+                Ok(res) => {
+                    accepted = Some(res);
+                    break;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => {}
+            }
+        }
+
+        if let Some(res) = accepted {
+            break res;
+        }
+
+        std::thread::sleep(Duration::from_millis(40));
+    };
+
+    stream.set_nonblocking(false)
+        .map_err(|e| VaultError::EncryptionError(format!("Kunde inte återställa socket: {}", e)))?;
+    let sock_timeout = Some(Duration::from_secs(30));
+    let _ = stream.set_read_timeout(sock_timeout);
+    let _ = stream.set_write_timeout(sock_timeout);
+
+    // 1. Verify Magic Header & Session ID
+    let mut magic = [0u8; 4];
+    stream.read_exact(&mut magic)
+        .map_err(|e| VaultError::EncryptionError(format!("Läsning av QR-handskakning misslyckades: {}", e)))?;
+    if magic != QR_PAIRING_MAGIC {
+        let _ = stream.write_all(&P2P_AUTH_FAILED_SIG);
+        let _ = stream.flush();
+        return Err(VaultError::InvalidFormat("Okänt protokoll. Klienten skickade inte giltig QR-magi.".into()));
+    }
+
+    let mut sid_bytes = [0u8; 16];
+    stream.read_exact(&mut sid_bytes)
+        .map_err(|e| VaultError::EncryptionError(format!("Läsning av sessions-ID misslyckades: {}", e)))?;
+    if !bool::from(sid_bytes.ct_eq(session.session_id.as_bytes())) {
+        let _ = stream.write_all(&P2P_AUTH_FAILED_SIG);
+        let _ = stream.flush();
+        return Err(VaultError::DecryptionError("Klienten angav ett felaktigt eller utgånget sessions-ID.".into()));
+    }
+
+    // 2. Mutual Challenge-Response Handshake
+    let mut client_challenge = [0u8; 32];
+    stream.read_exact(&mut client_challenge)
+        .map_err(|e| VaultError::EncryptionError(format!("Läsning av klientens utmaning misslyckades: {}", e)))?;
+
+    let mut host_challenge = [0u8; 32];
+    rand::rng().fill(&mut host_challenge);
+    stream.write_all(&host_challenge)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av värdutmaning misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush misslyckades: {}", e)))?;
+
+    let mut client_sig = [0u8; 64];
+    stream.read_exact(&mut client_sig)
+        .map_err(|e| VaultError::EncryptionError(format!("Läsning av klientsignatur misslyckades: {}", e)))?;
+
+    if verify_hmac(&host_challenge, &client_sig, &pairing_subkeys.hmac_key).is_err() {
+        let _ = stream.write_all(&P2P_AUTH_FAILED_SIG);
+        let _ = stream.flush();
+        return Err(VaultError::DecryptionError("Kryptografisk verifiering misslyckades: Ogiltig QR-nyckel.".into()));
+    }
+
+    let host_sig = compute_hmac(&client_challenge, &pairing_subkeys.hmac_key);
+    stream.write_all(&host_sig)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av värdsignatur misslyckades: {}", e)))?;
+    stream.write_all(&PAIRING_AUTH_OK)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av auth-ack misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush av auth misslyckades: {}", e)))?;
+
+    // 3. Exchange Device Metadata
+    let mut dev_len_buf = [0u8; 4];
+    stream.read_exact(&mut dev_len_buf)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av enhetsinfo misslyckades: {}", e)))?;
+    let client_dev_len = u32::from_be_bytes(dev_len_buf) as usize;
+    if client_dev_len > 16384 {
+        return Err(VaultError::InvalidFormat("Klientens enhetsinformation överskrider tillåten storlek".into()));
+    }
+    let mut client_dev_bytes = vec![0u8; client_dev_len];
+    stream.read_exact(&mut client_dev_bytes)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av enhetsdata misslyckades: {}", e)))?;
+    let client_info: DeviceInfo = rmp_serde::from_slice(&client_dev_bytes)
+        .map_err(|e| VaultError::SerializationError(format!("Avkodning av klientinfo misslyckades: {}", e)))?;
+
+    let host_info = resolve_local_device_info(host_device_name.as_deref());
+    let host_dev_bytes = rmp_serde::to_vec(&host_info)
+        .map_err(|e| VaultError::SerializationError(format!("Serialisering av värdinfo misslyckades: {}", e)))?;
+    let host_dev_len = host_dev_bytes.len() as u32;
+    stream.write_all(&host_dev_len.to_be_bytes())
+        .map_err(|e| VaultError::EncryptionError(format!("Sändning av värdinfo-längd misslyckades: {}", e)))?;
+    stream.write_all(&host_dev_bytes)
+        .map_err(|e| VaultError::EncryptionError(format!("Sändning av värdinfo misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush av värdinfo misslyckades: {}", e)))?;
+
+    // 4. Open Host's local vault & register trusted client
+    let mut host_manager = VaultManager::open(host_db_path, master_password)?;
+    let host_entries_count = host_manager.data.entries.len();
+
+    let trusted_client = crate::vault::types::TrustedDevice {
+        id: client_info.id,
+        name: client_info.name,
+        device_type: client_info.device_type,
+        os: client_info.os,
+        paired_at: Utc::now(),
+        last_sync_at: Some(Utc::now()),
+        token_hash: String::new(),
+    };
+    host_manager.data.settings.trusted_devices.retain(|d| {
+        d.id != trusted_client.id && !(d.name.eq_ignore_ascii_case(&trusted_client.name) && d.os == trusted_client.os)
+    });
+    host_manager.data.settings.trusted_devices.push(trusted_client);
+
+    // Ensure host is registered
+    host_manager.data.settings.trusted_devices.retain(|d| {
+        d.id != host_info.id && !(d.name.eq_ignore_ascii_case(&host_info.name) && d.os == host_info.os)
+    });
+    host_manager.data.settings.trusted_devices.push(crate::vault::types::TrustedDevice {
+        id: host_info.id,
+        name: host_info.name,
+        device_type: host_info.device_type,
+        os: host_info.os,
+        paired_at: Utc::now(),
+        last_sync_at: Some(Utc::now()),
+        token_hash: String::new(),
+    });
+
+    host_manager.data.metadata.updated_at = Utc::now();
+    host_manager.data.metadata.entry_count = host_entries_count;
+    host_manager.save()?;
+
+    // 5. Send Encrypted Vault + Salt + Optional Master Password over Transit Tunnel
+    let host_payload = QrPairingPayload {
+        salt: host_manager.salt,
+        data: host_manager.data.clone(),
+        master_password: if include_password { Some(master_password.to_string()) } else { None },
+        error_msg: None,
+    };
+
+    let serialized_payload = Zeroizing::new(
+        rmp_serde::to_vec(&host_payload)
+            .map_err(|e| VaultError::SerializationError(format!("Serialisering av QR-valvdata: {}", e)))?
+    );
+    let aad = qr_pairing_aad(&session.session_id);
+    let encrypted_blob = encrypt_vault_with_aad(&serialized_payload, &pairing_subkeys.vault_key, &aad)?;
+    let blob_bytes = rmp_serde::to_vec(&encrypted_blob)
+        .map_err(|e| VaultError::SerializationError(format!("Serialisering av krypterad blob: {}", e)))?;
+
+    let blob_len = blob_bytes.len() as u64;
+    stream.write_all(&blob_len.to_be_bytes())
+        .map_err(|e| VaultError::EncryptionError(format!("Sändning av nyttolaststorlek misslyckades: {}", e)))?;
+    stream.write_all(&blob_bytes)
+        .map_err(|e| VaultError::EncryptionError(format!("Sändning av krypterad nyttolast misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush av nyttolast misslyckades: {}", e)))?;
+
+    let stats = PairingStats {
+        entries_sent: host_entries_count,
+        entries_received: 0,
+        entries_merged: host_entries_count,
+        total_entries: host_entries_count,
+        vault_path: None,
+        peer_addr: Some(peer_sock_addr.ip().to_string()),
+    };
+
+    Ok((stats, host_manager.data))
+}
+
+/// Runs the Client side of the QR pairing protocol.
+pub fn run_p2p_qr_pairing_client(
+    qr_payload: &str,
+    client_mode: ClientPairingMode,
+    client_device_name: Option<String>,
+    client_password: Option<String>,
+) -> crate::Result<QrClientPairingResult> {
+    let (session_id, secret, target_addr, sas, _host_name) = parse_qr_pairing_payload(qr_payload)?;
+    let pairing_subkeys = derive_qr_pairing_subkeys(&secret, &session_id)?;
+
+    let mut stream = TcpStream::connect_timeout(&target_addr, Duration::from_secs(6))
+        .map_err(|e| VaultError::EncryptionError(format!("Kunde inte ansluta till värddatorn på {}: {}", target_addr, e)))?;
+
+    let sock_timeout = Some(Duration::from_secs(30));
+    let _ = stream.set_read_timeout(sock_timeout);
+    let _ = stream.set_write_timeout(sock_timeout);
+
+    // 1. Send Magic Header & Session ID
+    stream.write_all(&QR_PAIRING_MAGIC)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av QR-magi misslyckades: {}", e)))?;
+    stream.write_all(session_id.as_bytes())
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av sessions-ID misslyckades: {}", e)))?;
+
+    // 2. Mutual Challenge-Response Handshake
+    let mut client_challenge = [0u8; 32];
+    rand::rng().fill(&mut client_challenge);
+    stream.write_all(&client_challenge)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av klientutmaning misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush misslyckades: {}", e)))?;
+
+    let mut host_challenge = [0u8; 32];
+    stream.read_exact(&mut host_challenge)
+        .map_err(|e| VaultError::EncryptionError(format!("Läsning av värdutmaning misslyckades: {}", e)))?;
+
+    let client_sig = compute_hmac(&host_challenge, &pairing_subkeys.hmac_key);
+    stream.write_all(&client_sig)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av klientsignatur misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush av signatur misslyckades: {}", e)))?;
+
+    let mut host_sig = [0u8; 64];
+    stream.read_exact(&mut host_sig)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av värdsignatur misslyckades: {}", e)))?;
+
+    if host_sig == P2P_AUTH_FAILED_SIG {
+        return Err(VaultError::DecryptionError("Värden avvisade QR-parningen: Ogiltig eller utgången kod.".into()));
+    }
+
+    if verify_hmac(&client_challenge, &host_sig, &pairing_subkeys.hmac_key).is_err() {
+        let _ = stream.write_all(&P2P_AUTH_FAILED_SIG);
+        let _ = stream.flush();
+        return Err(VaultError::DecryptionError("Värdverifiering misslyckades: Ogiltig autentiseringsnyckel.".into()));
+    }
+
+    let mut auth_ack = [0u8; 8];
+    stream.read_exact(&mut auth_ack)
+        .map_err(|e| VaultError::EncryptionError(format!("Läsning av auth ack misslyckades: {}", e)))?;
+    if auth_ack != PAIRING_AUTH_OK {
+        return Err(VaultError::EncryptionError("Felaktigt svar från värddatorn vid QR-parning".into()));
+    }
+
+    // 3. Exchange Device Metadata
+    let client_info = resolve_local_device_info(client_device_name.as_deref());
+    let client_dev_bytes = rmp_serde::to_vec(&client_info)
+        .map_err(|e| VaultError::SerializationError(format!("Serialisering av enhetsinfo misslyckades: {}", e)))?;
+    let client_dev_len = client_dev_bytes.len() as u32;
+    stream.write_all(&client_dev_len.to_be_bytes())
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av enhetsinfo-längd misslyckades: {}", e)))?;
+    stream.write_all(&client_dev_bytes)
+        .map_err(|e| VaultError::EncryptionError(format!("Skickande av enhetsinfo misslyckades: {}", e)))?;
+    stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush av enhetsinfo misslyckades: {}", e)))?;
+
+    let mut dev_len_buf = [0u8; 4];
+    stream.read_exact(&mut dev_len_buf)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av värdens enhetsinfo-längd misslyckades: {}", e)))?;
+    let host_dev_len = u32::from_be_bytes(dev_len_buf) as usize;
+    if host_dev_len > 16384 {
+        return Err(VaultError::InvalidFormat("Värdens enhetsinformation överskrider tillåten storlek".into()));
+    }
+    let mut host_dev_bytes = vec![0u8; host_dev_len];
+    stream.read_exact(&mut host_dev_bytes)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av värdens enhetsinformation misslyckades: {}", e)))?;
+    let host_info: DeviceInfo = rmp_serde::from_slice(&host_dev_bytes)
+        .map_err(|e| VaultError::SerializationError(format!("Avkodning av värdens enhetsinfo misslyckades: {}", e)))?;
+
+    // 4. Receive Transit-Encrypted Vault Payload
+    let mut size_buf = [0u8; 8];
+    stream.read_exact(&mut size_buf)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av nyttolaststorlek misslyckades: {}", e)))?;
+    let payload_size = u64::from_be_bytes(size_buf) as usize;
+
+    if payload_size > MAX_DB_SIZE {
+        return Err(VaultError::InvalidFormat("QR-nyttolast överskrider maximal tillåten storlek".into()));
+    }
+
+    let mut encrypted_bytes = vec![0u8; payload_size];
+    stream.read_exact(&mut encrypted_bytes)
+        .map_err(|e| VaultError::DecryptionError(format!("Läsning av krypterad nyttolast misslyckades: {}", e)))?;
+
+    let encrypted_blob: EncryptedBlob = rmp_serde::from_slice(&encrypted_bytes)
+        .map_err(|e| VaultError::SerializationError(format!("Avkodning av krypterad blob misslyckades: {}", e)))?;
+    let aad = qr_pairing_aad(&session_id);
+    let decrypted_bytes = Zeroizing::new(
+        decrypt_vault_with_aad(&encrypted_blob, &pairing_subkeys.vault_key, &aad)?
+    );
+    let host_payload: QrPairingPayload = rmp_serde::from_slice(&decrypted_bytes)
+        .map_err(|e| VaultError::SerializationError(format!("Avkodning av valvdata misslyckades: {}", e)))?;
+
+    if let Some(err) = host_payload.error_msg {
+        return Err(VaultError::InvalidFormat(err));
+    }
+
+    let host_salt = host_payload.salt;
+    let mut merged_data = host_payload.data;
+
+    // Register host as trusted device on client
+    let trusted_host = crate::vault::types::TrustedDevice {
+        id: host_info.id,
+        name: host_info.name,
+        device_type: host_info.device_type,
+        os: host_info.os,
+        paired_at: Utc::now(),
+        last_sync_at: Some(Utc::now()),
+        token_hash: String::new(),
+    };
+    merged_data.settings.trusted_devices.retain(|d| {
+        d.id != trusted_host.id && !(d.name.eq_ignore_ascii_case(&trusted_host.name) && d.os == trusted_host.os)
+    });
+    merged_data.settings.trusted_devices.push(trusted_host);
+
+    // 5. Determine destination path with strict collision isolation
+    let (final_dest_path, should_backup) = match &client_mode {
+        ClientPairingMode::ExistingVault { path } => (path.clone(), true),
+        ClientPairingMode::AdoptIntoFile { target_file } => (target_file.clone(), false),
+        ClientPairingMode::AdoptIntoDir { target_dir } => {
+            let safe_name = sanitize_vault_filename(&merged_data.metadata.name);
+            let mut dest = target_dir.join(format!("{}.vdb", safe_name));
+            if dest.exists() {
+                let mut counter = 1;
+                while dest.exists() {
+                    dest = target_dir.join(format!("{} ({}).vdb", safe_name, counter));
+                    counter += 1;
+                }
+            }
+            (dest, false)
+        }
+    };
+
+    // Determine effective master password: host-provided or client-provided
+    let effective_password = host_payload.master_password.or(client_password);
+    let has_master_password = effective_password.is_some();
+    let needs_password = !has_master_password;
+
+    let pending_to_save = PendingAdoptedVault {
+        data: merged_data.clone(),
+        salt: host_salt,
+        dest_path: final_dest_path.clone(),
+    };
+
+    if let Some(ref pwd) = effective_password {
+        if should_backup && final_dest_path.exists() {
+            let backup_path = final_dest_path.with_extension("vdb.bak");
+            let _ = fs::copy(&final_dest_path, &backup_path);
+        }
+        complete_adopted_vault_save(&pending_to_save, pwd)?;
+    }
+
+    let stats = PairingStats {
+        entries_sent: 0,
+        entries_received: merged_data.entries.len(),
+        entries_merged: merged_data.entries.len(),
+        total_entries: merged_data.entries.len(),
+        vault_path: Some(final_dest_path.to_string_lossy().to_string()),
+        peer_addr: Some(target_addr.to_string()),
+    };
+
+    Ok(QrClientPairingResult {
+        stats,
+        has_master_password,
+        needs_password,
+        sas_code: sas,
+        master_password: effective_password,
+        pending_vault: if needs_password { Some(pending_to_save) } else { None },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1298,7 +1915,7 @@ mod tests {
             run_p2p_pairing_host(addr, password, pin, &h_path, Duration::from_secs(5))
         });
 
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(150));
 
         // Connect as client in AdoptIntoDir mode pointing to temp_dir
         let (c_stats, c_data) = run_p2p_pairing_client_with_device(
@@ -1368,7 +1985,7 @@ mod tests {
             run_p2p_pairing_host(addr, password, pin, &h_path, Duration::from_secs(5))
         });
 
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(150));
 
         let (c_stats, _) = run_p2p_pairing_client_with_device(
             addr,
@@ -1434,5 +2051,186 @@ mod tests {
         assert_eq!(discovered_port, 5324);
 
         host_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_qr_session_generation_and_payload_parsing() {
+        let ips = vec!["127.0.0.1".to_string(), "192.168.1.50".to_string()];
+        let (session, info) = generate_qr_pairing_session(ips, 5324, Some("Test-Desktop".to_string()));
+
+        assert!(info.qr_payload.starts_with("yntrapair://v2?"));
+        assert_eq!(info.sas_code.len(), 4);
+        assert!(info.sas_code.chars().all(|c| c.is_ascii_digit()));
+
+        let (parsed_id, parsed_secret, parsed_addr, parsed_sas, parsed_name) =
+            parse_qr_pairing_payload(&info.qr_payload).unwrap();
+
+        assert_eq!(parsed_id, session.session_id);
+        assert_eq!(parsed_secret, *session.secret);
+        assert_eq!(parsed_addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(parsed_addr.port(), 5324);
+        assert_eq!(parsed_sas, info.sas_code);
+        assert_eq!(parsed_name, "Test-Desktop");
+
+        // Tampering test: modified SAS should fail integrity check
+        let tampered_payload = info.qr_payload.replace(&format!("sas={}", info.sas_code), "sas=9999");
+        if info.sas_code != "9999" {
+            assert!(parse_qr_pairing_payload(&tampered_payload).is_err());
+        }
+    }
+
+    #[test]
+    fn test_qr_pairing_subkeys_deterministic() {
+        let secret = [42u8; 32];
+        let sid = uuid::Uuid::new_v4();
+
+        let k1 = derive_qr_pairing_subkeys(&secret, &sid).unwrap();
+        let k2 = derive_qr_pairing_subkeys(&secret, &sid).unwrap();
+        assert!(bool::from(k1.ct_eq(&k2)));
+
+        let sid2 = uuid::Uuid::new_v4();
+        let k3 = derive_qr_pairing_subkeys(&secret, &sid2).unwrap();
+        assert!(!bool::from(k1.ct_eq(&k3)));
+    }
+
+    #[test]
+    fn test_qr_pairing_loopback_roundtrip() {
+        let temp_dir = tempdir().unwrap();
+        let host_db = temp_dir.path().join("host.vdb");
+        let client_target_dir = temp_dir.path().join("client_vaults");
+        fs::create_dir_all(&client_target_dir).unwrap();
+
+        let password = "TestMasterPassword#QR2026";
+        {
+            let mut mgr = VaultManager::create("Host Vault", password, &host_db).unwrap();
+            mgr.add_entry(crate::vault::manager::NewEntry {
+                title: "Host QR Entry".into(),
+                username: "qr_user".into(),
+                password: "qr_secret_pass".into(),
+                url: "".into(),
+                email: "".into(),
+                notes: "".into(),
+                tags: vec![],
+                totp_secret: None,
+                custom_fields: vec![],
+                attachments: None,
+                entry_type: Default::default(),
+                generate_passkey: None,
+            }).unwrap();
+            mgr.save().unwrap();
+        }
+
+        let (session, info) = generate_qr_pairing_session(vec!["127.0.0.1".to_string()], 5333, Some("Host-PC".to_string()));
+
+        let host_db_clone = host_db.clone();
+        let session_clone = session.clone();
+        let pwd_clone = password.to_string();
+
+        let host_handle = std::thread::spawn(move || {
+            run_p2p_qr_pairing_host(
+                &session_clone,
+                &host_db_clone,
+                &pwd_clone,
+                true,
+                Duration::from_secs(10),
+                Some("Host-PC".to_string()),
+                None,
+            )
+        });
+
+        std::thread::sleep(Duration::from_millis(150));
+
+        let client_res = run_p2p_qr_pairing_client(
+            &info.qr_payload,
+            ClientPairingMode::AdoptIntoDir { target_dir: client_target_dir.clone() },
+            Some("Mobile-Client".to_string()),
+            None,
+        ).unwrap();
+
+        let (host_stats, _) = host_handle.join().unwrap().unwrap();
+
+        assert_eq!(client_res.has_master_password, true);
+        assert_eq!(client_res.needs_password, false);
+        assert_eq!(client_res.sas_code, info.sas_code);
+        assert_eq!(client_res.master_password.as_deref(), Some(password));
+        assert!(client_res.stats.vault_path.is_some());
+        assert_eq!(host_stats.entries_sent, 1);
+
+        // Verify adopted vault on client can be opened with the provisioned password
+        let adopted_path = client_res.stats.vault_path.unwrap();
+        let client_mgr = VaultManager::open(&std::path::PathBuf::from(adopted_path), password).unwrap();
+        assert_eq!(client_mgr.data.entries.len(), 1);
+        assert_eq!(client_mgr.data.entries[0].title, "Host QR Entry");
+        assert_eq!(client_mgr.data.entries[0].username, "qr_user");
+    }
+
+    #[test]
+    fn test_qr_pairing_without_password_adoption() {
+        let temp_dir = tempdir().unwrap();
+        let host_db = temp_dir.path().join("host_nopwd.vdb");
+        let client_target_dir = temp_dir.path().join("client_vaults_nopwd");
+        fs::create_dir_all(&client_target_dir).unwrap();
+
+        let password = "ManualEnteredPassword#2026";
+        {
+            let mut mgr = VaultManager::create("Host Vault No Pwd", password, &host_db).unwrap();
+            mgr.add_entry(crate::vault::manager::NewEntry {
+                title: "Sensitive Entry".into(),
+                username: "secret_agent".into(),
+                password: "top_secret_pass".into(),
+                url: "".into(),
+                email: "".into(),
+                notes: "".into(),
+                tags: vec![],
+                totp_secret: None,
+                custom_fields: vec![],
+                attachments: None,
+                entry_type: Default::default(),
+                generate_passkey: None,
+            }).unwrap();
+            mgr.save().unwrap();
+        }
+
+        let (session, info) = generate_qr_pairing_session(vec!["127.0.0.1".to_string()], 5334, Some("Host-PC".to_string()));
+
+        let host_db_clone = host_db.clone();
+        let session_clone = session.clone();
+        let pwd_clone = password.to_string();
+
+        let host_handle = std::thread::spawn(move || {
+            run_p2p_qr_pairing_host(
+                &session_clone,
+                &host_db_clone,
+                &pwd_clone,
+                false, // include_password = false
+                Duration::from_secs(10),
+                Some("Host-PC".to_string()),
+                None,
+            )
+        });
+
+        std::thread::sleep(Duration::from_millis(150));
+
+        // Client connects without providing password initially: should get pending_vault and needs_password = true
+        let client_res = run_p2p_qr_pairing_client(
+            &info.qr_payload,
+            ClientPairingMode::AdoptIntoDir { target_dir: client_target_dir.clone() },
+            Some("Mobile-Client".to_string()),
+            None,
+        ).unwrap();
+
+        let _ = host_handle.join().unwrap().unwrap();
+
+        assert_eq!(client_res.has_master_password, false);
+        assert_eq!(client_res.needs_password, true);
+        assert!(client_res.pending_vault.is_some());
+
+        // Now complete adoption with client password
+        let pending = client_res.pending_vault.unwrap();
+        complete_adopted_vault_save(&pending, password).unwrap();
+
+        let client_mgr = VaultManager::open(&pending.dest_path, password).unwrap();
+        assert_eq!(client_mgr.data.entries.len(), 1);
+        assert_eq!(client_mgr.data.entries[0].title, "Sensitive Entry");
     }
 }

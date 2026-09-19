@@ -97,7 +97,16 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 - **Session-Bound Adopt Path Preservation**: During an active pairing wizard session, the newly adopted vault path is preserved in volatile memory (`adoptedVaultPathRef`) so subsequent in-wizard re-synchronizations update the existing file without spawning duplicate `<Vault> (1).vdb` files.
 - **Mutual Device Metadata Exchange**: Devices securely exchange `DeviceInfo` (UUID, device name, hardware type, OS) and register them into `VaultSettings.trusted_devices` with strict deduplication by UUID and `(name, os)`.
 
-#### 3. Active UDP Query-Response Discovery (Port 5323)
+#### 3. Optical QR-Code Zero-Knowledge Pairing Protocol (Protocol `YQR2`)
+- **Optical Pre-Shared Key & Custom URI**: Host generates a single-use 256-bit CSPRNG optical secret and UUIDv4 session ID with a 90-second TTL. The QR code encodes `yntrapair://v2?id=<session_id>&s=<secret_hex>&ip=<ip>&p=<port>&sas=<sas>&name=<name>`. Master passwords and database payloads are never placed in the optical QR image.
+- **Short Authentication String (SAS)**: 4-digit decimal visual confirmation code derived deterministically via BLAKE3 (`b"yntra-qr-sas-v2"`), displayed simultaneously on host display and client camera viewfinder for out-of-band MitM detection.
+- **Mutual Handshake (`YQR2`)**: Client transmits 68-byte frame (`[YQR2 | session_id | client_challenge | HMAC]`), verified by host in constant time before host responds with 48-byte signed challenge. Unauthenticated peers are rejected with zero metadata disclosure.
+- **Dynamic Session AAD Binding**: Ephemeral transit payloads use `XChaCha20-Poly1305` authenticated with dynamic Additional Authenticated Data (`yntra-qr-transit-v2:<session_id>`), eliminating cross-session replay vulnerabilities.
+- **Zero-IPC Plaintext Isolation**: Provisioned master passwords for biometric enrollment are held exclusively in `zeroize::Zeroizing` buffers in native `AppState.pending_adopted_vault`. Plaintext credentials never cross the Tauri IPC bridge into webview JavaScript (eliminating `receivedMasterPassword` in V8).
+- **Safe Adoption & Collision Avoidance**: When pairing without provisioned credentials (`include_password: false`), client safely adopts into `<HostVaultName>.vdb` without data loss and prompts user to verify the existing master password via `complete_adopted_vault`.
+- **Dual-Engine Camera Scanner (`QrScannerModal.tsx`)**: Hardware-accelerated browser-native `BarcodeDetector` with automatic `jsQR` canvas fallback, front/rear camera switcher, and drag-and-drop image file optical scan.
+
+#### 4. Active UDP Query-Response Discovery (Port 5323)
 - **Active Query-Response Protocol**: Clients emit periodic `YQRY` query pulses (`[YQRY (4B) | pairing_beacon_id (32B)]`). Hosts respond with immediate direct unicast `YPAR` packets (`[YPAR (4B) | pairing_beacon_id (32B) | local_port (2B)]`), reducing discovery latency from 7 seconds to <50ms and penetrating AP isolation.
 - **In-Loop Self-Echo Isolation**: The receive loop in `listen_discovery_beacon` evaluates received packet source IP addresses against known local network adapters and loopback *inside* the receive loop. Self-echo packets are dropped immediately, allowing the listener to continue until remote peers respond or the timeout expires.
 - **Multi-Interface Local Network Enumeration & IPv4 Prioritization**: `get_local_lan_ips` probes all active network adapters (Ethernet, Wi-Fi, mobile hotspots, virtual adapters), excludes un-routable link-local IPv6 addresses (`fe80::/10`) and multicast, and sorts IPv4 addresses first to guarantee reachable network endpoints in the UI.
@@ -107,8 +116,8 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 - **Parallel Candidate Port Fallback**: Clients test candidate ports `[confirmed_host_port, 5324, 5322, 5325]` with a snappy 350ms LAN timeout and direct UDP pre-ping.
 - **Real-Time Auto-Dot & Hostname Formatting**: `formatIpv4Input` validates and formats IP addresses with automatic octet dot insertion, supports local hostnames (`localhost`, `*.local`), and sanitizes port segments.
 
-#### 4. Progressive Two-Step Wizard & Sync Notifications
-- **Progressive Two-Step Pairing Flow (`DevicePairingWizard.tsx`)**: Eliminates visual clutter by separating master password confirmation from 6-digit PIN input (`1. Password ➔ 2. Pairing PIN ➔ 3. Synchronize`).
+#### 5. Unified Pairing Wizard & Sync Notifications
+- **Segmented Mode Switcher (`DevicePairingWizard.tsx`)**: Tabbed interface offering instant `QR-kod (Snabbast)` as optical default alongside `6-siffrig PIN` as manual fallback.
 - **Monochrome Minimalist Aesthetic**: Uses clean design system tokens (`var(--text-primary)`, `var(--border)`, `var(--bg-elevated)`), eliminating colored badges and green success elements. Matches the exact aesthetic of the first-time setup window (`Onboarding.tsx`) with segmented horizontal progress bars (`h-1 rounded-full`).
 - **Comprehensive Desktop & In-App Sync Notifications**: Dispatches native desktop notifications (`sendDesktopNotification` via `@tauri-apps/plugin-notification`) and in-app toasts for both host listener sync and client auto-discovery sync, notifying users of synced credential counts or confirming up-to-date status.
 - **English In-Code Defaults & Full Localization**: All wizard and notification strings default to English in source code with complete localization keys in `en.ts` and `sv.ts`.

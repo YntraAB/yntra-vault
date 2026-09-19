@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, ArrowDownAZ, Clock, Calendar, Check } from 'lucide-react';
+import { Plus, X, ArrowDownAZ, Clock, Calendar, CalendarDays, Check } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
 
 export interface PasswordListAreaContextMenuProps {
@@ -17,6 +17,8 @@ export interface PasswordListAreaContextMenuProps {
   onClearSearch: () => void;
   sortOrder?: 'title' | 'updated' | 'created';
   onSetSortOrder: (order: 'title' | 'updated' | 'created') => void;
+  groupByDate?: boolean;
+  onToggleGroupByDate?: () => void;
 }
 
 export function PasswordListAreaContextMenu({
@@ -29,6 +31,8 @@ export function PasswordListAreaContextMenu({
   onClearSearch,
   sortOrder = 'updated',
   onSetSortOrder,
+  groupByDate = true,
+  onToggleGroupByDate,
 }: PasswordListAreaContextMenuProps) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -66,7 +70,7 @@ export function PasswordListAreaContextMenu({
 
   const adjustedPosition = () => {
     const menuWidth = 210;
-    const menuHeight = searchTerm ? 170 : 135;
+    const menuHeight = searchTerm ? 210 : 175;
     const adjustedX = Math.min(x, window.innerWidth - menuWidth - 8);
     const adjustedY = Math.min(y, window.innerHeight - menuHeight - 8);
     return { left: adjustedX, top: adjustedY };
@@ -146,6 +150,21 @@ export function PasswordListAreaContextMenu({
             <Calendar size={13} />
             <span className="flex-1">{t('menu.sort_created')}</span>
             {sortOrder === 'created' && <Check size={13} className="text-[var(--accent-primary)]" />}
+          </button>
+
+          <div className="my-1 h-[1px] bg-[var(--border-subtle)]" />
+
+          {/* Grouping */}
+          <button
+            onClick={() => {
+              onToggleGroupByDate?.();
+              onClose();
+            }}
+            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <CalendarDays size={13} />
+            <span className="flex-1">{t('menu.group_by_date')}</span>
+            {groupByDate && <Check size={13} className="text-[var(--accent-primary)]" />}
           </button>
         </motion.div>
       )}

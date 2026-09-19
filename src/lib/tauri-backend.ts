@@ -28,6 +28,8 @@ import type {
   MergeStats,
   PairingStats,
   LocalDeviceInfo,
+  QrSessionInfo,
+  QrClientPairingResult,
   TrustedDevice,
   ParsedImportEntry,
   ImportPreviewResult,
@@ -408,6 +410,26 @@ export class TauriBackend implements YntraVaultBackend {
 
   async scanPairingDiscovery(password: string, pairingCode: string, timeoutMs?: number | null): Promise<string | null> {
     return invoke('scan_pairing_discovery', { password, pairingCode, timeoutMs });
+  }
+
+  async generateQrPairingSession(deviceName?: string): Promise<QrSessionInfo> {
+    return invoke('generate_qr_pairing_session', { deviceName });
+  }
+
+  async startQrPairingHost(password: string, includePassword: boolean, deviceName?: string): Promise<PairingStats> {
+    return invoke('start_qr_pairing_host', { password, includePassword, deviceName });
+  }
+
+  async cancelQrPairingHost(): Promise<void> {
+    return invoke('cancel_qr_pairing_host');
+  }
+
+  async startQrPairingClient(qrPayload: string, deviceName?: string, password?: string): Promise<QrClientPairingResult> {
+    return invoke('start_qr_pairing_client', { qrPayload, deviceName, password });
+  }
+
+  async completeAdoptedVault(password: string): Promise<PairingStats> {
+    return invoke('complete_adopted_vault', { password });
   }
 
   async splitMasterPassword(password: string): Promise<string[]> {

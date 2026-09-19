@@ -346,6 +346,20 @@ export interface PairingStats {
   peer_addr?: string | null;
 }
 
+export interface QrSessionInfo {
+  session_id: string;
+  qr_payload: string;
+  sas_code: string;
+  expires_at: number;
+}
+
+export interface QrClientPairingResult {
+  stats: PairingStats;
+  has_master_password: boolean;
+  needs_password: boolean;
+  sas_code: string;
+}
+
 export interface LocalDeviceInfo {
   id: string;
   name: string;
@@ -785,6 +799,26 @@ export interface IpcCommands {
   scan_pairing_discovery: {
     args: { password: string; pairingCode: string; timeoutMs?: number | null };
     return: string | null;
+  };
+  generate_qr_pairing_session: {
+    args: { deviceName?: string };
+    return: QrSessionInfo;
+  };
+  start_qr_pairing_host: {
+    args: { password: string; includePassword: boolean; deviceName?: string };
+    return: PairingStats;
+  };
+  cancel_qr_pairing_host: {
+    args?: Record<string, never>;
+    return: void;
+  };
+  start_qr_pairing_client: {
+    args: { qrPayload: string; deviceName?: string; password?: string };
+    return: QrClientPairingResult;
+  };
+  complete_adopted_vault: {
+    args: { password: string };
+    return: PairingStats;
   };
 
   // Shamir Secret Sharing

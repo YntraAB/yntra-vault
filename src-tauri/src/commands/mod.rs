@@ -28,4 +28,6 @@ pub struct AppState {
     pub lock_on_system_lock: AtomicBool,
     pub smart_login_cancel: Arc<AtomicBool>,
     pub pairing_cancel: Arc<AtomicBool>,
+    pub qr_pairing_session: Mutex<Option<yntra_vault_core::services::sync::QrPairingSession>>,
+    pub pending_adopted_vault: Mutex<Option<yntra_vault_core::services::sync::PendingAdoptedVault>>,
 }

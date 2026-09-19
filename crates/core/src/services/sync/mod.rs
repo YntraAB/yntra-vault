@@ -28,6 +28,11 @@ pub use pairing::{
     run_p2p_pairing_host_with_device, run_p2p_pairing_host_with_device_and_cancel,
     run_p2p_pairing_client_with_device,
     DeviceInfo, resolve_local_device_info, ClientPairingMode, sanitize_vault_filename,
+    QrSessionInfo, QrClientPairingResult, QrPairingPayload, QrPairingSession,
+    PendingAdoptedVault, complete_adopted_vault_save,
+    generate_qr_pairing_session, parse_qr_pairing_payload,
+    run_p2p_qr_pairing_host, run_p2p_qr_pairing_client,
+    compute_qr_sas_code, derive_qr_pairing_subkeys,
 };
 
 // ─── WebDAV Cloud Sync & SOTA Merge Protocol ───────────────────────────────────
@@ -51,7 +56,7 @@ pub struct MergeStats {
 pub fn merge_vault_data(local: &mut crate::vault::types::VaultData, remote: crate::vault::types::VaultData) -> MergeStats {
     use std::collections::HashMap;
     use uuid::Uuid;
-    use crate::vault::types::{Entry, Tag, TrashedEntry};
+    use crate::vault::types::{Entry, TrashedEntry};
 
     let mut stats = MergeStats::default();
 
@@ -111,15 +116,29 @@ pub fn merge_vault_data(local: &mut crate::vault::types::VaultData, remote: crat
     }
     local.entries = final_entries;
 
-    // 2. Merge Tags by UUID
-    let mut tag_map: HashMap<Uuid, Tag> = local.tags.drain(..).map(|t| (t.id, t)).collect();
-    for remote_tag in remote.tags {
-        if let std::collections::hash_map::Entry::Vacant(e) = tag_map.entry(remote_tag.id) {
-            e.insert(remote_tag);
+    // 2. Merge Tags by UUID preserving order from the more recently modified vault
+    let local_tags = std::mem::take(&mut local.tags);
+    let newer_is_remote = remote.metadata.updated_at > local.metadata.updated_at;
+    let (primary_tags, secondary_tags) = if newer_is_remote {
+        (remote.tags, local_tags)
+    } else {
+        (local_tags, remote.tags)
+    };
+
+    let mut merged_tags = Vec::with_capacity(primary_tags.len() + secondary_tags.len());
+    let mut seen_ids = std::collections::HashSet::with_capacity(primary_tags.len() + secondary_tags.len());
+
+    for tag in primary_tags {
+        seen_ids.insert(tag.id);
+        merged_tags.push(tag);
+    }
+    for tag in secondary_tags {
+        if seen_ids.insert(tag.id) {
+            merged_tags.push(tag);
             stats.tags_merged += 1;
         }
     }
-    local.tags = tag_map.into_values().collect();
+    local.tags = merged_tags;
 
     // 3. Reconcile remaining trash items
     for (id, remote_trash) in remote_trash_map {
@@ -1519,6 +1538,71 @@ mod tests {
 
         let common_res = local.entries.iter().find(|e| e.id == id_common).unwrap();
         assert_eq!(common_res.title, "Common Title (Updated Remote)");
+    }
+
+    #[test]
+    fn test_tag_order_preserved_on_merge() {
+        use chrono::Utc;
+        use uuid::Uuid;
+        use crate::vault::types::{VaultData, VaultMetadata, Tag, VaultSettings};
+
+        let now = Utc::now();
+        let older = now - chrono::Duration::minutes(5);
+
+        let t1 = Tag { id: Uuid::new_v4(), name: "Work".into(), color: "#f00".into(), icon: "briefcase".into() };
+        let t2 = Tag { id: Uuid::new_v4(), name: "Personal".into(), color: "#0f0".into(), icon: "user".into() };
+        let t3 = Tag { id: Uuid::new_v4(), name: "Finance".into(), color: "#00f".into(), icon: "wallet".into() };
+        let t4 = Tag { id: Uuid::new_v4(), name: "Crypto".into(), color: "#ff0".into(), icon: "key".into() };
+
+        // 1. Remote is newer: Remote order must win, with local-only tags appended
+        let mut local = VaultData {
+            metadata: VaultMetadata { id: Uuid::new_v4(), name: "Local".into(), created_at: older, updated_at: older, entry_count: 0, version: 3 },
+            entries: vec![],
+            tags: vec![t1.clone(), t2.clone(), t3.clone()],
+            trash: vec![],
+            settings: VaultSettings::default(),
+        };
+
+        let remote = VaultData {
+            metadata: VaultMetadata { id: Uuid::new_v4(), name: "Remote".into(), created_at: older, updated_at: now, entry_count: 0, version: 3 },
+            entries: vec![],
+            tags: vec![t3.clone(), t1.clone(), t4.clone()],
+            trash: vec![],
+            settings: VaultSettings::default(),
+        };
+
+        let stats = merge_vault_data(&mut local, remote);
+        assert_eq!(stats.tags_merged, 1); // t2 from local appended
+        assert_eq!(local.tags.len(), 4);
+        assert_eq!(local.tags[0].id, t3.id);
+        assert_eq!(local.tags[1].id, t1.id);
+        assert_eq!(local.tags[2].id, t4.id);
+        assert_eq!(local.tags[3].id, t2.id);
+
+        // 2. Local is newer: Local order must win, with remote-only tags appended
+        let mut local_newer = VaultData {
+            metadata: VaultMetadata { id: Uuid::new_v4(), name: "Local".into(), created_at: older, updated_at: now, entry_count: 0, version: 3 },
+            entries: vec![],
+            tags: vec![t2.clone(), t1.clone(), t3.clone()],
+            trash: vec![],
+            settings: VaultSettings::default(),
+        };
+
+        let remote_older = VaultData {
+            metadata: VaultMetadata { id: Uuid::new_v4(), name: "Remote".into(), created_at: older, updated_at: older, entry_count: 0, version: 3 },
+            entries: vec![],
+            tags: vec![t3.clone(), t4.clone()],
+            trash: vec![],
+            settings: VaultSettings::default(),
+        };
+
+        let stats2 = merge_vault_data(&mut local_newer, remote_older);
+        assert_eq!(stats2.tags_merged, 1); // t4 from remote appended
+        assert_eq!(local_newer.tags.len(), 4);
+        assert_eq!(local_newer.tags[0].id, t2.id);
+        assert_eq!(local_newer.tags[1].id, t1.id);
+        assert_eq!(local_newer.tags[2].id, t3.id);
+        assert_eq!(local_newer.tags[3].id, t4.id);
     }
 
     #[test]

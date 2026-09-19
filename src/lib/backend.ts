@@ -11,8 +11,8 @@
  * - MockBackend (development) — uses in-memory data
  */
 
-import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo } from '@/types/ipc';
-export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo };
+import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult } from '@/types/ipc';
+export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult };
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -467,6 +467,11 @@ export interface YntraVaultBackend {
   cancelPairingHost(): Promise<void>;
   startPairingClient(serverAddr: string, password: string, pairingCode: string, dbPath: string, deviceName?: string): Promise<PairingStats>;
   scanPairingDiscovery(password: string, pairingCode: string, timeoutMs?: number | null): Promise<string | null>;
+  generateQrPairingSession(deviceName?: string): Promise<QrSessionInfo>;
+  startQrPairingHost(password: string, includePassword: boolean, deviceName?: string): Promise<PairingStats>;
+  cancelQrPairingHost(): Promise<void>;
+  startQrPairingClient(qrPayload: string, deviceName?: string, password?: string): Promise<QrClientPairingResult>;
+  completeAdoptedVault(password: string): Promise<PairingStats>;
   splitMasterPassword(password: string): Promise<string[]>;
   reconstructMasterPassword(shareA: string, shareB: string): Promise<string>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;

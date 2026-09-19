@@ -213,10 +213,23 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
   }, [togglePin]);
 
   const sections = useMemo<Section[]>(() => {
+    const isGroupByDate = settings.groupByDate !== false && (settings.entrySortOrder ?? 'updated') !== 'title';
     const pinned = filteredEntries.filter((e) => e.pinned);
-    const today = filteredEntries.filter((e) => !e.pinned && isToday(e.updatedAt));
-    const yesterday = filteredEntries.filter((e) => !e.pinned && isYesterday(e.updatedAt));
-    const earlier = filteredEntries.filter((e) => !e.pinned && !isToday(e.updatedAt) && !isYesterday(e.updatedAt));
+    const unpinned = filteredEntries.filter((e) => !e.pinned);
+
+    if (!isGroupByDate) {
+      const result: Section[] = [];
+      if (pinned.length) result.push({ title: t('detail.pin'), items: pinned });
+      if (unpinned.length) result.push({ title: '', items: unpinned });
+      return result;
+    }
+
+    const isCreatedSort = (settings.entrySortOrder ?? 'updated') === 'created';
+    const getDate = (e: PasswordEntry) => (isCreatedSort ? (e.createdAt || e.updatedAt) : (e.updatedAt || e.createdAt));
+
+    const today = unpinned.filter((e) => isToday(getDate(e)));
+    const yesterday = unpinned.filter((e) => isYesterday(getDate(e)));
+    const earlier = unpinned.filter((e) => !isToday(getDate(e)) && !isYesterday(getDate(e)));
 
     const result: Section[] = [];
     if (pinned.length) result.push({ title: t('detail.pin'), items: pinned });
@@ -224,7 +237,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
     if (yesterday.length) result.push({ title: t('time.yesterday'), items: yesterday });
     if (earlier.length) result.push({ title: t('time.earlier'), items: earlier });
     return result;
-  }, [filteredEntries, t]);
+  }, [filteredEntries, settings.groupByDate, settings.entrySortOrder, t]);
 
   const headerTitle = useMemo(() => {
     if (filterCategory === 'all') return t('sidebar.all_items');
@@ -253,7 +266,10 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
       style={{ width: 'var(--passwordlist-width)' }}
     >
       {/* Desktop Header */}
-      <div className="hidden md:flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3">
+      <div
+        className="hidden md:flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3"
+        onContextMenu={handleListAreaContextMenu}
+      >
         <h1 className="text-[14px] font-semibold text-[var(--text-primary)]">
           {headerTitle}
         </h1>
@@ -358,13 +374,18 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
               key="populated-list"
               className="w-full shrink-0 flex flex-col"
             >
-              {sections.map((section) => (
-                <div key={section.title} className="w-full">
-                  <div className="sticky top-0 z-10 flex h-7 items-center bg-[var(--bg-surface)] px-3">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
-                      {section.title}
-                    </span>
-                  </div>
+              {sections.map((section, idx) => (
+                <div
+                  key={section.title || `section-${idx}`}
+                  className={`w-full ${idx > 0 && section.title ? 'mt-3' : ''}`}
+                >
+                  {section.title ? (
+                    <div className="sticky top-0 z-10 flex h-7 items-center bg-[var(--bg-surface)] px-3">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
+                        {section.title}
+                      </span>
+                    </div>
+                  ) : null}
                   {section.items.map((entry) => (
                     <ListItem
                       key={entry.id}
@@ -425,7 +446,25 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
         searchTerm={searchTerm}
         onClearSearch={() => setSearchTerm('')}
         sortOrder={settings.entrySortOrder ?? 'updated'}
-        onSetSortOrder={(entrySortOrder) => updateSettings({ entrySortOrder })}
+        onSetSortOrder={(entrySortOrder) => {
+          if (entrySortOrder !== 'title') {
+            updateSettings({ entrySortOrder, groupByDate: true });
+          } else {
+            updateSettings({ entrySortOrder });
+          }
+        }}
+        groupByDate={settings.groupByDate !== false && (settings.entrySortOrder ?? 'updated') !== 'title'}
+        onToggleGroupByDate={() => {
+          const currentActive = settings.groupByDate !== false && (settings.entrySortOrder ?? 'updated') !== 'title';
+          if (!currentActive) {
+            updateSettings({
+              groupByDate: true,
+              entrySortOrder: settings.entrySortOrder === 'title' ? 'updated' : (settings.entrySortOrder ?? 'updated'),
+            });
+          } else {
+            updateSettings({ groupByDate: false });
+          }
+        }}
       />
 
       {/* Delete Entry Confirmation Overlay */}

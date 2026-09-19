@@ -9,6 +9,7 @@ describe('Settings Slice', () => {
     expect(DEFAULT_SETTINGS.clipboardClearSeconds).toBe(30);
     expect(DEFAULT_SETTINGS.windowCaptureProtection).toBe(true);
     expect(DEFAULT_SETTINGS.lockOnSystemLock).toBe(true);
+    expect(DEFAULT_SETTINGS.groupByDate).toBe(true);
   });
 
   it('includes keybind defaults', () => {

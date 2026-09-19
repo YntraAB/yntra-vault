@@ -640,11 +640,11 @@ export function PasswordDetail() {
                     </ActionTooltip>
 
                     {/* Smart Login */}
-                    {isTauri() && !!data.url && !isAppPath(data.url) && (
+                    {isTauri() && (
                       <SmartLoginButton
                         entryId={data.id}
                         entryTitle={data.title}
-                        hasUrl={!!data.url}
+                        hasUrl={Boolean(data.url && !isAppPath(data.url))}
                       />
                     )}
 

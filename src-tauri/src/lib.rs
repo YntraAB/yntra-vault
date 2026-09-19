@@ -26,6 +26,8 @@ pub fn run() {
             lock_on_system_lock: std::sync::atomic::AtomicBool::new(true),
             smart_login_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pairing_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            qr_pairing_session: Mutex::new(None),
+            pending_adopted_vault: Mutex::new(None),
         });
 
     #[cfg(not(mobile))]
@@ -165,6 +167,11 @@ pub fn run() {
             commands::cancel_pairing_host,
             commands::start_pairing_client,
             commands::scan_pairing_discovery,
+            commands::generate_qr_pairing_session,
+            commands::start_qr_pairing_host,
+            commands::cancel_qr_pairing_host,
+            commands::start_qr_pairing_client,
+            commands::complete_adopted_vault,
             commands::split_master_password,
             commands::reconstruct_master_password,
             commands::reconstruct_master_password_hash,

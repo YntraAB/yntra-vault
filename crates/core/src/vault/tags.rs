@@ -246,5 +246,11 @@ mod tests {
         assert_eq!(manager.tags()[0].id, id3);
         assert_eq!(manager.tags()[1].id, id1);
         assert_eq!(manager.tags()[2].id, id2);
+
+        // Verify persistence to encrypted disk file
+        let reloaded = VaultManager::open(&test_vault.path, "password123").unwrap();
+        assert_eq!(reloaded.tags()[0].id, id3);
+        assert_eq!(reloaded.tags()[1].id, id1);
+        assert_eq!(reloaded.tags()[2].id, id2);
     }
 }

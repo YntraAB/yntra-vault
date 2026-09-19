@@ -5,6 +5,62 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-19
+
+### Added
+- **Zero-Knowledge Optical QR-Code Device Pairing Protocol (`YQR2`)**:
+  - Implemented an air-gapped, zero-knowledge pairing exchange allowing clients (smartphones, tablets, secondary workstations) to securely pair and adopt vaults without manually typing IP addresses, 6-digit PINs, or master passwords.
+  - Optical payload uses custom URI scheme (`yntrapair://v2?id=<session_id>&s=<secret_hex>&ip=<ip>&p=<port>&sas=<sas>&name=<name>`), encoding a 256-bit CSPRNG ephemeral optical secret, session UUID, host network endpoints, and Short Authentication String (SAS).
+  - Short Authentication String (SAS) visual badge (4-digit decimal confirmation code derived via keyed BLAKE3) displayed concurrently on both host screen and scanner interface for out-of-band visual verification against Active Man-in-the-Middle (MitM) attacks.
+  - Single-use 90-second ephemeral session TTL with real-time countdown progress indicator and 1-click regeneration.
+  - Automatic memory zeroization (`zeroize::Zeroizing`) of ephemeral optical pre-shared keys, transit encryption keys, and adopted credentials immediately following session completion.
+- **Embedded Camera QR Scanner with Dual-Engine Optical Fallback**:
+  - Built high-performance in-app camera viewfinder modal (`QrScannerModal`) utilizing browser-native `BarcodeDetector` where hardware-accelerated, with seamless fallback to `jsQR` canvas raster scanning.
+  - Real-time animated scanning beam, camera switcher (front/rear lens selection), flash/torch detection, and local image file drag-and-drop / picker fallback for environments lacking direct webcam access.
+  - Discrete visual feedback upon successful optical capture.
+- **Seamless 1-Click Biometric Enrollment on Adopted Devices**:
+  - Optional transit master password transfer encrypted end-to-end under the ephemeral optical key (`XChaCha20-Poly1305` + dynamic session `AAD`), enabling mobile and desktop clients to enroll directly into hardware biometrics (Touch ID, Face ID, Android Keystore, Windows Hello) immediately upon adopting a vault without manual master password entry.
+  - Master password in volatile memory is cleared and zeroized immediately after biometric key envelope creation.
+- **Unified Tabbed Device Pairing Interface**:
+  - Re-architected `DevicePairingWizard` with a sleek segmented mode switcher: `QR-kod (Snabbast)` as the modern optical default, alongside `6-siffrig PIN` as the manual fallback.
+  - Discrete monochrome SVG QR code renderer (`QrCodeView`) adhering strictly to the design system geometry (`rounded-[3px]`, semantic theme tokens).
+  - Synchronous 4-digit SAS verification badge displayed during connection and success states on both host and client screens.
+- **Manual Password Adoption Fallback & IPC Command**:
+  - Added safe adoption flow for vaults adopted without an optical password (`include_password: false`): client saves into a dedicated `.vdb` file and prompts user to verify the existing master password.
+  - Added `complete_adopted_vault` Tauri IPC command to finalize and verify adoption without leaking secrets across the webview bridge.
+- **Date-Section Grouping for Password Entries (`groupByDate`)**:
+  - Added structured chronological section headers ("Idag", "Igår", "Tidigare" / "Today", "Yesterday", "Earlier") when sorting entries by updated or created date.
+  - Added a dedicated setting toggle in `GeneralTab` (`settings.group_by_date`) and a quick-toggle option directly in the list area context menu (`menu.group_by_date`).
+  - Enhanced sort order fallback logic to cleanly handle entries with missing timestamps.
+- **Refined Smart Login & Autotype Tooltips & Disabled States**:
+  - Replaced abrupt button hiding with a discrete disabled button and helpful localized tooltips (`smart_login.disabled_tooltip`, `context_menu.autotype_no_url_tooltip`) when an entry lacks a website URL or application target.
+  - Added localized helper descriptions for hardware key enrollment and challenge verification (`hw.enroll_desc`, `hw.test_desc`).
+
+### Security
+- **Zero-IPC Master Password Leakage Invariant**:
+  - Master passwords provisioned during adoption are held exclusively inside `zeroize::Zeroizing` buffers within Rust Tauri `AppState.pending_adopted_vault`. Plaintext credentials are NEVER serialized or transmitted across the Tauri IPC boundary to webview JavaScript or V8 heap (`receivedMasterPassword` completely eliminated from React state).
+  - Hardware biometrics wrap credentials directly in native memory (TPM 2.0 / DPAPI / Secure Enclave), and RAM is purged immediately upon completion.
+- **Dynamic Session AAD Binding**:
+  - Transit AEAD payload encryption (`XChaCha20-Poly1305`) binds dynamic Additional Authenticated Data (`format!("yntra-qr-transit-v2:{}", session_id)`), cryptographically binding every encrypted packet to the unique session UUID and eliminating cross-session replay or payload injection attacks.
+- **Protocol `YQR2` Mutual Pre-Authentication Handshake**:
+  - Employs mutual HMAC challenge-response verification (68-byte client request, 48-byte host response) using dedicated `client_to_host` and `host_to_client` subkeys derived via `HKDF-SHA512` over the 256-bit optical CSPRNG secret.
+  - Unauthenticated peers or network scanners are rejected immediately before any vault metadata or payload is exposed, closing unauthenticated password and sync oracles.
+- **Non-Destructive Adoption & Collision Avoidance (`AdoptIntoDir`)**:
+  - Client QR adoption uses `ClientPairingMode::AdoptIntoDir`, adopting into a collision-free file (`<HostVaultName>.vdb`, `<HostVaultName> (1).vdb`) in the user's vaults directory, guaranteeing that existing vaults on disk are never overwritten, unpersisted, or corrupted.
+- **256-Bit CSPRNG Optical Pre-Shared Secrets & Out-of-Band Transit Isolation**:
+  - The QR code contains zero plaintext passwords, database payloads, or long-term private keys. All Wi-Fi traffic is encrypted using `XChaCha20-Poly1305` AEAD with subkeys derived via `HKDF-SHA512` bound to the optical pre-shared secret.
+  - Eavesdroppers on the local Wi-Fi network who observe network packets cannot decrypt the transit payload without optical line-of-sight to the host screen.
+
+### Changed
+- **P2P Discovery & Sync Engine Extensibility**:
+  - Modularized pairing protocol functions (`run_p2p_qr_pairing_host`, `run_p2p_qr_pairing_client`, `derive_qr_pairing_subkeys`, `compute_qr_sas_code`, `complete_adopted_vault_save`) in `crates/core/src/services/sync/pairing.rs`.
+  - Updated desktop Tauri IPC commands and state management to support concurrent cancelable QR pairing background threads and pending adopted vault storage.
+- **IPC Contract Hardening**:
+  - Updated `QrClientPairingResult` in `src/types/ipc.ts`, `crates/core`, and `src-tauri`: replaced sensitive `master_password` field with `has_master_password: bool`, `needs_password: bool`, and `sas_code: String`.
+- **Localization Parity & Comprehensive Fallbacks**:
+  - Added `'pairing.manual_adopt_title'`, `'common.retry'`, `'hw.enroll_desc'`, and `'hw.test_desc'` to `en.ts` and `sv.ts`.
+  - Propagated complete translation coverage and fallbacks across all 24 supported language dictionaries.
+
 ## [0.1.9] - 2026-09-18
 
 ### Added

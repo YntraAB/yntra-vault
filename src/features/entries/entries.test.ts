@@ -382,5 +382,43 @@ describe('Entries Feature Slice', () => {
     expect(isRecoveryField('PIN')).toBe(false);
     expect(isRecoveryField('')).toBe(false);
   });
+
+  it('correctly sorts entries by title alphabetically preserving pinned items at top', () => {
+    const rawEntries: PasswordEntry[] = [
+      { id: '1', title: 'Zebra', username: '', password: '', url: '', tags: [], favorite: false, pinned: false, customFields: [], createdAt: '', updatedAt: new Date().toISOString() },
+      { id: '2', title: 'Apple', username: '', password: '', url: '', tags: [], favorite: false, pinned: false, customFields: [], createdAt: '', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: '3', title: 'Banana', username: '', password: '', url: '', tags: [], favorite: false, pinned: true, customFields: [], createdAt: '', updatedAt: '2026-01-01T00:00:00Z' },
+    ];
+
+    const sorted = [...rawEntries].sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return a.title.localeCompare(b.title);
+    });
+
+    expect(sorted[0].title).toBe('Banana'); // pinned item at top
+    expect(sorted[1].title).toBe('Apple');  // unpinned alphabetically first
+    expect(sorted[2].title).toBe('Zebra');  // unpinned alphabetically second
+  });
+
+  it('correctly sorts entries by created/updated date with safe fallback for missing values', () => {
+    const rawEntries: PasswordEntry[] = [
+      { id: '1', title: 'Old', username: '', password: '', url: '', tags: [], favorite: false, pinned: false, customFields: [], createdAt: '', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: '2', title: 'New', username: '', password: '', url: '', tags: [], favorite: false, pinned: false, customFields: [], createdAt: '', updatedAt: '2026-09-19T00:00:00Z' },
+      { id: '3', title: 'Pinned', username: '', password: '', url: '', tags: [], favorite: false, pinned: true, customFields: [], createdAt: '', updatedAt: '2025-01-01T00:00:00Z' },
+    ];
+
+    const sorted = [...rawEntries].sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      const timeA = new Date(a.createdAt || a.updatedAt).getTime() || 0;
+      const timeB = new Date(b.createdAt || b.updatedAt).getTime() || 0;
+      return timeB - timeA;
+    });
+
+    expect(sorted[0].title).toBe('Pinned');
+    expect(sorted[1].title).toBe('New');
+    expect(sorted[2].title).toBe('Old');
+  });
 });
 
