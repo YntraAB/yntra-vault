@@ -6,4 +6,5 @@ export type { CompetitorBrand, BrandInfo } from './brands';
 export { DevicePairingWizard } from './components/DevicePairingWizard';
 export { QrCodeView } from './components/QrCodeView';
 export { QrScannerModal } from './components/QrScannerModal';
+export { P2pVpnWarningModal, P2P_VPN_STORAGE_KEY } from './components/P2pVpnWarningModal';
 export { formatIpv4Input } from './utils/formatIpv4';

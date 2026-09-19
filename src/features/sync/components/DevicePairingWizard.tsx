@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
+  ShieldAlert,
   Lock,
   KeyRound,
   ArrowRight,
@@ -30,6 +31,7 @@ import type { PairingStats, QrSessionInfo } from '@/lib/backend';
 import { formatIpv4Input } from '../utils/formatIpv4';
 import { QrCodeView } from './QrCodeView';
 import { QrScannerModal } from './QrScannerModal';
+import { P2pVpnWarningModal, P2P_VPN_STORAGE_KEY } from './P2pVpnWarningModal';
 
 export interface DevicePairingWizardProps {
   isOpen: boolean;
@@ -68,6 +70,26 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   const [biometricAvailable, setBiometricAvailable] = useState<boolean>(false);
   const [biometricEnrolled, setBiometricEnrolled] = useState<boolean>(false);
   const [isEnrollingBiometric, setIsEnrollingBiometric] = useState<boolean>(false);
+  const [isVpnWarningOpen, setIsVpnWarningOpen] = useState<boolean>(false);
+  const [isInitialVpnWarning, setIsInitialVpnWarning] = useState<boolean>(false);
+  const [prevIsOpen, setPrevIsOpen] = useState<boolean>(isOpen);
+
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
+    if (isOpen) {
+      let shouldShowVpn = false;
+      try {
+        shouldShowVpn = localStorage.getItem(P2P_VPN_STORAGE_KEY) !== 'true';
+      } catch {
+        // Ignore storage access errors
+      }
+      setIsVpnWarningOpen(shouldShowVpn);
+      setIsInitialVpnWarning(shouldShowVpn);
+    } else {
+      setIsVpnWarningOpen(false);
+      setIsInitialVpnWarning(false);
+    }
+  }
 
   const [pairingCode, setPairingCode] = useState<string>('');
   const [inputDigits, setInputDigits] = useState<string[]>(['', '', '', '', '', '']);
@@ -555,7 +577,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   return (
     <>
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && !(isVpnWarningOpen && isInitialVpnWarning) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -602,13 +624,27 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
-                >
-                  <X size={15} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <ActionTooltip content={t('pairing.vpn_info_tooltip') || 'Viktigt om VPN'}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsInitialVpnWarning(false);
+                        setIsVpnWarningOpen(true);
+                      }}
+                      className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+                    >
+                      <ShieldAlert size={15} />
+                    </button>
+                  </ActionTooltip>
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
               </div>
 
               {/* Stepper Progress Bar */}
@@ -809,6 +845,24 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                 {/* Step 2: Code & Pairing Execution Step */}
                 {step === 'code' && (
                   <div className="flex flex-col gap-3.5">
+                    {/* VPN Reminder banner */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsInitialVpnWarning(false);
+                        setIsVpnWarningOpen(true);
+                      }}
+                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer text-left w-full"
+                    >
+                      <span className="flex items-center gap-1.5 truncate">
+                        <ShieldAlert size={13} className="shrink-0 text-[var(--text-tertiary)]" />
+                        <span className="truncate">{t('pairing.vpn_banner_tip') || 'Tips: Stäng av aktiv VPN om enheterna inte hittas'}</span>
+                      </span>
+                      <span className="text-[10px] text-[var(--text-tertiary)] font-medium shrink-0 underline underline-offset-2">
+                        {t('common.read_more') || 'Info'}
+                      </span>
+                    </button>
+
                     {/* Top Segmented Mode Selector: QR vs PIN */}
                     <div className="flex rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-0.5">
                       <button
@@ -1310,6 +1364,22 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         isOpen={isQrScannerOpen}
         onClose={() => setIsQrScannerOpen(false)}
         onScan={handleQrScanned}
+      />
+
+      {/* P2P VPN Warning Modal */}
+      <P2pVpnWarningModal
+        isOpen={isVpnWarningOpen}
+        onClose={() => {
+          if (isInitialVpnWarning) {
+            handleClose();
+          } else {
+            setIsVpnWarningOpen(false);
+          }
+        }}
+        onConfirm={() => {
+          setIsVpnWarningOpen(false);
+          setIsInitialVpnWarning(false);
+        }}
       />
     </>
   );

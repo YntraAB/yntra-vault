@@ -49,6 +49,9 @@ export type { EditTagModalProps } from './components/EditTagModal';
 export { DeleteTagModal, default as DeleteTagModalDefault } from './components/DeleteTagModal';
 export type { DeleteTagModalProps } from './components/DeleteTagModal';
 
+export { DeleteUnusedTagsModal, default as DeleteUnusedTagsModalDefault } from './components/DeleteUnusedTagsModal';
+export type { DeleteUnusedTagsModalProps } from './components/DeleteUnusedTagsModal';
+
 // Context & Hooks
 export {
   EntriesProvider,

@@ -3,7 +3,7 @@ import { Globe, Star, Plus, Settings, Lock } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/features/auth';
-import { useEntries, EditTagModal, DeleteTagModal, TagContextMenu, TagsAreaContextMenu } from '@/features/entries';
+import { useEntries, EditTagModal, DeleteTagModal, DeleteUnusedTagsModal, TagContextMenu, TagsAreaContextMenu } from '@/features/entries';
 import { useSettings } from '@/features/settings';
 import { useUi } from '@/contexts/UiContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -138,6 +138,7 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
 
   // Delete confirmation state
   const [deleteConfirmTag, setDeleteConfirmTag] = useState<Tag | null>(null);
+  const [unusedTagsToDelete, setUnusedTagsToDelete] = useState<Tag[]>([]);
 
   // Tags area context menu state
   const [areaContextMenu, setAreaContextMenu] = useState<{
@@ -154,12 +155,26 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
   const handleDeleteUnusedTags = useCallback(() => {
     const unused = tags.filter((t) => t.count === 0);
     if (unused.length === 0) return;
-    unused.forEach((t) => removeTag(t.id));
+    setUnusedTagsToDelete(unused);
+  }, [tags]);
+
+  const confirmDeleteUnused = useCallback(() => {
+    if (unusedTagsToDelete.length === 0) return;
+    const deletedCount = unusedTagsToDelete.length;
+    unusedTagsToDelete.forEach((t) => {
+      if (filterCategory === t.name) {
+        setFilterCategory('all');
+      }
+      removeTag(t.id);
+    });
     addToast({
-      message: `Deleted ${unused.length} unused tag${unused.length > 1 ? 's' : ''}`,
+      message: deletedCount === 1
+        ? (t('toast.unused_tag_deleted') || 'Deleted 1 unused tag')
+        : (t('toast.unused_tags_deleted', { count: deletedCount }) || `Deleted ${deletedCount} unused tags`),
       type: 'info',
     });
-  }, [tags, removeTag, addToast]);
+    setUnusedTagsToDelete([]);
+  }, [unusedTagsToDelete, filterCategory, setFilterCategory, removeTag, addToast, t]);
 
   const handleTagContextMenu = useCallback((e: React.MouseEvent, tag: Tag) => {
     e.preventDefault();
@@ -389,6 +404,14 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
         tag={deleteConfirmTag}
         onClose={() => setDeleteConfirmTag(null)}
         onConfirm={confirmDelete}
+      />
+
+      {/* Delete Unused Tags Modal */}
+      <DeleteUnusedTagsModal
+        tags={unusedTagsToDelete}
+        isOpen={unusedTagsToDelete.length > 0}
+        onClose={() => setUnusedTagsToDelete([])}
+        onConfirm={confirmDeleteUnused}
       />
 
     </aside>

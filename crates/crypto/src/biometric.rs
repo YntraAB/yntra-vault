@@ -152,7 +152,15 @@ pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>
         {
             Ok(())
         }
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        #[cfg(target_os = "android")]
+        {
+            // Android user authentication requires native BiometricPrompt / KeyStore bridge.
+            // Reject unprompted unlock to prevent bypassing master password.
+            Err(VaultError::BiometricNotAvailable(
+                "Android biometric authentication requires active BiometricPrompt bridge".into(),
+            ))
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
         {
             Err(VaultError::BiometricNotAvailable(
                 "Biometric hardware verification is not supported on this platform".into(),
@@ -186,7 +194,15 @@ pub fn check_biometric_availability() -> BiometricInfo {
         }
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "android")]
+    {
+        BiometricInfo {
+            available: false,
+            biometric_type: "Biometrics (Fingerprint / Face Unlock) - Bridge in progress".to_string(),
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
         BiometricInfo {
             available: false,

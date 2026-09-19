@@ -126,6 +126,10 @@ export default function Login() {
 
   const handleUnlockBiometric = useCallback(async () => {
     if (!currentVault?.path || !isTauri()) return;
+    if (typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')) {
+      autoBioTriggered.current = false;
+      return;
+    }
     setError('');
     setBiometricPrompting(true);
     setLoading(true);
@@ -151,6 +155,12 @@ export default function Login() {
       const msg = err?.message || String(err) || '';
       console.warn('Biometric unlock attempt:', msg);
 
+      if (msg.includes('Window is hidden') || msg.includes('Window is not visible')) {
+        // Silently reset without error banner when window was closed/hidden; allow restore to trigger prompt
+        autoBioTriggered.current = false;
+        return;
+      }
+
       if (msg.toLowerCase().includes('canceled') || msg.toLowerCase().includes('cancelled')) {
         setError(t('login.biometric_canceled') || 'Biometric prompt was dismissed');
       } else if (msg.includes('Hardware2FaRequired')) {
@@ -167,13 +177,34 @@ export default function Login() {
   }, [currentVault, navigate, setCurrentVault, setIsLocked, t, triggerShake]);
 
   useEffect(() => {
-    if (activeView === 'biometric' && biometricAvailable && !autoBioTriggered.current && !loading) {
+    // Only auto-trigger when window and document are actively visible
+    const isDocVisible = typeof document === 'undefined' || (!document.hidden && document.visibilityState === 'visible');
+
+    if (activeView === 'biometric' && biometricAvailable && !autoBioTriggered.current && !loading && isDocVisible) {
       autoBioTriggered.current = true;
       const timer = setTimeout(() => {
         handleUnlockBiometric();
       }, 150);
       return () => clearTimeout(timer);
     }
+
+    // When the app is restored/focused from tray, trigger biometrics if still locked & not yet triggered
+    const handleVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden && document.visibilityState === 'visible') {
+        if (activeView === 'biometric' && biometricAvailable && !autoBioTriggered.current && !loading) {
+          autoBioTriggered.current = true;
+          handleUnlockBiometric();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
   }, [activeView, biometricAvailable, handleUnlockBiometric, loading]);
 
   const handleHardwareUnlock = useCallback(async (e?: React.FormEvent) => {

@@ -86,6 +86,11 @@ pub async fn unlock_vault_biometric(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<VaultInfo, String> {
+    if let Ok(visible) = window.is_visible() {
+        if !visible {
+            return Err("Window is hidden".to_string());
+        }
+    }
     let _ = window.set_focus();
     let hwnd_raw = get_window_hwnd(&window);
     let vault_path = PathBuf::from(&path);

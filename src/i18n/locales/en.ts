@@ -717,6 +717,8 @@ export const en = {
   'entry_modal.recovery_codes_label': 'Recovery Codes (Secure Keys / Backup Codes)',
   'entry_modal.browse_apps_tooltip': 'Select installed desktop app or binary',
   'entry_modal.url_app_placeholder': 'https://example.com or C:\\Program Files\\...',
+  'entry_modal.scan_totp_title': 'Scan 2FA QR Code',
+  'entry_modal.scan_totp_subtitle': 'Point your camera at the QR code or select an image',
 
   // Detail View Extra
   'detail.launch_app': 'Launch Application',
@@ -1149,6 +1151,12 @@ export const en = {
   'pairing.err_camera_permission': 'Could not access camera. Please check permissions.',
   'pairing.err_camera_init': 'An error occurred while initializing the camera',
   'pairing.err_no_qr_found': 'No valid QR code was found in the selected image',
+  'pairing.err_wrong_qr_type': 'Found a QR code, but it is not a valid Yntra Vault pairing code',
+  'pairing.err_decode_failed': 'Could not decode image. Please try another image or point camera directly at QR code',
+  'pairing.drop_qr_image': 'Drop image here to scan',
+  'pairing.decoding_image': 'Analyzing and reading QR code...',
+  'pairing.decoding_subtext': 'Optimizing image for maximum detection',
+  'pairing.qr_scanned_verified': 'QR code detected & verified!',
   'pairing.connecting_qr': 'Connecting and transferring vault over encrypted QR session...',
   'pairing.enroll_biometric_title': 'Enable Biometric Unlock',
   'pairing.enroll_biometric_desc': 'Because the password was transferred securely, you can now enable Touch ID, Face ID, or Windows Hello with 1 click.',
@@ -1159,6 +1167,27 @@ export const en = {
   'pairing.manual_adopt_password_desc': 'The host device did not include the vault password in transit. Enter the vault password to encrypt and save the vault on this device.',
   'pairing.saving_adopted_vault': 'Encrypting and saving vault locally...',
   'pairing.save_vault_btn': 'Save & Unlock',
+
+  'common.continue': 'Continue',
+
+  // P2P VPN Warning
+  'pairing.vpn_warning_title': 'VPN & Network',
+  'pairing.vpn_warning_subtitle': 'Local network access required',
+  'pairing.vpn_warning_heading': 'Active VPN may block devices',
+  'pairing.vpn_warning_desc': 'An active VPN blocks local discovery between devices on your network. Temporarily disconnect your VPN during transfer.',
+  'pairing.vpn_dont_show_again': "Don't show this warning again",
+  'pairing.vpn_info_tooltip': 'Important info about VPN and networks',
+  'pairing.vpn_banner_tip': 'Tip: Disable active VPN if devices cannot find each other',
+
+  // Delete Unused Tags Confirmation
+  'tags.delete_unused_title': 'Delete Unused Tags',
+  'tags.delete_unused_confirm': 'Are you sure you want to delete all {count} unused tags?',
+  'tags.delete_unused_confirm_single': 'Are you sure you want to delete the unused tag?',
+  'tags.delete_unused_desc': 'These tags are not assigned to any entries in your vault. This action cannot be undone.',
+  'tags.delete_unused_desc_single': 'This tag is not assigned to any entries in your vault. This action cannot be undone.',
+  'tags.delete_unused_count': '{count} unused tags',
+  'toast.unused_tags_deleted': 'Deleted {count} unused tags',
+  'toast.unused_tag_deleted': 'Deleted 1 unused tag',
 };
 
 

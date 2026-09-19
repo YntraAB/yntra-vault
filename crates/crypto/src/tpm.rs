@@ -377,9 +377,36 @@ fn linux_get_or_create_wrap_key() -> crate::Result<[u8; 32]> {
         .or_else(|_| {
             std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
         })
-        .map_err(|_| {
+        .or_else(|_| {
+            // Android sandbox / private data directory fallbacks
+            let android_candidates = [
+                "/data/user/0/com.yntravault.app",
+                "/data/data/com.yntravault.app",
+                "/data/user/0/com.yntra.vault",
+                "/data/data/com.yntra.vault",
+            ];
+            for path in &android_candidates {
+                let pb = std::path::PathBuf::from(path);
+                if pb.exists() {
+                    let files_dir = pb.join("files");
+                    let _ = std::fs::create_dir_all(&files_dir);
+                    return Ok(files_dir);
+                }
+            }
+            if let Ok(data_dir) = std::env::var("ANDROID_DATA") {
+                let pb = std::path::PathBuf::from(data_dir).join("data/com.yntravault.app");
+                if pb.exists() {
+                    let files_dir = pb.join("files");
+                    let _ = std::fs::create_dir_all(&files_dir);
+                    return Ok(files_dir);
+                }
+            }
+            // Security Invariant 25: Never fallback to world-writable /tmp paths
+            Err(())
+        })
+        .map_err(|_: ()| {
             crate::error::VaultError::TpmError(
-                "Neither XDG_CONFIG_HOME nor HOME environment variable is set".into(),
+                "Neither XDG_CONFIG_HOME, HOME, nor valid private app sandbox is accessible".into(),
             )
         })?;
 

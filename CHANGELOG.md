@@ -5,6 +5,55 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-09-19
+
+### Added
+- **P2P Local Network & VPN Warning Modal**:
+  - Implemented `P2pVpnWarningModal` matching the Smart Login modal design system, alerting users before Wi-Fi pairing that active VPN connections block local network (LAN) discovery.
+  - Added "Don't show this warning again" preference persisted to `localStorage` (`yntra-vault-p2p-vpn-warning-dismissed`).
+  - Added flow isolation: closing or canceling the initial VPN notice exits pairing without advancing into "Pair Device via Wi-Fi".
+  - Added discrete header shield button (`ShieldAlert`) and neutral reminder banner in `DevicePairingWizard` allowing users to review VPN guidance on demand.
+  - Formatted with concise copy and complete translation key parity across Swedish and English.
+- **Delete Unused Tags Confirmation Modal**:
+  - Created `DeleteUnusedTagsModal` matching `DeleteTagModal` 1:1 in design, typography, and keyboard safety, preventing accidental bulk deletion when selecting "Delete Unused Tags" from the sidebar context menu.
+  - Supports both single and plural tag previews with color-coded badges, safe default focus on Cancel, Tab cycling, and Escape dismissal.
+  - Added differentiated toast feedback distinguishing single vs multiple tag deletions.
+- **Android Native Camera & WebChromeClient File Chooser Bridge**:
+  - Implemented custom `MainActivity.kt` in `src-tauri/android-overrides` overriding `onPermissionRequest` to request OS-level runtime camera permissions instead of silently denying WebView access.
+  - Implemented `onShowFileChooser` in `MainActivity.kt` allowing users to pick QR images or photos directly from device galleries or system photo pickers.
+  - Added automated build hook (`scripts/apply-android-customizations.js`) integrated into `release.yml` and `package.json`.
+- **High-Performance Multi-Scale QR Decoder**:
+  - Created `src/utils/qrDecoder.ts` featuring hardware-accelerated `BarcodeDetector` with dynamic downscaling (1024px, 640px, 1600px) to decode high-resolution mobile camera captures (12MP–48MP) without memory exhaustion.
+  - Added bidirectional contrast inversion (`inversionAttempts: 'attemptBoth'`) and adaptive binarization for photos of screens or low-light conditions.
+- **Direct Camera Scanner in TOTP / 2FA Setup**:
+  - Integrated `QrScannerModal` directly into `EntryModal`, allowing users to scan 2FA QR codes live from screen or paper without manually typing base32 secrets.
+
+### Changed
+- **Mobile Entry Detail Tag Navigation**:
+  - Updated tag click handler in `PasswordDetail` on mobile devices (`< 768px`) to clear `selectedEntry` when filtering by tag, immediately closing the full-screen detail view and transitioning the user to the filtered entry list.
+- **Android App Sandbox Key Wrapping Preparation**:
+  - Added Android app-sandbox private data paths (`/data/user/0/com.yntravault.app/files`, `/data/data/com.yntravault.app/files`) in `crates/crypto/src/tpm.rs` for isolated key wrapping while strictly enforcing Invariant 25 (rejecting insecure `/tmp` paths).
+  - Explicitly guarded Android biometric unlock against unprompted access in `crates/crypto/src/biometric.rs` pending active native BiometricPrompt bridge integration, preventing unauthenticated auto-unlock.
+
+### Fixed
+- **Ghost Windows Hello / Biometric Prompt on Application Close**:
+  - Resolved issue where closing the window (or minimizing to tray) triggered an unwanted Windows Hello modal over the desktop.
+  - Added window visibility guards in `Login.tsx` (`document.hidden`, `visibilityState !== 'visible'`) and added listeners to only prompt when the application window is actively restored and focused.
+  - Added `window.is_visible()` validation in `unlock_vault_biometric` (`src-tauri/src/commands/auth.rs`) to prevent invoking system biometrics when the window is hidden.
+  - Resolved tray restore race condition by resetting `autoBioTriggered.current` ref when hidden so focusing/restoring immediately prompts for biometrics.
+- **Android WebChromeClient Least Privilege**:
+  - Enforced strict `RESOURCE_VIDEO_CAPTURE` resource granting in `MainActivity.kt`, rejecting audio capture and preventing WebView crashes from unrequested OS permissions.
+- **Smart TOTP QR URI Parameter Parsing**:
+  - Added automatic extraction and intelligent prefilling of `title` (issuer) and `username` (account) when scanning standard `otpauth://` QR codes in `EntryModal`, alongside automated base32 space/dash cleaning.
+- **Android WebView Media Stream CSP**:
+  - Added `media-src 'self' blob: data: mediastream:;` in `tauri.conf.json` to allow live camera feeds in Android WebViews.
+
+### Security
+- **Android App Sandbox Key Wrapping & Invariant 25 Enforcement**:
+  - Restricted hardware key wrapping paths on Android strictly to internal app-isolated storage directories (`/data/user/0/com.yntravault.app/files`, `/data/data/com.yntravault.app/files`), rejecting world-writable or shared storage locations.
+- **Biometric Prompt Window Visibility & Background Suppression**:
+  - Enforced active window visibility verification (`window.is_visible()`) prior to launching native biometric authentication, preventing background or tray-minimized Windows Hello prompt execution.
+
 ## [0.2.1] - 2026-09-19
 
 ### Added

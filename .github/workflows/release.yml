@@ -114,9 +114,10 @@ jobs:
       - name: Install Node dependencies
         run: bun install
 
-      - name: Initialize Android project & Apply App Icons
+      - name: Initialize Android project, Apply Permissions & App Icons
         run: |
           bun run tauri android init --ci
+          node scripts/apply-android-customizations.js
           for res_dir in src-tauri/gen/android/app/src/main/res gen/android/app/src/main/res; do
             if [ -d "$res_dir" ] && [ -d "src-tauri/icons/android" ]; then
               echo "Applying Yntra Vault Android app icons to $res_dir..."

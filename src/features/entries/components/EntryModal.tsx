@@ -26,6 +26,8 @@ import { getBackend } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 import { AppPickerModal } from './AppPickerModal';
+import { QrScannerModal } from '@/features/sync';
+import { decodeQrFromImage } from '@/utils/qrDecoder';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -87,6 +89,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
   const [fieldsOrder, setFieldsOrder] = useState<string[]>(['username', 'password', 'url']);
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
   const [showAppPicker, setShowAppPicker] = useState(false);
+  const [isTotpScannerOpen, setIsTotpScannerOpen] = useState(false);
 
   const [stagedAttachments, setStagedAttachments] = useState<{ name: string; mimeType: string; data: Uint8Array; size: number }[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<AttachmentInfo[]>([]);
@@ -95,42 +98,71 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrFileInputRef = useRef<HTMLInputElement>(null);
 
+  const applyTotpSecret = useCallback((rawSecret: string) => {
+    let secret = rawSecret.trim();
+    let extractedIssuer = '';
+    let extractedAccount = '';
+
+    if (secret.toLowerCase().startsWith('otpauth://')) {
+      try {
+        const parsedUrl = new URL(secret);
+        const extracted = parsedUrl.searchParams.get('secret');
+        if (extracted) {
+          secret = extracted.replace(/[\s-]/g, '').toUpperCase();
+        }
+        extractedIssuer = parsedUrl.searchParams.get('issuer') || '';
+        const pathPart = decodeURIComponent(parsedUrl.pathname.replace(/^\/+(totp|hotp)\/+/i, ''));
+        if (pathPart.includes(':')) {
+          const parts = pathPart.split(':');
+          if (!extractedIssuer) extractedIssuer = parts[0].trim();
+          extractedAccount = parts.slice(1).join(':').trim();
+        } else if (!extractedAccount && pathPart) {
+          extractedAccount = pathPart.trim();
+        }
+      } catch {
+        // Fallback to raw string if URL parsing fails
+      }
+    } else if (!secret.toLowerCase().startsWith('steam://')) {
+      secret = secret.replace(/[\s-]/g, '').toUpperCase();
+    }
+
+    setForm(prev => ({
+      ...prev,
+      totpSecret: secret,
+      title: prev.title.trim() ? prev.title : (extractedIssuer || extractedAccount || prev.title),
+      username: prev.username.trim() ? prev.username : (extractedAccount || prev.username),
+    }));
+    setErrors(prev => ({ ...prev, totpSecret: '' }));
+    if (!fieldsOrder.includes('totpSecret')) {
+      setFieldsOrder(prev => [...prev, 'totpSecret']);
+    }
+    addToast({ message: t('entry_modal.qr_scanned_success'), type: 'success' });
+  }, [addToast, fieldsOrder, t]);
+
+  const handleTotpQrScanned = useCallback((code: string) => {
+    setIsTotpScannerOpen(false);
+    applyTotpSecret(code);
+  }, [applyTotpSecret]);
+
   const handleQrImageScan = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
 
     try {
-      let rawValue: string | null = null;
-
-      if ('BarcodeDetector' in window) {
-        try {
-          const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-          const imageBitmap = await createImageBitmap(file);
-          const barcodes = await detector.detect(imageBitmap);
-          if (barcodes && barcodes.length > 0) {
-            rawValue = barcodes[0].rawValue;
-          }
-        } catch {}
-      }
-
-      if (rawValue) {
-        setForm(prev => ({ ...prev, totpSecret: rawValue! }));
-        setErrors(prev => ({ ...prev, totpSecret: '' }));
-        if (!fieldsOrder.includes('totpSecret')) {
-          setFieldsOrder(prev => [...prev, 'totpSecret']);
-        }
-        addToast({ message: t('entry_modal.qr_scanned_success'), type: 'success' });
+      const result = await decodeQrFromImage(file);
+      if (result.success && result.text) {
+        applyTotpSecret(result.text);
       } else {
         addToast({
-          message: t('entry_modal.qr_detect_error'),
+          message: t('entry_modal.qr_detect_error') || 'Kunde inte identifiera någon QR-kod i bilden. Kontrollera att bilden är tydlig.',
           type: 'info',
         });
       }
     } catch (err) {
       addToast({ message: t('toast.qr_scan_error', { err: String(err) }), type: 'error' });
     }
-  }, [addToast, fieldsOrder, t]);
+  }, [addToast, applyTotpSecret, t]);
 
   const handleFileSelect = useCallback(async (files: FileList | File[]) => {
     const newStaged: { name: string; mimeType: string; data: Uint8Array; size: number }[] = [];
@@ -780,7 +812,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 <ActionTooltip content={t('entry_modal.scan_qr_tooltip')}>
                                   <button
                                     type="button"
-                                    onClick={() => qrFileInputRef.current?.click()}
+                                    onClick={() => setIsTotpScannerOpen(true)}
                                     className="inline-flex h-8 w-8 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 shrink-0 cursor-pointer"
                                   >
                                     <QrCode size={14} />
@@ -1374,6 +1406,15 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
         open={showAppPicker}
         onClose={() => setShowAppPicker(false)}
         onSelectApp={(appPath) => updateField('url', appPath)}
+      />
+
+      <QrScannerModal
+        isOpen={isTotpScannerOpen}
+        onClose={() => setIsTotpScannerOpen(false)}
+        onScan={handleTotpQrScanned}
+        title={t('entry_modal.scan_totp_title') || 'Skanna 2FA QR-kod'}
+        subtitle={t('entry_modal.scan_totp_subtitle') || 'Rikta kameran mot QR-koden eller välj en bild'}
+        expectedPrefix=""
       />
     </>
   );

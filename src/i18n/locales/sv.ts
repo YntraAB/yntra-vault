@@ -678,6 +678,8 @@ export const sv = {
   'entry_modal.recovery_codes_label': 'Återställningskoder (Säkerhetsnycklar / Reservkoder)',
   'entry_modal.browse_apps_tooltip': 'Välj installerad skrivbordsapp eller körbar fil',
   'entry_modal.url_app_placeholder': 'https://example.com eller C:\\Program Files\\...',
+  'entry_modal.scan_totp_title': 'Skanna 2FA QR-kod',
+  'entry_modal.scan_totp_subtitle': 'Rikta kameran mot QR-koden eller välj en bild',
 
   // Detail View Extra
   'detail.launch_app': 'Starta program',
@@ -1153,6 +1155,12 @@ export const sv = {
   'pairing.err_camera_permission': 'Kunde inte komma åt kameran. Kontrollera behörigheter.',
   'pairing.err_camera_init': 'Ett fel uppstod vid initiering av kameran',
   'pairing.err_no_qr_found': 'Ingen giltig QR-kod hittades i den valda bilden',
+  'pairing.err_wrong_qr_type': 'Hittade en QR-kod, men den är inte en giltig Yntra Vault-parkopplingskod',
+  'pairing.err_decode_failed': 'Kunde inte läsa bilden. Försök med en annan bild eller rikta kameran direkt mot QR-koden',
+  'pairing.drop_qr_image': 'Släpp bilden här för att skanna',
+  'pairing.decoding_image': 'Analyserar och läser QR-kod...',
+  'pairing.decoding_subtext': 'Optimerar bild för maximal avkodning',
+  'pairing.qr_scanned_verified': 'QR-kod identifierad!',
   'pairing.connecting_qr': 'Ansluter och överför valv via krypterad QR-session...',
   'pairing.enroll_biometric_title': 'Aktivera biometrisk inloggning',
   'pairing.enroll_biometric_desc': 'Eftersom lösenordet överfördes säkert kan du nu aktivera Touch ID, Face ID eller Windows Hello med ett klick.',
@@ -1163,6 +1171,27 @@ export const sv = {
   'pairing.manual_adopt_password_desc': 'Värddatorn inkluderade inte valvlösenordet i överföringen. Ange valvlösenordet för att kryptera och spara valvet på denna enhet.',
   'pairing.saving_adopted_vault': 'Krypterar och sparar valvet lokalt...',
   'pairing.save_vault_btn': 'Spara & Öppna',
+
+  'common.continue': 'Fortsätt',
+
+  // P2P VPN Warning
+  'pairing.vpn_warning_title': 'VPN & Nätverk',
+  'pairing.vpn_warning_subtitle': 'Lokal nätverksåtkomst krävs',
+  'pairing.vpn_warning_heading': 'Aktiv VPN kan förhindra anslutning',
+  'pairing.vpn_warning_desc': 'Aktiv VPN blockerar lokal anslutning mellan enheterna på nätverket. Koppla från VPN under överföringen.',
+  'pairing.vpn_dont_show_again': 'Visa inte denna varning igen',
+  'pairing.vpn_info_tooltip': 'Viktigt om VPN och nätverk',
+  'pairing.vpn_banner_tip': 'Tips: Stäng av aktiv VPN om enheterna inte hittas',
+
+  // Delete Unused Tags Confirmation
+  'tags.delete_unused_title': 'Ta bort oanvända taggar',
+  'tags.delete_unused_confirm': 'Är du säker på att du vill ta bort alla {count} oanvända taggar?',
+  'tags.delete_unused_confirm_single': 'Är du säker på att du vill ta bort den oanvända taggen?',
+  'tags.delete_unused_desc': 'Dessa taggar är inte kopplade till några poster i ditt valv. Åtgärden kan inte ångras.',
+  'tags.delete_unused_desc_single': 'Denna tagg är inte kopplad till några poster i ditt valv. Åtgärden kan inte ångras.',
+  'tags.delete_unused_count': '{count} oanvända taggar',
+  'toast.unused_tags_deleted': 'Tog bort {count} oanvända taggar',
+  'toast.unused_tag_deleted': 'Tog bort 1 oanvänd tagg',
 };
 
 

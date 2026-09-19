@@ -54,6 +54,7 @@ export function PasswordDetail() {
   const { t } = useTranslation();
   const {
     selectedEntry,
+    setSelectedEntry,
     deleteEntry,
     deleteAttachment,
     updateEntry,
@@ -577,7 +578,12 @@ export function PasswordDetail() {
                       <ActionTooltip key={tag.id} content={t('detail.filter_by', { tag: tag.name })}>
                         <button
                           type="button"
-                          onClick={() => setFilterCategory(tag.name)}
+                          onClick={() => {
+                            setFilterCategory(tag.name);
+                            if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                              setSelectedEntry(null);
+                            }
+                          }}
                           className="inline-flex items-center gap-1 rounded-[2px] px-1.5 py-0.5 text-[11px] cursor-pointer transition-opacity hover:opacity-80 focus:outline-none"
                           style={{
                             backgroundColor: `${tag.color}14`,

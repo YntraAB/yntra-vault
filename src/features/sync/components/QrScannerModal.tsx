@@ -1,25 +1,35 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Camera, Image, AlertCircle, RefreshCw } from 'lucide-react';
+import { X, Camera, Image, AlertCircle, RefreshCw, Loader2, CheckCircle2, UploadCloud } from 'lucide-react';
 import jsQR from 'jsqr';
 import { useTranslation } from '@/contexts/LanguageContext';
+import { decodeQrFromImage } from '@/utils/qrDecoder';
 
 export interface QrScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onScan: (payload: string) => void;
+  title?: string;
+  subtitle?: string;
+  expectedPrefix?: string;
 }
 
 export const QrScannerModal: React.FC<QrScannerModalProps> = ({
   isOpen,
   onClose,
   onScan,
+  title,
+  subtitle,
+  expectedPrefix = 'yntrapair://',
 }) => {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(true);
+  const [isDecodingImage, setIsDecodingImage] = useState<boolean>(false);
+  const [isSuccess, setIsSuccess] = useState<boolean>(false);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -27,6 +37,12 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const hasScannedRef = useRef<boolean>(false);
+
+  // Checks if scanned QR matches expected prefix if configured
+  const isValidPayload = useCallback((payload: string): boolean => {
+    if (!expectedPrefix) return true;
+    return payload.trim().toLowerCase().startsWith(expectedPrefix.toLowerCase());
+  }, [expectedPrefix]);
 
   // Stop camera tracks and clean up
   const stopCamera = useCallback(() => {
@@ -48,9 +64,11 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       const videoDevices = devices.filter((d) => d.kind === 'videoinput');
       setCameras(videoDevices);
       if (videoDevices.length > 0 && !selectedCameraId) {
-        // Prefer back/environment camera if available
+        // Prefer back/environment camera on phones
         const backCam = videoDevices.find((d) =>
-          d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment')
+          d.label.toLowerCase().includes('back') ||
+          d.label.toLowerCase().includes('rear') ||
+          d.label.toLowerCase().includes('environment')
         );
         setSelectedCameraId(backCam ? backCam.deviceId : videoDevices[0].deviceId);
       }
@@ -59,7 +77,19 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     }
   }, [selectedCameraId]);
 
-  // Scan frame loop
+  // Handle successful scan with feedback
+  const handleSuccess = useCallback((payload: string) => {
+    if (hasScannedRef.current) return;
+    hasScannedRef.current = true;
+    setIsSuccess(true);
+    stopCamera();
+
+    setTimeout(() => {
+      onScan(payload);
+    }, 280);
+  }, [onScan, stopCamera]);
+
+  // Live video frame scanning loop
   const scanLoop = useCallback(() => {
     if (hasScannedRef.current || !videoRef.current || !canvasRef.current) return;
 
@@ -72,17 +102,15 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // 1. Try Hardware-accelerated BarcodeDetector if available
-      if ('BarcodeDetector' in window) {
+      // 1. Hardware BarcodeDetector if available
+      if (typeof window !== 'undefined' && window.BarcodeDetector) {
         try {
-          const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-          detector.detect(video).then((barcodes: any[]) => {
+          const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+          detector.detect(video).then((barcodes) => {
             if (barcodes && barcodes.length > 0 && !hasScannedRef.current) {
               const rawValue = barcodes[0].rawValue;
-              if (rawValue && rawValue.startsWith('yntrapair://')) {
-                hasScannedRef.current = true;
-                stopCamera();
-                onScan(rawValue);
+              if (rawValue && isValidPayload(rawValue)) {
+                handleSuccess(rawValue.trim());
                 return;
               }
             }
@@ -92,7 +120,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         }
       }
 
-      // 2. Pure JS canvas decode via jsQR
+      // 2. Pure JS decode via jsQR
       try {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height, {
@@ -100,10 +128,8 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         });
 
         if (code && code.data && !hasScannedRef.current) {
-          if (code.data.startsWith('yntrapair://')) {
-            hasScannedRef.current = true;
-            stopCamera();
-            onScan(code.data);
+          if (isValidPayload(code.data)) {
+            handleSuccess(code.data.trim());
             return;
           }
         }
@@ -112,18 +138,21 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       }
     }
 
-    animationFrameRef.current = requestAnimationFrame(scanLoop);
-  }, [onScan, stopCamera]);
+    if (!hasScannedRef.current) {
+      animationFrameRef.current = requestAnimationFrame(scanLoop);
+    }
+  }, [handleSuccess, isValidPayload]);
 
-  // Start selected camera stream
+  // Start selected camera stream and request permissions
   const startCamera = useCallback(async (deviceId?: string) => {
     stopCamera();
     setError(null);
     hasScannedRef.current = false;
     setIsScanning(true);
+    setIsSuccess(false);
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setError(t('pairing.err_camera_unsupported') || 'Kamera stöds inte i denna miljö. Välj en bild istället.');
+      setError(t('pairing.err_camera_unsupported') || 'Kameran stöds inte i denna miljö eller saknar behörighet. Välj en bild istället.');
       return;
     }
 
@@ -131,7 +160,11 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       const constraints: MediaStreamConstraints = {
         video: deviceId
           ? { deviceId: { exact: deviceId } }
-          : { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          : {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -144,9 +177,13 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         detectCameras();
         animationFrameRef.current = requestAnimationFrame(scanLoop);
       }
-    } catch (err: any) {
-      const msg = err.name === 'NotAllowedError'
-        ? (t('pairing.err_camera_permission') || 'Kamerabehörighet nekades. Tillåt kameraåtkomst eller välj en bild.')
+    } catch (err: unknown) {
+      const errName = (err instanceof Error || (typeof err === 'object' && err !== null && 'name' in err))
+        ? (err as { name?: string }).name
+        : '';
+      const isDenied = errName === 'NotAllowedError' || errName === 'PermissionDeniedError';
+      const msg = isDenied
+        ? (t('pairing.err_camera_permission') || 'Kamerabehörighet nekades. Tillåt kameraåtkomst i enhetens inställningar eller välj en bild nedan.')
         : (t('pairing.err_camera_init') || 'Kunde inte starta kameran. Kontrollera att ingen annan app använder den.');
       setError(msg);
     }
@@ -154,6 +191,9 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      hasScannedRef.current = false;
+      setIsSuccess(false);
+      setIsDecodingImage(false);
       startCamera(selectedCameraId || undefined);
     } else {
       stopCamera();
@@ -163,7 +203,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     };
   }, [isOpen, selectedCameraId, startCamera, stopCamera]);
 
-  // Switch camera
+  // Switch camera between front/back
   const handleSwitchCamera = () => {
     if (cameras.length <= 1) return;
     const currentIndex = cameras.findIndex((c) => c.deviceId === selectedCameraId);
@@ -173,39 +213,92 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     startCamera(nextId);
   };
 
-  // Handle file input upload (image file decoding)
+  // Robust decoding of image files (photos, gallery, screenshots)
+  const handleProcessFile = useCallback(async (file: File | Blob) => {
+    setError(null);
+    setIsDecodingImage(true);
+
+    try {
+      const result = await decodeQrFromImage(file);
+
+      if (result.success && result.text) {
+        const code = result.text.trim();
+        if (isValidPayload(code)) {
+          handleSuccess(code);
+        } else {
+          setError(
+            t('pairing.err_wrong_qr_type') ||
+            'Hittade en QR-kod, men den är inte en giltig Yntra Vault-parkopplingskod.'
+          );
+        }
+      } else {
+        setError(
+          t('pairing.err_no_qr_found') ||
+          'Ingen giltig QR-kod kunde upptäckas i den valda bilden. Se till att QR-koden är skarp och väl synlig.'
+        );
+      }
+    } catch {
+      setError(
+        t('pairing.err_decode_failed') ||
+        'Kunde inte läsa bilden. Försök med en annan bild eller rikta kameran direkt mot QR-koden.'
+      );
+    } finally {
+      setIsDecodingImage(false);
+    }
+  }, [handleSuccess, isValidPayload, t]);
+
+  // Handle file input change
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-        if (code && code.data && code.data.startsWith('yntrapair://')) {
-          hasScannedRef.current = true;
-          stopCamera();
-          onScan(code.data);
-        } else {
-          setError(t('pairing.err_no_qr_found') || 'Hittade ingen giltig Yntra Vault QR-kod i den valda bilden.');
-        }
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    handleProcessFile(file);
     e.target.value = '';
   };
+
+  // Drag and drop image files onto the viewfinder
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      handleProcessFile(file);
+    }
+  };
+
+  // Clipboard paste support (e.g. pasted screenshot)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            handleProcessFile(file);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isOpen, handleProcessFile]);
 
   return (
     <AnimatePresence>
@@ -224,6 +317,9 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.96 }}
             className="relative w-full max-w-[420px] rounded-[4px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden z-10"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]">
@@ -233,17 +329,17 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                    {t('pairing.scan_qr_title') || 'Skanna QR-kod'}
+                    {title || t('pairing.scan_qr_title') || 'Skanna QR-kod'}
                   </h3>
                   <p className="text-[11px] text-[var(--text-muted)]">
-                    {t('pairing.scan_qr_subtitle') || 'Rikta kameran mot QR-koden på datorn'}
+                    {subtitle || t('pairing.scan_qr_subtitle') || 'Rikta kameran mot QR-koden eller välj en bild'}
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="h-7 w-7 rounded-[3px] border border-transparent hover:border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                className="h-7 w-7 rounded-[3px] border border-transparent hover:border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -259,7 +355,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
               />
               <canvas ref={canvasRef} className="hidden" />
 
-              {/* Viewfinder Target Frame */}
+              {/* Viewfinder Target Reticle Frame */}
               <div className="relative z-10 w-[210px] h-[210px] pointer-events-none">
                 {/* Corner Accents */}
                 <div className="absolute top-0 left-0 w-7 h-7 border-t-2 border-l-2 border-white/90 rounded-tl-[3px]" />
@@ -268,7 +364,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 <div className="absolute bottom-0 right-0 w-7 h-7 border-b-2 border-r-2 border-white/90 rounded-br-[3px]" />
 
                 {/* Animated Laser Scan Line */}
-                {isScanning && !error && (
+                {isScanning && !error && !isDecodingImage && !isSuccess && (
                   <motion.div
                     animate={{ y: [0, 204, 0] }}
                     transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
@@ -277,21 +373,70 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 )}
               </div>
 
-              {/* Error Overlay */}
-              {error && (
-                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-black/85 text-center">
-                  <AlertCircle className="w-8 h-8 text-red-400 mb-2" />
-                  <p className="text-xs text-zinc-300 font-medium max-w-[280px] mb-4">
+              {/* Dragging Overlay */}
+              {isDragging && (
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-emerald-950/80 backdrop-blur-xs border-2 border-dashed border-emerald-400 text-center p-4 pointer-events-none">
+                  <UploadCloud className="w-10 h-10 text-emerald-400 mb-2 animate-bounce" />
+                  <p className="text-xs font-semibold text-white">
+                    {t('pairing.drop_qr_image') || 'Släpp bilden här för att skanna'}
+                  </p>
+                </div>
+              )}
+
+              {/* Decoding Image Loading Overlay */}
+              {isDecodingImage && (
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/85 backdrop-blur-xs text-center p-6">
+                  <Loader2 className="w-9 h-9 text-emerald-400 animate-spin mb-3" />
+                  <p className="text-xs font-medium text-white mb-1">
+                    {t('pairing.decoding_image') || 'Analyserar och läser QR-kod...'}
+                  </p>
+                  <p className="text-[11px] text-zinc-400">
+                    {t('pairing.decoding_subtext') || 'Optimerar bild för maximal avkodning'}
+                  </p>
+                </div>
+              )}
+
+              {/* Success Flash Overlay */}
+              {isSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-emerald-950/90 text-center p-6"
+                >
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-2">
+                    <CheckCircle2 className="w-7 h-7" />
+                  </div>
+                  <p className="text-xs font-semibold text-white">
+                    {t('pairing.qr_scanned_verified') || 'QR-kod identifierad!'}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* Error Overlay with Clear Action Prompts */}
+              {error && !isDecodingImage && !isSuccess && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-black/90 text-center">
+                  <AlertCircle className="w-8 h-8 text-red-400 mb-2 shrink-0" />
+                  <p className="text-xs text-zinc-200 font-medium max-w-[280px] mb-4 leading-relaxed">
                     {error}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => startCamera(selectedCameraId || undefined)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-800 hover:bg-zinc-700 rounded-[3px] transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    {t('common.retry') || 'Försök igen'}
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startCamera(selectedCameraId || undefined)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-zinc-800 hover:bg-zinc-700 rounded-[3px] border border-zinc-700 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      {t('common.retry') || 'Begär behörighet / Försök igen'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-900 bg-emerald-400 hover:bg-emerald-300 rounded-[3px] transition-colors cursor-pointer shadow-xs"
+                    >
+                      <Image className="w-3.5 h-3.5" />
+                      {t('pairing.pick_qr_image') || 'Välj bild eller ta foto'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -302,7 +447,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 <button
                   type="button"
                   onClick={handleSwitchCamera}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[3px] border border-[var(--border)] hover:bg-[var(--bg-elevated)] transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[3px] border border-[var(--border)] hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   {t('pairing.switch_camera') || 'Växla kamera'}
@@ -311,7 +456,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 <div />
               )}
 
-              {/* Upload Image Fallback */}
+              {/* Select image / Take photo button */}
               <div>
                 <input
                   ref={fileInputRef}
@@ -323,10 +468,10 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[3px] border border-[var(--border)] hover:bg-[var(--bg-elevated)] transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:text-[var(--text-primary)] rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer shadow-2xs"
                 >
-                  <Image className="w-3.5 h-3.5" />
-                  {t('pairing.pick_qr_image') || 'Välj bild med QR'}
+                  <Image className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{t('pairing.pick_qr_image') || 'Välj bild eller ta foto'}</span>
                 </button>
               </div>
             </div>

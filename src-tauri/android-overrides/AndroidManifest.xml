@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Network for HIBP k-anonymity checks and P2P LAN sync -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Camera for optical QR pairing and TOTP 2FA secret scanning -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Storage / Media access for image-based QR import and file attachments -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+    <!-- Camera hardware features (marked not required so app installs on devices without camera) -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+</manifest>
