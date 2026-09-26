@@ -1,0 +1,37 @@
+name: Verify Android signing identity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'YntraAB/yntra-vault'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Inspect public certificates only
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/identity.p12"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -v -keystore "$KEYSTORE" -storetype PKCS12 -storepass:env ANDROID_KEYSTORE_PASSWORD | grep 'SHA256:'
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          echo "Build tools: $(basename "$BUILD_TOOLS")"
+          curl --fail --location --proto '=https' --proto-redir '=https' 'https://github.com/YntraAB/yntra-vault/releases/download/v0.2.3/Yntra.Vault_0.2.3_universal.apk' --output "$RUNNER_TEMP/published.apk"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/published.apk" > "$RUNNER_TEMP/public-certificates.txt"
+          grep -E '^(Signer|Number of signers)' "$RUNNER_TEMP/public-certificates.txt"
+          "$BUILD_TOOLS/aapt" dump badging "$RUNNER_TEMP/published.apk" > "$RUNNER_TEMP/badging.txt"
+          node scripts/verify-android-update.mjs "$RUNNER_TEMP/badging.txt" "$RUNNER_TEMP/public-certificates.txt" '0.2.3'
