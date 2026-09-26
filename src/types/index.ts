@@ -133,6 +133,7 @@ export interface AppSettings {
   p2pAutoSyncWifi?: boolean;
   p2pAutoSyncIntervalMinutes?: number;
   externalFaviconsEnabled?: boolean;
+  autoCheckUpdates?: boolean;
   operationMode?: 'standard' | 'airgap';
 }
 

@@ -7,6 +7,8 @@ import { LanguageCombobox } from './LanguageCombobox';
 import { SettingSection, SettingRow, Toggle } from './SettingSection';
 import { isTauri } from '@/lib/backend';
 import { useBackend } from '@/lib/useBackend';
+import { RefreshCw, Sparkles, CheckCircle2 } from 'lucide-react';
+import { useUpdater, UpdateModal } from '@/features/updater';
 
 const AUTO_LOCK_OPTIONS = [
   { value: 1, labelKey: 'time.1_min' },
@@ -36,6 +38,16 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
   const { addToast } = useToast();
   const { t } = useTranslation();
   const { backend } = useBackend();
+  const {
+    status: updaterStatus,
+    updateInfo,
+    currentVersion,
+    isModalOpen,
+    isDownloading,
+    setIsModalOpen,
+    checkForUpdates,
+    installUpdate,
+  } = useUpdater();
 
   return (
     <div className="flex flex-col gap-6">
@@ -164,7 +176,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         tooltip={t('settings.tooltip_favicons')}
       >
         <Toggle
-          checked={settings.externalFaviconsEnabled !== false}
+          checked={settings.externalFaviconsEnabled === true}
           onChange={(v) => updateSettings({ externalFaviconsEnabled: v })}
         />
       </SettingRow>
@@ -282,6 +294,77 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         />
       </SettingRow>
 
+      {/* Application Updates & Version */}
+      <SettingSection label={t('settings.updates_title') || 'App Updates & Version'}>
+        <div className="flex flex-col gap-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3.5">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                {t('settings.current_version') || 'Installed Version'}
+              </span>
+              <span className="font-mono text-[13px] font-semibold text-[var(--text-primary)]">
+                v{currentVersion}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => checkForUpdates(false)}
+              disabled={updaterStatus === 'checking'}
+              className="h-7 px-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+            >
+              {updaterStatus === 'checking' ? (
+                <>
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>{t('settings.checking_updates') || 'Checking...'}</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3 h-3" />
+                  <span>{t('settings.check_updates_btn') || 'Check for Updates'}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {updateInfo?.has_update && (
+            <div className="flex items-center justify-between p-2.5 rounded-[3px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <div className="flex items-center gap-2 text-[12px]">
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span>
+                  {t('settings.new_update_ready') || 'Update available'}: <strong>v{updateInfo.latest_version}</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(true)}
+                className="h-6 px-2.5 rounded-[3px] bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium transition-colors cursor-pointer shadow-sm"
+              >
+                {t('settings.view_update') || 'View & Install'}
+              </button>
+            </div>
+          )}
+
+          {updaterStatus === 'up-to-date' && !updateInfo?.has_update && (
+            <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>{t('settings.is_latest_version') || 'You have the latest version.'}</span>
+            </div>
+          )}
+        </div>
+      </SettingSection>
+
+      <SettingRow
+        label={t('settings.auto_update_label') || 'Automatically check for updates'}
+        description={t('settings.auto_update_desc') || 'Periodically check for security updates and new versions on launch.'}
+        tooltip={t('settings.tooltip_auto_update') || 'Checks GitHub release manifest on launch. No telemetry or user data is ever sent.'}
+      >
+        <Toggle
+          checked={settings.autoCheckUpdates === true}
+          onChange={(v) => updateSettings({ autoCheckUpdates: v })}
+        />
+      </SettingRow>
+
       {/* Maintenance & Reset */}
       <SettingSection label={t('onboarding.rerun_setup')}>
         <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
@@ -300,6 +383,16 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
           {t('onboarding.rerun_setup')}
         </button>
       </SettingSection>
+
+      {/* Update Details Modal */}
+      <UpdateModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        updateInfo={updateInfo}
+        currentVersion={currentVersion}
+        isDownloading={isDownloading}
+        onInstall={installUpdate}
+      />
     </div>
   );
 }

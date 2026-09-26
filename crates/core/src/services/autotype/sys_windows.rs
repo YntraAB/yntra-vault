@@ -1,11 +1,13 @@
 //! Windows UI Automation and Win32 SendInput autotype driver implementation.
 
 use super::{AutotypeDriver, AutotypeGuard};
-use windows::core::{Interface, BSTR, PCWSTR};
+mod native_login;
+pub(crate) use native_login::run_native_google_login;
+#[cfg(test)]
+pub(crate) use native_login::observe_test_window;
+use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
-use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::ProcessStatus::GetModuleBaseNameA;
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 use windows::Win32::UI::Accessibility::{
@@ -13,10 +15,14 @@ use windows::Win32::UI::Accessibility::{
     IUIAutomationInvokePattern, IUIAutomationValuePattern, TreeScope_Descendants,
     UIA_ButtonControlTypeId, UIA_ControlTypePropertyId, UIA_EditControlTypeId,
     UIA_HyperlinkControlTypeId, UIA_InvokePatternId, UIA_ValuePatternId, UIA_CONTROLTYPE_ID,
+    UIA_DocumentControlTypeId, UIA_ToolBarControlTypeId, UIA_WindowControlTypeId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_RETURN, VK_SHIFT, VK_TAB,
+    KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_SHIFT, VK_TAB,
+    GetKeyboardLayout, GetKeyState, GetAsyncKeyState, VkKeyScanExW, MapVirtualKeyExW, MAPVK_VK_TO_VSC_EX,
+    KEYEVENTF_SCANCODE, KEYEVENTF_EXTENDEDKEY, VK_MENU, VK_CAPITAL,
+    ToUnicodeEx, HKL, VK_LCONTROL, VK_LSHIFT, VK_RMENU, VK_LWIN, VK_RWIN, MAPVK_VSC_TO_VK_EX,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -52,6 +58,27 @@ fn safe_sleep_with_target_guard(duration_ms: u64, target_hwnd: HWND) -> crate::R
     }
     check_target_window_active(target_hwnd)?;
     Ok(())
+}
+
+const KEY_HOLD_MS: u64 = 8;
+
+/// Keep key-down and key-up as separate OS events with a nonzero hold interval.
+/// Releases are attempted even when focus is lost or only part of a batch succeeds.
+fn send_character_chord(inputs: &[INPUT], target_hwnd: HWND) -> crate::Result<()> {
+    check_target_window_active(target_hwnd)?;
+    let (downs, ups) = inputs.split_at(inputs.len() / 2);
+    let sent = unsafe { SendInput(downs, std::mem::size_of::<INPUT>() as i32) };
+    let held = if sent == downs.len() as u32 {
+        safe_sleep_with_target_guard(KEY_HOLD_MS, target_hwnd)
+    } else {
+        Err(crate::error::VaultError::AutoTypeError("Autotype input was interrupted".into()))
+    };
+    let released = unsafe { SendInput(ups, std::mem::size_of::<INPUT>() as i32) };
+    if released != ups.len() as u32 {
+        unsafe { SendInput(ups, std::mem::size_of::<INPUT>() as i32); }
+        return Err(crate::error::VaultError::AutoTypeError("Could not release autotype keys".into()));
+    }
+    held
 }
 
 fn autotype_text_with_delay_guarded(
@@ -90,10 +117,35 @@ fn autotype_text_with_delay_guarded(
         }
     }
 
-    let utf16_chars: Vec<u16> = text.encode_utf16().collect();
+    let target_hwnd = if target_hwnd.is_invalid() {
+        let hwnd = unsafe { GetForegroundWindow() };
+        let mut pid = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)); }
+        if hwnd.is_invalid() || pid == std::process::id() {
+            return Err(crate::error::VaultError::AutoTypeError("Focus a target window before typing".into()));
+        }
+        hwnd
+    } else {
+        target_hwnd
+    };
 
-    for &ch in &utf16_chars {
+    for ch in text.encode_utf16() {
         check_target_window_active(target_hwnd)?;
+        check_modifier_keys_released()?;
+
+        // Subtle randomized timing variance (+/- 3ms) to prevent synthetic rhythm detection by anti-bot scripts
+        let jitter: i64 = if char_delay_ms > 10 {
+            use rand::Rng;
+            rand::rng().random_range(-3..=3)
+        } else {
+            0
+        };
+        let delay = (char_delay_ms as i64 + jitter).max(KEY_HOLD_MS as i64 + 1) as u64;
+
+        if ch != 9 && send_layout_character(ch, target_hwnd)? {
+            safe_sleep_with_target_guard(delay.saturating_sub(KEY_HOLD_MS), target_hwnd)?;
+            continue;
+        }
 
         let (vk, scan, flags) = if ch == 9 {
             (VK_TAB, 0u16, KEYBD_EVENT_FLAGS(0))
@@ -131,20 +183,276 @@ fn autotype_text_with_delay_guarded(
 
         let inputs = [input_down, input_up];
 
-        unsafe {
-            let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-            if sent != 2 {
-                return Err(crate::error::VaultError::EncryptionError(
-                    "Autotype failed to send input events".into(),
-                ));
-            }
-        }
+        send_character_chord(&inputs, target_hwnd)?;
 
         // Configurable delay between characters with active window guard check
-        safe_sleep_with_target_guard(char_delay_ms, target_hwnd)?;
+        safe_sleep_with_target_guard(delay.saturating_sub(KEY_HOLD_MS), target_hwnd)?;
     }
 
     Ok(())
+}
+
+fn scan_input(scan: u16, key_up: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT {
+            wVk: VIRTUAL_KEY(0),
+            wScan: scan & 0xff,
+            dwFlags: KEYEVENTF_SCANCODE
+                | if scan & 0xff00 == 0xe000 { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) }
+                | if key_up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+            time: 0,
+            dwExtraInfo: 0,
+        } },
+    }
+}
+
+fn check_modifier_keys_released() -> crate::Result<()> {
+    if [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN]
+        .iter()
+        .any(|key| unsafe { GetAsyncKeyState(key.0 as i32) } < 0)
+    {
+        return Err(crate::error::VaultError::AutoTypeError(
+            "Release modifier keys before autotype".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Build events without injecting them. Only use a layout mapping that Windows
+/// confirms produces exactly the requested character; dead keys use Unicode.
+fn layout_character_inputs(ch: u16, layout: HKL, caps_lock: bool) -> Option<([INPUT; 8], usize)> {
+    if char::from_u32(ch as u32).is_none_or(char::is_control) { return None; }
+    let mapped = unsafe { VkKeyScanExW(ch, layout) };
+    if mapped == -1 || ((mapped as u16 >> 8) & !7) != 0 {
+        return None;
+    }
+    let translates_exactly = |vk: u16, modifiers: u16| -> Option<u16> {
+        // Numpad digits/decimal share scan codes with navigation keys. Avoid
+        // relying on Num Lock or changing the user's toggle state.
+        if (0x60..=0x6f).contains(&vk) { return None; }
+        let scan = unsafe { MapVirtualKeyExW(vk as u32, MAPVK_VK_TO_VSC_EX, layout) } as u16;
+        if scan == 0 { return None; }
+        let physical_vk = unsafe { MapVirtualKeyExW(scan as u32, MAPVK_VSC_TO_VK_EX, layout) };
+        if physical_vk == 0 { return None; }
+        let mut state = [0u8; 256];
+        state[VK_CAPITAL.0 as usize] = u8::from(caps_lock);
+        for (mask, key) in [(1, VK_SHIFT), (2, VK_CONTROL), (4, VK_MENU)] {
+            if modifiers & mask != 0 { state[key.0 as usize] = 0x80; }
+        }
+        let mut output = zeroize::Zeroizing::new([0u16; 8]);
+        // Bit 2 prevents changing the thread's dead-key state (Windows 10 1607+).
+        let count = unsafe { ToUnicodeEx(physical_vk, scan as u32, &state, &mut output[..], 4, layout) };
+        (count == 1 && output[0] == ch).then_some(scan)
+    };
+    let vk = mapped as u16 & 0xff;
+    let proposed = (mapped as u16 >> 8) & 7;
+    // Try the OS suggestion, then its Caps Lock variant. Some layouts return a
+    // numpad suggestion despite having a regular punctuation key (e.g. Italian .).
+    let mapping = [proposed, proposed ^ 1].into_iter()
+        .find_map(|modifiers| translates_exactly(vk, modifiers).map(|scan| (scan, modifiers)))
+        .or_else(|| (0x30..=0xfe).find_map(|vk| {
+            [0, 1, 6, 7].into_iter().find_map(|modifiers|
+                translates_exactly(vk, modifiers).map(|scan| (scan, modifiers)))
+        }));
+    let (scan, modifiers) = mapping?;
+    // VkKeyScanEx reports AltGr as Ctrl+Alt. Use the extended RIGHT Alt key,
+    // not left Alt, so browsers receive the layout's actual AltGraph chord.
+    let alt = if modifiers & 6 == 6 { VK_RMENU } else { VK_MENU };
+    let modifier_keys = [(2, VK_LCONTROL), (4, alt), (1, VK_LSHIFT)];
+    let mut inputs = [INPUT::default(); 8];
+    let mut count = 0;
+    for (mask, key) in modifier_keys {
+        if modifiers & mask != 0 {
+            let code = unsafe { MapVirtualKeyExW(key.0 as u32, MAPVK_VK_TO_VSC_EX, layout) } as u16;
+            if code == 0 { return None; }
+            inputs[count] = scan_input(code, false);
+            count += 1;
+        }
+    }
+    inputs[count] = scan_input(scan, false);
+    inputs[count + 1] = scan_input(scan, true);
+    count += 2;
+    for (mask, key) in modifier_keys.into_iter().rev() {
+        if modifiers & mask != 0 {
+            let code = unsafe { MapVirtualKeyExW(key.0 as u32, MAPVK_VK_TO_VSC_EX, layout) } as u16;
+            inputs[count] = scan_input(code, true);
+            count += 1;
+        }
+    }
+    Some((inputs, count))
+}
+
+fn send_layout_character(ch: u16, target_hwnd: HWND) -> crate::Result<bool> {
+    let layout = unsafe { GetKeyboardLayout(GetWindowThreadProcessId(target_hwnd, None)) };
+    let caps_lock = unsafe { GetKeyState(VK_CAPITAL.0 as i32) } & 1 != 0;
+    let Some((inputs, count)) = layout_character_inputs(ch, layout, caps_lock) else {
+        return Ok(false);
+    };
+    send_character_chord(&inputs[..count], target_hwnd)?;
+    Ok(true)
+}
+
+fn inject_identifier_guarded(focused: &IUIAutomationElement, text: &str, target_hwnd: HWND, char_delay_ms: u64) -> crate::Result<()> {
+    if is_known_web_browser(&get_window_process_name(target_hwnd)) {
+        if text.chars().any(char::is_control) {
+            return Err(crate::error::VaultError::AutoTypeError("Username contains control characters".into()));
+        }
+        check_identifier_focus(focused, target_hwnd)?;
+        let pattern: IUIAutomationValuePattern = unsafe {
+            focused.GetCurrentPattern(UIA_ValuePatternId)
+                .and_then(|pattern| pattern.cast())
+        }.map_err(|_| crate::error::VaultError::AutoTypeError("Cannot verify the username field".into()))?;
+        if unsafe { pattern.CurrentIsReadOnly() }.map_or(true, |value| value.as_bool()) {
+            return Err(crate::error::VaultError::AutoTypeError("Username field is read-only".into()));
+        }
+        check_modifier_keys_released()?;
+        send_ctrl_a_backspace_guarded(target_hwnd)?;
+        for ch in text.chars() {
+            check_identifier_focus(focused, target_hwnd)?;
+            let mut encoded = zeroize::Zeroizing::new([0u8; 4]);
+            autotype_text_with_delay_guarded(ch.encode_utf8(&mut encoded[..]), char_delay_ms, 0, target_hwnd)?;
+        }
+        // Let the browser process its input queue, but never submit a partial,
+        // rejected or changed value, and never retry credentials automatically.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            check_identifier_focus(focused, target_hwnd)?;
+            let matches = unsafe { pattern.CurrentValue() }
+                .map(|value| zeroize::Zeroizing::new(value.to_string()).as_str() == text)
+                .unwrap_or(false);
+            if matches { return Ok(()); }
+            if std::time::Instant::now() >= deadline {
+                return Err(crate::error::VaultError::AutoTypeError("Username field did not accept the input".into()));
+            }
+            safe_sleep_with_target_guard(25, target_hwnd)?;
+        }
+    } else {
+        inject_secret_guarded(focused, text, target_hwnd, char_delay_ms)
+    }
+}
+
+fn check_identifier_focus(focused: &IUIAutomationElement, target_hwnd: HWND) -> crate::Result<()> {
+    check_target_window_active(target_hwnd)?;
+    if !unsafe { focused.CurrentHasKeyboardFocus() }.is_ok_and(|value| value.as_bool()) {
+        return Err(crate::error::VaultError::AutoTypeError("Username field lost keyboard focus".into()));
+    }
+    Ok(())
+}
+
+/// Capture the foreground window before CDP verifies that its page has focus.
+pub(crate) fn foreground_browser_token() -> crate::Result<usize> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_invalid() || !is_known_web_browser(&get_window_process_name(hwnd)) {
+        return Err(crate::error::VaultError::AutoTypeError("Focus the browser login page".into()));
+    }
+    Ok(hwnd.0 as usize)
+}
+
+fn inject_password_guarded(
+    focused: &IUIAutomationElement,
+    text: &str,
+    target_hwnd: HWND,
+    char_delay_ms: u64,
+) -> crate::Result<()> {
+    if text.chars().any(char::is_control) {
+        return Err(crate::error::VaultError::AutoTypeError("Password contains control characters".into()));
+    }
+    check_identifier_focus(focused, target_hwnd)?;
+    if unsafe { focused.CurrentIsPassword() }.map(|v| v.as_bool()).ok() != Some(true) {
+        return Err(crate::error::VaultError::AutoTypeError("Expected a protected password field".into()));
+    }
+    if let Ok(pattern) = unsafe { focused.GetCurrentPattern(UIA_ValuePatternId) }
+        && let Ok(val_pattern) = pattern.cast::<IUIAutomationValuePattern>()
+        && unsafe { val_pattern.CurrentIsReadOnly() }.map_or(false, |v| v.as_bool()) {
+            return Err(crate::error::VaultError::AutoTypeError("Password field is read-only".into()));
+        }
+    check_modifier_keys_released()?;
+    send_ctrl_a_backspace_guarded(target_hwnd)?;
+    safe_sleep_with_target_guard(50, target_hwnd)?;
+
+    for ch in text.chars() {
+        check_identifier_focus(focused, target_hwnd)?;
+        if unsafe { focused.CurrentIsPassword() }.map(|v| v.as_bool()).ok() != Some(true) {
+            return Err(crate::error::VaultError::AutoTypeError("Password field changed type".into()));
+        }
+        let mut encoded = zeroize::Zeroizing::new([0u8; 4]);
+        autotype_text_with_delay_guarded(ch.encode_utf8(&mut encoded[..]), char_delay_ms, 0, target_hwnd)?;
+    }
+    safe_sleep_with_target_guard(50, target_hwnd)?;
+    check_identifier_focus(focused, target_hwnd)?;
+    Ok(())
+}
+
+/// Type into a focused browser field (identifier or password) using OS physical scan codes.
+pub(crate) fn type_browser_field(
+    text: &str,
+    window_token: usize,
+    field_id: &str,
+    is_password: bool,
+    char_delay_ms: u64,
+    expected_url: &str,
+) -> crate::Result<()> {
+    use windows::Win32::System::Com::CoUninitialize;
+    let hwnd = HWND(window_token as *mut _);
+    check_target_window_active(hwnd)?;
+    unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok()
+        .map_err(|_| crate::error::VaultError::AutoTypeError("Cannot initialize browser input".into()))?;
+    struct ComGuard;
+    impl Drop for ComGuard { fn drop(&mut self) { unsafe { CoUninitialize(); } } }
+    let _com = ComGuard;
+    let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) }
+        .map_err(|_| crate::error::VaultError::AutoTypeError("Cannot inspect browser input".into()))?;
+    let address_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let actual = loop {
+        check_target_window_active(hwnd)?;
+        if let Some(actual) = browser_address(&automation, hwnd) { break actual; }
+        if std::time::Instant::now() >= address_deadline {
+            return Err(crate::error::VaultError::AutoTypeError("Cannot inspect the active browser address".into()));
+        }
+        safe_sleep_with_target_guard(50, hwnd)?;
+    };
+    if !same_browser_document(expected_url, &actual) {
+        return Err(crate::error::VaultError::AutoTypeError("The selected browser page is not the active window".into()));
+    }
+    if let Ok(window) = unsafe { automation.ElementFromHandle(hwnd) } {
+        let _ = find_targeted_elements(&automation, &window, UIA_EditControlTypeId);
+    }
+    // Chromium enables its accessibility tree lazily on the first UIA request.
+    // Poll readiness without moving focus or sending input to the container.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let focused = loop {
+        check_target_window_active(hwnd)?;
+        if let Ok(element) = unsafe { automation.GetFocusedElement() } {
+            if unsafe { element.CurrentControlType() }.ok() == Some(UIA_EditControlTypeId) {
+                break element;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(crate::error::VaultError::AutoTypeError("Cannot find focused browser input".into()));
+        }
+        if let Ok(window) = unsafe { automation.ElementFromHandle(hwnd) } {
+            let _ = find_targeted_elements(&automation, &window, UIA_EditControlTypeId);
+        }
+        safe_sleep_with_target_guard(25, hwnd)?;
+    };
+    if unsafe { focused.CurrentControlType() }.ok() != Some(UIA_EditControlTypeId) {
+        return Err(crate::error::VaultError::AutoTypeError("Browser input focus changed".into()));
+    }
+    if unsafe { focused.CurrentIsPassword() }.map(|value| value.as_bool()).ok() != Some(is_password) {
+        return Err(crate::error::VaultError::AutoTypeError("Browser input focus changed".into()));
+    }
+    if !field_id.is_empty() {
+        let auto_id = unsafe { focused.CurrentAutomationId() }.map(|id| id.to_string()).unwrap_or_default();
+        if auto_id != field_id {
+            return Err(crate::error::VaultError::AutoTypeError("Browser input identity changed".into()));
+        }
+    }
+    if is_password {
+        inject_password_guarded(&focused, text, hwnd, char_delay_ms)
+    } else {
+        inject_identifier_guarded(&focused, text, hwnd, char_delay_ms)
+    }
 }
 
 fn send_shift_tab_guarded(target_hwnd: HWND) -> crate::Result<()> {
@@ -188,81 +496,23 @@ fn send_shift_tab_guarded(target_hwnd: HWND) -> crate::Result<()> {
 }
 
 fn send_ctrl_a_backspace_guarded(target_hwnd: HWND) -> crate::Result<()> {
-    let send_single = |vk: VIRTUAL_KEY, scan: u16, flags: KEYBD_EVENT_FLAGS| -> crate::Result<()> {
-        check_target_window_active(target_hwnd)?;
-        let input = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk,
-                    wScan: scan,
-                    dwFlags: flags,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        unsafe {
-            let sent = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
-            if sent != 1 {
-                return Err(crate::error::VaultError::EncryptionError(
-                    "Autotype failed to send key event".into(),
-                ));
-            }
-        }
-        Ok(())
-    };
-
-    send_single(VK_CONTROL, 0x1D, KEYBD_EVENT_FLAGS(0))?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VIRTUAL_KEY(0x41), 0x1E, KEYBD_EVENT_FLAGS(0))?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VIRTUAL_KEY(0x41), 0x1E, KEYEVENTF_KEYUP)?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP)?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VK_BACK, 0x0E, KEYBD_EVENT_FLAGS(0))?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-    send_single(VK_BACK, 0x0E, KEYEVENTF_KEYUP)?;
-
-    Ok(())
-}
-
-fn send_enter_guarded(target_hwnd: HWND) -> crate::Result<()> {
     check_target_window_active(target_hwnd)?;
-
-    let input_down = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_RETURN,
-                wScan: 0x1C,
-                dwFlags: KEYBD_EVENT_FLAGS(0),
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let input_up = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_RETURN,
-                wScan: 0x1C,
-                dwFlags: KEYEVENTF_KEYUP,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    unsafe {
-        let _ = SendInput(&[input_down, input_up], std::mem::size_of::<INPUT>() as i32);
+    check_modifier_keys_released()?;
+    let layout = unsafe { GetKeyboardLayout(GetWindowThreadProcessId(target_hwnd, None)) };
+    let a_scan = unsafe { MapVirtualKeyExW(0x41, MAPVK_VK_TO_VSC_EX, layout) } as u16;
+    if a_scan == 0 {
+        return Err(crate::error::VaultError::AutoTypeError("Cannot map Select All shortcut".into()));
     }
-    Ok(())
+    send_character_chord(&[scan_input(0x1d, false), scan_input(a_scan, false), scan_input(a_scan, true), scan_input(0x1d, true)], target_hwnd)?;
+    send_character_chord(&[scan_input(0x0e, false), scan_input(0x0e, true)], target_hwnd)
+}
+pub(crate) fn send_enter_guarded(target_hwnd: HWND) -> crate::Result<()> {
+    check_target_window_active(target_hwnd)?;
+    check_modifier_keys_released()?;
+
+    let input_down = scan_input(0x1C, false);
+    let input_up = scan_input(0x1C, true);
+    send_character_chord(&[input_down, input_up], target_hwnd)
 }
 
 fn send_backspaces_guarded(count: usize, target_hwnd: HWND) -> crate::Result<()> {
@@ -327,99 +577,6 @@ fn autotype_correct_text_guarded(current: &str, target: &str, char_delay_ms: u64
     }
 }
 
-fn try_set_element_value_via_uia(
-    focused: &IUIAutomationElement,
-    text: &str,
-) -> bool {
-    unsafe {
-        if let Ok(pattern_obj) = focused.GetCurrentPattern(UIA_ValuePatternId)
-            && let Ok(val_pattern) = pattern_obj.cast::<IUIAutomationValuePattern>() {
-                let bstr = BSTR::from(text);
-                if val_pattern.SetValue(&bstr).is_ok() {
-                    return true;
-                }
-            }
-    }
-    false
-}
-
-fn send_ctrl_v_guarded(target_hwnd: HWND) -> crate::Result<()> {
-    let send_single = |vk: VIRTUAL_KEY, scan: u16, flags: KEYBD_EVENT_FLAGS| -> crate::Result<()> {
-        check_target_window_active(target_hwnd)?;
-        let input = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk,
-                    wScan: scan,
-                    dwFlags: flags,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        unsafe {
-            let sent = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
-            if sent != 1 {
-                return Err(crate::error::VaultError::EncryptionError(
-                    "Autotype failed to send key event".into(),
-                ));
-            }
-        }
-        Ok(())
-    };
-
-    send_single(VK_CONTROL, 0x1D, KEYBD_EVENT_FLAGS(0))?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VIRTUAL_KEY(0x56), 0x2F, KEYBD_EVENT_FLAGS(0))?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VIRTUAL_KEY(0x56), 0x2F, KEYEVENTF_KEYUP)?;
-    safe_sleep_with_target_guard(15, target_hwnd)?;
-
-    send_single(VK_CONTROL, 0x1D, KEYEVENTF_KEYUP)?;
-
-    Ok(())
-}
-
-fn send_secure_paste_guarded(text: &str, target_hwnd: HWND) -> crate::Result<()> {
-    check_target_window_active(target_hwnd)?;
-
-    let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-    let bytes_len = utf16.len() * std::mem::size_of::<u16>();
-
-    unsafe {
-        if OpenClipboard(target_hwnd).is_ok() {
-            let _ = EmptyClipboard();
-            if let Ok(h_mem) = GlobalAlloc(GMEM_MOVEABLE, bytes_len) {
-                let ptr = GlobalLock(h_mem) as *mut u16;
-                if !ptr.is_null() {
-                    std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
-                    let _ = GlobalUnlock(h_mem);
-                    let _ = SetClipboardData(13u32, windows::Win32::Foundation::HANDLE(h_mem.0));
-                }
-            }
-            let _ = CloseClipboard();
-        }
-    }
-
-    // Send Ctrl+V key combination (keyloggers see Ctrl+V only, hiding raw password scan codes)
-    send_ctrl_v_guarded(target_hwnd)?;
-
-    // Immediate zeroization of clipboard after paste settling delay (50ms)
-    safe_sleep_with_target_guard(50, target_hwnd)?;
-
-    unsafe {
-        if OpenClipboard(target_hwnd).is_ok() {
-            let _ = EmptyClipboard();
-            let _ = CloseClipboard();
-        }
-    }
-
-    Ok(())
-}
-
 fn inject_secret_guarded(
     focused: &IUIAutomationElement,
     text: &str,
@@ -428,17 +585,16 @@ fn inject_secret_guarded(
 ) -> crate::Result<()> {
     check_target_window_active(target_hwnd)?;
 
-    // Primary Defense: Direct UIA COM Property Injection (0 Keystrokes, Immune to WH_KEYBOARD_LL)
-    if try_set_element_value_via_uia(focused, text) {
-        return Ok(());
+    // If target is a web browser, use pure native keyboard typing (no clipboard paste / no Ctrl+V)
+    if is_known_web_browser(&get_window_process_name(target_hwnd)) {
+        return if unsafe { focused.CurrentIsPassword() }.is_ok_and(|v| v.as_bool()) {
+            inject_password_guarded(focused, text, target_hwnd, char_delay_ms)
+        } else {
+            inject_identifier_guarded(focused, text, target_hwnd, char_delay_ms)
+        };
     }
 
-    // Secondary Defense: Block Paste with Instant Zeroization (Keyloggers see Ctrl+V only)
-    if send_secure_paste_guarded(text, target_hwnd).is_ok() {
-        return Ok(());
-    }
-
-    // Tertiary Fallback: Guarded Keystroke Typing
+    // Direct keystroke typing for native desktop applications as well (no clipboard paste)
     autotype_text_with_delay_guarded(text, char_delay_ms, 0, target_hwnd)
 }
 
@@ -554,15 +710,111 @@ fn extract_domain_token(url: &str) -> String {
     parts[0].to_string()
 }
 
+fn verified_browser_url(expected: &str, actual: &str) -> bool {
+    let Ok(actual) = reqwest::Url::parse(actual) else { return false; };
+    actual.scheme() == "https" && actual.username().is_empty() && actual.password().is_none()
+        && crate::smartlogin::discovery::is_allowed_auth_domain(expected, actual.as_str())
+}
+
+fn same_browser_document(expected: &str, actual: &str) -> bool {
+    let (Ok(mut expected), Ok(mut actual)) = (reqwest::Url::parse(expected), reqwest::Url::parse(actual)) else { return false; };
+    if !matches!(expected.scheme(), "https" | "http") { return false; }
+    // Chromium also elides HTTP on loopback; local development pages remain verifiable by origin/path.
+    if expected.scheme() == "http" && matches!(expected.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+        && actual.scheme() == "https" { let _ = actual.set_scheme("http"); }
+    expected.set_fragment(None);
+    actual.set_fragment(None);
+    expected == actual
+}
+
+/// Before native Enter, bind the selected CDP page to a focused document input.
+pub(crate) fn verify_browser_submit(window_token: usize, expected_url: &str) -> bool {
+    let hwnd = HWND(window_token as *mut _);
+    if !is_target_window_active(hwnd) { return false; }
+    if unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_err() { return false; }
+    let valid = (|| {
+        let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) }.ok()?;
+        let actual = browser_address(&automation, hwnd)?;
+        let focused = unsafe { automation.GetFocusedElement() }.ok()?;
+        Some(same_browser_document(expected_url, &actual)
+            && unsafe { focused.CurrentControlType() }.ok() == Some(UIA_EditControlTypeId)
+            && native_login::document_field(&automation, &focused)
+            && check_identifier_focus(&focused, hwnd).is_ok())
+    })().unwrap_or(false);
+    unsafe { windows::Win32::System::Com::CoUninitialize(); }
+    valid
+}
+
+/// Chromium elides the outer scheme while redirect queries can still contain
+/// an inner https:// URL. Only a scheme at the start belongs to this document.
+fn normalize_browser_address(address: &str) -> Option<String> {
+    let address = address.trim();
+    if address.is_empty() || address.contains(char::is_whitespace) { return None; }
+    let normalized = if address.to_ascii_lowercase().starts_with("https://")
+        || address.to_ascii_lowercase().starts_with("http://") {
+        address.to_owned()
+    } else {
+        format!("https://{address}")
+    };
+    let url = reqwest::Url::parse(&normalized).ok()?;
+    if !url.username().is_empty() || url.password().is_some()
+        || !url.host_str().is_some_and(|host| host.contains('.') || host == "localhost" || host == "[::1]") {
+        return None;
+    }
+    Some(normalized)
+}
+
+/// Read only browser chrome: an edit beneath a native toolbar, never a web document.
+fn browser_address(automation: &IUIAutomation, hwnd: HWND) -> Option<String> {
+    unsafe {
+        let window = automation.ElementFromHandle(hwnd).ok()?;
+        let edits = find_targeted_elements(automation, &window, UIA_EditControlTypeId)?;
+        let walker = automation.ControlViewWalker().ok()?;
+        for index in 0..edits.Length().ok()?.min(100) {
+            let Ok(edit) = edits.GetElement(index) else { continue; };
+            if edit.CurrentIsOffscreen().map_or(true, |v| v.as_bool()) { continue; }
+            let mut ancestor = edit.clone();
+            let mut toolbar = false;
+            let mut chrome = false;
+            for _ in 0..24 {
+                let Ok(parent) = walker.GetParentElement(&ancestor) else { break; };
+                let kind = parent.CurrentControlType().ok();
+                if kind == Some(UIA_DocumentControlTypeId) { break; }
+                toolbar |= kind == Some(UIA_ToolBarControlTypeId);
+                if kind == Some(UIA_WindowControlTypeId) {
+                    chrome = toolbar && automation.CompareElements(&parent, &window).is_ok_and(|v| v.as_bool());
+                    break;
+                }
+                ancestor = parent;
+            }
+            if !chrome { continue; }
+            let Ok(pattern) = edit.GetCurrentPattern(UIA_ValuePatternId) else { continue; };
+            let Ok(value) = pattern.cast::<IUIAutomationValuePattern>() else { continue; };
+            let Ok(value) = value.CurrentValue() else { continue; };
+            let address = value.to_string();
+            // Chromium's unfocused omnibox elides the scheme. This verifies the
+            // hostname, not the TLS state; never accept an explicitly insecure URL.
+            if let Some(address) = normalize_browser_address(&address) { return Some(address); }
+        }
+    }
+    None
+}
+
 fn is_verified_login_context(
     hwnd: HWND,
     title: &str,
-    target_domain_token: &str,
+    expected_url: &str,
     automation: &IUIAutomation,
 ) -> bool {
     let title_lower = title.to_lowercase();
     let proc_name = get_window_process_name(hwnd);
     let is_browser = is_known_web_browser(&proc_name);
+    if is_browser && !expected_url.is_empty() {
+        return browser_address(automation, hwnd)
+            .is_some_and(|actual| verified_browser_url(expected_url, &actual));
+    }
+    let domain_token = extract_domain_token(expected_url);
+    let target_domain_token = domain_token.as_str();
 
     // 1. Basic UI check: Does window have an active password field or explicit login indicator?
     let has_login_indicator = if let Ok(win_el) = unsafe { automation.ElementFromHandle(hwnd) } {
@@ -1097,7 +1349,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
         };
 
         std::thread::spawn(move || {
-            let domain_token = extract_domain_token(&normalized_url);
+            let expected_url = normalized_url.clone();
 
             // Use normalized target URL directly without network probing (enforces offline invariant)
             let target_url = if !normalized_url.is_empty() && launch_browser {
@@ -1138,7 +1390,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                         );
 
                         // Adaptive Settle Polling: Poll in 50ms steps until browser window & login context render (max 3500ms)
-                        let _ = poll_until_login_context_ready(&automation, &domain_token, 3500);
+                        let _ = poll_until_login_context_ready(&automation, &expected_url, 3500);
 
                         // Fallback: If we landed on a homepage (e.g. because resolver fell back to original base URL)
                         // and no input is focused, try to find and click a login link.
@@ -1171,7 +1423,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
 
                                 if !already_on_login_form
                                     && try_click_login_link(&automation, &window_el) {
-                                        let _ = poll_until_login_context_ready(&automation, &domain_token, 3000);
+                                        let _ = poll_until_login_context_ready(&automation, &expected_url, 3000);
                                     }
                             }
                     }
@@ -1206,7 +1458,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
 
                     // Anti-Phishing Guard: Enforce verified domain token and process executable matching
                     let title = get_window_title(hwnd);
-                    let is_login_context = is_verified_login_context(hwnd, &title, &domain_token, &automation);
+                    let is_login_context = is_verified_login_context(hwnd, &title, &expected_url, &automation);
 
                     if !is_login_context {
                         // Not a verified login context (e.g. domain mismatch or untrusted process title), ignore
@@ -1280,7 +1532,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                         if on_register
                             && let Ok(win_el) = automation.ElementFromHandle(hwnd)
                                 && try_click_login_link(&automation, &win_el) {
-                                    let _ = poll_until_login_context_ready(&automation, &domain_token, 3000);
+                                    let _ = poll_until_login_context_ready(&automation, &expected_url, 3000);
                                     last_focused_element_id = None; // Reset focus to re-evaluate on redirected page
                                     continue;
                                 }
@@ -1354,7 +1606,7 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                                 let mut user_val = String::new();
                                 if let Ok(new_focused) = automation.GetFocusedElement() {
                                     user_val = get_element_value(&new_focused);
-                                    if inject_secret_guarded(&new_focused, &guard.username, target_hwnd, char_delay_ms).is_err() { break; }
+                                    if inject_identifier_guarded(&new_focused, &guard.username, target_hwnd, char_delay_ms).is_err() { break; }
                                 } else if autotype_correct_text_guarded(&user_val, &guard.username, char_delay_ms, target_hwnd).is_err() {
                                     break;
                                 }
@@ -1369,14 +1621,14 @@ impl AutotypeDriver for WindowsAutotypeDriver {
                             // Clear password and fill
                             if send_ctrl_a_backspace_guarded(target_hwnd).is_err() { break; }
                             if safe_sleep_with_target_guard(100, target_hwnd).is_err() { break; }
-                            if inject_secret_guarded(&focused, &guard.password, target_hwnd, char_delay_ms).is_err() { break; }
+                            if inject_password_guarded(&focused, &guard.password, target_hwnd, char_delay_ms).is_err() { break; }
                             if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
                             if send_enter_guarded(target_hwnd).is_err() { break; }
                             filled_password = true;
                         } else if is_username_field && !filled_username {
                             last_focused_element_id = Some(element_key.clone());
 
-                            if inject_secret_guarded(&focused, &guard.username, target_hwnd, char_delay_ms).is_err() { break; }
+                            if inject_identifier_guarded(&focused, &guard.username, target_hwnd, char_delay_ms).is_err() { break; }
                             if safe_sleep_with_target_guard(field_delay_ms, target_hwnd).is_err() { break; }
 
                             // Check if password field is visible in active window
@@ -1395,8 +1647,8 @@ impl AutotypeDriver for WindowsAutotypeDriver {
 
                                 // Re-query focused password element to inject safely
                                 if let Ok(pass_focused) = automation.GetFocusedElement() {
-                                    if inject_secret_guarded(&pass_focused, &guard.password, target_hwnd, char_delay_ms).is_err() { break; }
-                                } else if autotype_text_with_delay_guarded(&guard.password, char_delay_ms, 0, target_hwnd).is_err() {
+                                    if inject_password_guarded(&pass_focused, &guard.password, target_hwnd, char_delay_ms).is_err() { break; }
+                                } else {
                                     break;
                                 }
 
@@ -1422,6 +1674,283 @@ impl AutotypeDriver for WindowsAutotypeDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_url_requires_verified_https_origin() {
+        assert!(verified_browser_url("https://gmail.com", "https://accounts.google.com/signin"));
+        for target in ["http://accounts.google.com", "https://accounts.google.com.evil.test", "https://accounts.google.com@evil.test", "https://evil.test/login/google", "accounts.google.com"] {
+            assert!(!verified_browser_url("https://gmail.com", target));
+        }
+    }
+
+    #[test]
+    fn browser_target_binding_rejects_other_documents_and_error_pages() {
+        assert!(same_browser_document("https://example.test/login#one", "https://example.test/login#two"));
+        assert!(!same_browser_document("https://example.test/login", "https://other.test/login"));
+        assert!(!same_browser_document("https://example.test/login", "https://example.test/other"));
+        assert!(!same_browser_document("https://example.test/login?a=1", "https://example.test/login?a=2"));
+        assert!(!same_browser_document("chrome-error://chromewebdata/", "https://example.test/"));
+        assert!(!same_browser_document("https://example.test/login", ""));
+        assert!(same_browser_document("http://127.0.0.1:1234/", "https://127.0.0.1:1234/"));
+    }
+
+    #[test]
+    fn elided_browser_scheme_is_not_confused_by_redirect_urls_or_email_queries() {
+        for address in [
+            "accounts.google.com/v3/signin/identifier?continue=https://mail.google.com/mail/",
+            "accounts.google.com/v3/signin/challenge/pwd?Email=demo@example.test&continue=https://mail.google.com/",
+        ] {
+            let actual = normalize_browser_address(address).unwrap();
+            assert_eq!(reqwest::Url::parse(&actual).unwrap().host_str(), Some("accounts.google.com"));
+        }
+        assert_eq!(normalize_browser_address("http://example.test/").as_deref(), Some("http://example.test/"));
+        for address in ["chrome://newtab/", "about:blank", "user@accounts.google.com", "javascript:alert(1)", "not a url"] {
+            assert!(normalize_browser_address(address).is_none(), "{address}");
+        }
+        let malicious = normalize_browser_address("evil.test/?continue=https://accounts.google.com").unwrap();
+        assert!(!crate::smartlogin::native_state::account_host(&malicious));
+    }
+
+    #[test]
+    #[ignore = "opens a disposable normal Brave window to verify native address-bar inspection"]
+    fn native_browser_address_smoke() {
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok().unwrap();
+        let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) }.unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe")
+            .arg(format!("--user-data-dir={}", profile.path().display())).arg("--no-first-run")
+            .arg("https://example.test/native-address-check").spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut found = None;
+        while std::time::Instant::now() < deadline {
+            let hwnd = unsafe { GetForegroundWindow() };
+            let mut pid = 0;
+            unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)); }
+            if pid == child.id() {
+                found = browser_address(&automation, hwnd);
+                if found.is_some() { break; }
+
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(automation);
+        unsafe { windows::Win32::System::Com::CoUninitialize(); }
+        assert_eq!(found.as_deref(), Some("https://example.test/native-address-check"));
+    }
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyboardLayoutList, LoadKeyboardLayoutW, UnloadKeyboardLayout, ACTIVATE_KEYBOARD_LAYOUT_FLAGS,
+    };
+
+    #[test]
+    #[ignore = "opens normal Brave and tests Google's identifier step with an explicitly supplied test address"]
+    fn google_native_identifier_diagnostic() {
+        use windows::Win32::System::Com::CoUninitialize;
+        use windows::Win32::UI::Accessibility::UIA_TextControlTypeId;
+        let email = zeroize::Zeroizing::new(std::env::var("YNTRA_GOOGLE_TEST_EMAIL").expect("explicit test identifier required"));
+        let profile = tempfile::tempdir().unwrap();
+        let child = std::process::Command::new(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe")
+            .arg(format!("--user-data-dir={}", profile.path().display()))
+            .arg("--no-first-run").arg("https://accounts.google.com/AddSession?service=mail")
+            .spawn().unwrap();
+        struct TestBrowser(std::process::Child);
+        impl Drop for TestBrowser { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }
+        let child = TestBrowser(child);
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok().unwrap();
+        struct ComGuard;
+        impl Drop for ComGuard { fn drop(&mut self) { unsafe { CoUninitialize(); } } }
+        let _com = ComGuard;
+        let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) }.unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+        let (hwnd, field) = loop {
+            let hwnd = unsafe { GetForegroundWindow() };
+            let mut pid = 0;
+            unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)); }
+            if pid == child.0.id() {
+                if let Ok(window) = unsafe { automation.ElementFromHandle(hwnd) } {
+                    if let Some(elements) = find_targeted_elements(&automation, &window, UIA_EditControlTypeId) {
+                        let mut found = None;
+                        for i in 0..unsafe { elements.Length() }.unwrap_or(0) {
+                            let element = unsafe { elements.GetElement(i) }.unwrap();
+                            if unsafe { element.CurrentAutomationId() }.is_ok_and(|id| id.to_string() == "identifierId")
+                                && !unsafe { element.CurrentIsOffscreen() }.map_or(true, |b| b.as_bool()) {
+                                found = Some(element); break;
+                            }
+                        }
+                        if let Some(field) = found { break (hwnd, field); }
+                    }
+                }
+            }
+            assert!(std::time::Instant::now() < deadline, "Normal Brave identifier input was not found in foreground");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        };
+        eprintln!("Normal Brave ready; title={}, native Auto-type starts now", get_window_title(hwnd));
+        unsafe { field.SetFocus() }.unwrap();
+        let focus_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let field = loop {
+            check_target_window_active(hwnd).unwrap();
+            if let Ok(current) = unsafe { automation.GetFocusedElement() } {
+                if unsafe { current.CurrentAutomationId() }.is_ok_and(|id| id.to_string() == "identifierId")
+                    && check_identifier_focus(&current, hwnd).is_ok() { break current; }
+            }
+            assert!(std::time::Instant::now() < focus_deadline, "Identifier focus did not settle");
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        inject_identifier_guarded(&field, &email, hwnd, 15).unwrap();
+        safe_sleep_with_target_guard(300, hwnd).unwrap();
+        send_enter_guarded(hwnd).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            check_target_window_active(hwnd).unwrap();
+            let window = unsafe { automation.ElementFromHandle(hwnd) }.unwrap();
+            let password = active_window_has_password_field(&automation, &window);
+            let mut text = String::new();
+            if let Some(elements) = find_targeted_elements(&automation, &window, UIA_TextControlTypeId) {
+                for i in 0..unsafe { elements.Length() }.unwrap_or(0).min(80) {
+                    let element = unsafe { elements.GetElement(i) }.unwrap();
+                    if !unsafe { element.CurrentIsOffscreen() }.map_or(true, |b| b.as_bool()) {
+                        if let Ok(name) = unsafe { element.CurrentName() } { text.push_str(&name.to_string()); text.push('\n'); }
+                    }
+                }
+            }
+            let rejected = text.to_lowercase().contains("may not be secure") || text.to_lowercase().contains("kanske inte är säker");
+            if password || rejected || std::time::Instant::now() >= deadline {
+                eprintln!("Normal Brave outcome: password_visible={password}, rejected={rejected}, text={text}");
+                // Leave the result visible long enough for the operator to inspect it.
+                std::thread::sleep(std::time::Duration::from_secs(20));
+                assert!(password || rejected, "No conclusive Google identifier result");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+
+    static TEST_LAYOUT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    struct TestLayout {
+        handle: HKL,
+        unload: bool,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl Drop for TestLayout {
+        fn drop(&mut self) {
+            if self.unload { unsafe { let _ = UnloadKeyboardLayout(self.handle); } }
+        }
+    }
+
+    fn test_layout(id: &str) -> TestLayout {
+        let lock = TEST_LAYOUT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut previous = vec![HKL::default(); unsafe { GetKeyboardLayoutList(None) } as usize];
+        unsafe { GetKeyboardLayoutList(Some(&mut previous)); }
+        let id: Vec<u16> = id.encode_utf16().chain(Some(0)).collect();
+        // No KLF_ACTIVATE: tests neither change the active layout nor send input.
+        let handle = unsafe { LoadKeyboardLayoutW(PCWSTR(id.as_ptr()), ACTIVATE_KEYBOARD_LAYOUT_FLAGS(0)) }
+            .expect("standard Windows keyboard layout");
+        TestLayout { handle, unload: !previous.contains(&handle), _lock: lock }
+    }
+
+    fn down_scans(inputs: &[INPUT]) -> Vec<u16> {
+        inputs.iter().filter_map(|input| {
+            let key = unsafe { input.Anonymous.ki };
+            assert_eq!(key.wVk, VIRTUAL_KEY(0));
+            assert_ne!(key.dwFlags & KEYEVENTF_SCANCODE, KEYBD_EVENT_FLAGS(0));
+            if key.dwFlags & KEYEVENTF_KEYUP != KEYBD_EVENT_FLAGS(0) { return None; }
+            Some(key.wScan | if key.dwFlags & KEYEVENTF_EXTENDEDKEY != KEYBD_EVENT_FLAGS(0) { 0xe000 } else { 0 })
+        }).collect()
+    }
+
+    #[test]
+    fn keyboard_layout_email_symbols_use_the_expected_physical_keys() {
+        for (layout_id, ch, expected) in [
+            ("00000409", '@', vec![0x2a, 0x03]), // US Shift+2
+            ("0000041d", '@', vec![0x1d, 0xe038, 0x03]), // Swedish AltGr+2
+            ("00000407", '@', vec![0x1d, 0xe038, 0x10]), // German AltGr+Q
+            ("0000041d", '€', vec![0x1d, 0xe038, 0x06]), // Swedish AltGr+5
+            ("0000041d", 'å', vec![0x1a]),
+            ("00000410", '.', vec![0x34]), // Italian: regular period, not Num Lock-dependent decimal
+        ] {
+            let layout = test_layout(layout_id);
+            let (inputs, count) = layout_character_inputs(ch as u16, layout.handle, false).unwrap();
+            assert_eq!(down_scans(&inputs[..count]), expected, "{layout_id} {ch}");
+            // Every key down has a corresponding key up in reverse chord order.
+            assert_eq!(count, expected.len() * 2);
+            for (down, up) in inputs[..count / 2].iter().zip(inputs[count / 2..count].iter().rev()) {
+                let (down, up) = unsafe { (down.Anonymous.ki, up.Anonymous.ki) };
+                assert_eq!(down.wScan, up.wScan);
+                assert_eq!(down.dwFlags | KEYEVENTF_KEYUP, up.dwFlags);
+            }
+        }
+    }
+
+    #[test]
+    fn keyboard_layout_caps_lock_preserves_case_and_symbols() {
+        let layout = test_layout("0000041d");
+        for (ch, expected) in [('a', vec![0x2a, 0x1e]), ('A', vec![0x1e]), ('å', vec![0x2a, 0x1a]), ('Å', vec![0x1a]), ('@', vec![0x1d, 0xe038, 0x03])] {
+            let (inputs, count) = layout_character_inputs(ch as u16, layout.handle, true).unwrap();
+            assert_eq!(down_scans(&inputs[..count]), expected, "{ch}");
+        }
+    }
+
+    #[test]
+    fn keyboard_layout_preserves_unicode_fallback_for_dead_and_unmapped_keys() {
+        let layout = test_layout("0000041d");
+        for ch in ['^' as u16, '漢' as u16, 0xd83d, 0xde00, 0, 9, 10, 13] {
+            assert!(layout_character_inputs(ch, layout.handle, false).is_none(), "{ch:x}");
+        }
+    }
+
+    #[test]
+    fn keyboard_layout_matrix_round_trips_emitted_scan_codes() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::VK_RCONTROL;
+        // Regional punctuation, AZERTY/QWERTZ, Dvorak, AltGr and non-Latin layouts.
+        let layouts = [
+            ("00000409", "US"), ("00000809", "UK"), ("00020409", "US International"),
+            ("00010409", "US Dvorak"), ("0000041d", "Swedish"), ("00000414", "Norwegian"),
+            ("00000406", "Danish"), ("0000040b", "Finnish"), ("00000407", "German"),
+            ("00000807", "Swiss German"), ("0000040c", "French"), ("0000080c", "Belgian French"),
+            ("0000040a", "Spanish"), ("0000080a", "Latin American"), ("00000410", "Italian"),
+            ("00000816", "Portuguese"), ("00010416", "Brazilian ABNT2"),
+            ("00000415", "Polish programmer"), ("00000405", "Czech"), ("0000040e", "Hungarian"),
+            ("0000041f", "Turkish Q"), ("0001041f", "Turkish F"),
+            ("00000419", "Russian"), ("00000422", "Ukrainian"), ("00000408", "Greek"),
+            ("00000401", "Arabic 101"), ("0000040d", "Hebrew"),
+        ];
+        for (id, name) in layouts {
+            let loaded = test_layout(id);
+            let layout = loaded.handle;
+            if !matches!(name, "Russian" | "Ukrainian" | "Greek" | "Arabic 101" | "Hebrew") {
+                assert!(layout_character_inputs('@' as u16, layout, false).is_some(), "{name}: @ should have a physical mapping");
+            }
+            for caps_lock in [false, true] {
+                let samples = (32u16..=126).chain("åÅäÄöÖéÉèÈçÇñÑßẞøØæÆ€£¥ıİğĞşŞąĄłŁžŽčČěěйЙяЯїЇαΑωΩشא漢".encode_utf16());
+                let mut mapped_count = 0;
+                for ch in samples {
+                    let Some((inputs, count)) = layout_character_inputs(ch, layout, caps_lock) else { continue; };
+                    mapped_count += 1;
+                    // Decode the EMITTED physical scan codes back to virtual keys,
+                    // independently of VkKeyScanEx's suggested mapping.
+                    let scans = down_scans(&inputs[..count]);
+                    let mut state = [0u8; 256];
+                    state[VK_CAPITAL.0 as usize] = u8::from(caps_lock);
+                    let mut main_vk = 0;
+                    for scan in &scans {
+                        let vk = unsafe { MapVirtualKeyExW(*scan as u32, MAPVK_VSC_TO_VK_EX, layout) };
+                        assert!(vk > 0 && vk < 256, "{name}: unmapped scan code");
+                        state[vk as usize] = 0x80;
+                        let key = VIRTUAL_KEY(vk as u16);
+                        if key == VK_LCONTROL || key == VK_RCONTROL { state[VK_CONTROL.0 as usize] = 0x80; }
+                        if key == VK_MENU || key == VK_RMENU { state[VK_MENU.0 as usize] = 0x80; }
+                        if key == VK_LSHIFT { state[VK_SHIFT.0 as usize] = 0x80; }
+                        main_vk = vk;
+                    }
+                    let mut output = [0u16; 8];
+                    let result = unsafe { ToUnicodeEx(main_vk, *scans.last().unwrap() as u32, &state, &mut output, 4, layout) };
+                    assert_eq!(result, 1, "{name} caps={caps_lock} U+{ch:04X}");
+                    assert_eq!(output[0], ch, "{name} caps={caps_lock}");
+                }
+                assert!(mapped_count >= 10, "{name}: layout did not provide usable mappings");
+            }
+        }
+    }
 
     #[test]
     fn test_extract_domain_token_subdomains() {

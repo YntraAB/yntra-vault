@@ -41,6 +41,7 @@ import type {
   Hardware2FaProtocol,
   OpenDialogOptions,
   SaveDialogOptions,
+  CheckUpdateResult,
 } from './backend';
 
 export class TauriBackend implements YntraVaultBackend {
@@ -665,10 +666,14 @@ export class TauriBackend implements YntraVaultBackend {
     return save(options as any);
   }
 
+  async getMobileVaultPath(name: string): Promise<string | null> {
+    return invoke('get_mobile_vault_path', { name });
+  }
+
   // ─── Smart Login ────────────────────────────────────────────────
 
-  async smartLoginPrecheck(): Promise<import('./backend').SmartLoginPreCheckResult> {
-    return invoke('smart_login_precheck');
+  async smartLoginPrecheck(entryId?: string): Promise<import('./backend').SmartLoginPreCheckResult> {
+    return invoke('smart_login_precheck', { entryId });
   }
 
   async smartLoginCloseBrowser(processName: string): Promise<void> {
@@ -693,6 +698,22 @@ export class TauriBackend implements YntraVaultBackend {
     const { listen } = await import('@tauri-apps/api/event');
     const unlisten = await listen('smart-login-result', (e) => callback(e.payload));
     return unlisten;
+  }
+
+  async checkAppUpdate(customEndpoint?: string): Promise<CheckUpdateResult> {
+    return invoke('check_app_update', { customEndpoint });
+  }
+
+  async downloadAndInstallApk(apkUrl: string, expectedSha256?: string): Promise<string> {
+    return invoke('download_and_install_apk', { apkUrl, expectedSha256 });
+  }
+
+  async installPortableUpdate(url: string, expectedSha256?: string): Promise<void> {
+    return invoke('install_portable_update', { url, expectedSha256 });
+  }
+
+  async getAppVersion(): Promise<string> {
+    return invoke('get_app_version');
   }
 }
 

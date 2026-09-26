@@ -53,9 +53,15 @@ export const SecureSecretInput = forwardRef<SecureSecretInputRef, SecureSecretIn
     }, [autoFocus]);
 
     useEffect(() => {
-      if (value !== undefined && value === '') {
+      if (value !== undefined) {
         bufferRef.current.fill(0);
-        lengthRef.current = 0;
+        const encoded = new TextEncoder().encode(value);
+        if (encoded.length > bufferRef.current.length) {
+          bufferRef.current = new Uint8Array(encoded.length + 64);
+        }
+        bufferRef.current.set(encoded);
+        lengthRef.current = encoded.length;
+        encoded.fill(0);
       }
     }, [value]);
 

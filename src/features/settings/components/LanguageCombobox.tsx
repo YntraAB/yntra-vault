@@ -67,7 +67,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
       >
         <div className="flex items-center gap-2 truncate">
           <span className="text-base leading-none">{currentLanguage.flag}</span>
-          <span className="font-medium truncate">{currentLanguage.nativeName}</span>
+          <span title={currentLanguage.nativeName} className="font-medium truncate">{currentLanguage.nativeName}</span>
           {currentLanguage.name !== currentLanguage.nativeName && (
             <span className="text-xs text-[var(--text-secondary)] truncate">({currentLanguage.name})</span>
           )}
@@ -114,11 +114,11 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
                       <div className="flex items-center gap-2.5 truncate">
                         <span className="text-base leading-none">{lang.flag}</span>
                         <div className="flex flex-col truncate">
-                          <span className="text-sm leading-tight text-[var(--text-primary)] truncate">
+                          <span title={lang.nativeName} className="text-sm leading-tight text-[var(--text-primary)] truncate">
                             {lang.nativeName}
                           </span>
                           {lang.name !== lang.nativeName && (
-                            <span className="text-[11px] text-[var(--text-secondary)] truncate">
+                            <span title={lang.name} className="text-[11px] text-[var(--text-secondary)] truncate">
                               {lang.name}
                             </span>
                           )}

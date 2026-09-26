@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { type GeneratorOptions, type StrengthScore, type BreachResult } from '@/lib/backend';
 import { useBackend } from '@/lib/useBackend';
 
@@ -7,36 +7,30 @@ export function usePasswordGenerator() {
   const [password, setPassword] = useState<string>('');
   const [strength, setStrength] = useState<StrengthScore | null>(null);
   const [breach, setBreach] = useState<BreachResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, []);
 
   const generate = useCallback(async (options?: GeneratorOptions) => {
     if (!backend) return '';
-    let pw = '';
-    let isBreached = true;
-    let attempts = 0;
-
-    // Generate and check against HIBP database. Loop up to 5 times.
-    while (isBreached && attempts < 5) {
-      attempts++;
-      pw = options
+    const request = ++generation.current;
+    setPassword('');
+    setStrength(null);
+    setBreach(null);
+    setError(null);
+    try {
+      const pw = options
         ? await backend.generatePassword(options)
         : await backend.generatePasswordDefault();
-      
-      try {
-        const result = await backend.checkPasswordBreach(pw);
-        isBreached = result.is_breached;
-      } catch {
-        // Safe fallback in case of no network / API errors
-        isBreached = false;
-      }
+      const score = await backend.analyzePasswordStrength(pw);
+      if (request !== generation.current) return '';
+      setPassword(pw);
+      setStrength(score);
+      return pw;
+    } catch (err) {
+      if (request === generation.current) setError(String(err));
+      return '';
     }
-
-    setPassword(pw);
-
-    // Auto-analyze strength
-    const score = await backend.analyzePasswordStrength(pw);
-    setStrength(score);
-
-    return pw;
   }, [backend]);
 
   const checkBreach = useCallback(async (pw?: string) => {
@@ -59,7 +53,7 @@ export function usePasswordGenerator() {
     return score;
   }, [backend]);
 
-  return { password, strength, breach, generate, checkBreach, analyzeStrength };
+  return { password, strength, breach, error, generate, checkBreach, analyzeStrength };
 }
 
 export default usePasswordGenerator;

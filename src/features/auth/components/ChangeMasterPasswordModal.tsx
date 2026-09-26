@@ -331,7 +331,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                       idx <= step ? 'bg-[var(--text-primary)]' : 'bg-[var(--border-subtle)]'
                     }`}
                   />
-                  <span
+                  <span title={title}
                     className={`text-[10px] font-medium transition-colors whitespace-nowrap truncate ${
                       idx === step ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'
                     }`}

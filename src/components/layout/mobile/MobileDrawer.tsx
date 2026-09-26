@@ -136,7 +136,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
                       className="h-2.5 w-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: tag.color }}
                     />
-                    <span className="truncate">{tag.name}</span>
+                    <span title={tag.name} className="truncate">{tag.name}</span>
                   </div>
                   <span className="text-[11px] text-[var(--text-tertiary)]">{tag.count}</span>
                 </button>

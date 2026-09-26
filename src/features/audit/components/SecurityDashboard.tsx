@@ -307,7 +307,7 @@ const StatCard: React.FC<{
     </div>
     <div className="flex flex-col min-w-0">
       <span className="text-[13px] font-semibold font-mono text-[var(--text-primary)] leading-tight">{count}</span>
-      <span className="text-[10.5px] text-[var(--text-tertiary)] truncate mt-0.5">{label}</span>
+      <span title={label} className="text-[10.5px] text-[var(--text-tertiary)] truncate mt-0.5">{label}</span>
     </div>
   </div>
 );

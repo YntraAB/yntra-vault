@@ -172,11 +172,15 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   }, [isLocked]);
 
   const selectionSeqRef = useRef(0);
+  const refreshSeqRef = useRef(0);
+  const tagRefreshSeqRef = useRef(0);
 
   // Purge sensitive state from JS memory when vault is locked (V8 Heap Hygiene)
   useEffect(() => {
     if (isLocked) {
       selectionSeqRef.current++;
+      refreshSeqRef.current++;
+      tagRefreshSeqRef.current++;
       if (typeof document !== 'undefined' && document.activeElement) {
         try {
           (document.activeElement as HTMLElement).blur();
@@ -197,34 +201,12 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
   // Load entries from backend when vault is opened
   const refreshEntries = useCallback(async () => {
-    if (!backend || !currentVault) return;
+    if (!backend || !currentVault || isLockedRef.current) return;
+    const request = ++refreshSeqRef.current;
     try {
       const previews = await backend.listEntries();
+      if (isLockedRef.current || request !== refreshSeqRef.current) return;
       const entriesList = previews.map((p) => entryPreviewToPasswordEntry(p));
-
-      // One-time migration to reset breach status for the bug fix (per-vault)
-      const resetKey = `yntra-vault-breach-reset-v2:${currentVault.path}`;
-      const resetDone = localStorage.getItem(resetKey);
-      if (!resetDone && entriesList.length > 0) {
-        for (const entry of entriesList) {
-          if (entry.breachStatus && entry.breachStatus.type !== 'Unknown') {
-            entry.breachStatus = { type: 'Unknown' };
-          }
-        }
-        (async () => {
-          for (const entry of previews) {
-            const status = entry.breach_status;
-            if (status && status.type !== 'Unknown') {
-              try {
-                await backend.updateEntryBreachStatus(entry.id, { type: 'Unknown' });
-              } catch (err) {
-                console.error('Failed to reset breach status for entry', entry.title, err);
-              }
-            }
-          }
-        })();
-        localStorage.setItem(resetKey, 'true');
-      }
 
       setEntries(entriesList);
 
@@ -234,10 +216,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         const matchingPreview = entriesList.find((p) => p.id === currentSelected.id);
         if (!matchingPreview) {
           setSelectedEntry(null);
-        } else if (matchingPreview.updatedAt !== currentSelected.updatedAt) {
+        } else {
+          const selection = selectionSeqRef.current;
           try {
             const full = await backend.getEntry(currentSelected.id);
-            if (!isLockedRef.current && selectedEntryRef.current?.id === currentSelected.id) {
+            if (!isLockedRef.current && request === refreshSeqRef.current && selection === selectionSeqRef.current && selectedEntryRef.current?.id === currentSelected.id) {
               setSelectedEntry(decryptedEntryToPasswordEntry(full));
             }
           } catch (err) {
@@ -250,11 +233,19 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
   }, [backend, currentVault]);
 
+  useEffect(() => () => {
+    refreshSeqRef.current++;
+    tagRefreshSeqRef.current++;
+    selectionSeqRef.current++;
+  }, [currentVault?.id, currentVault?.path]);
+
   // Load tags from backend when vault is opened
   const refreshTags = useCallback(async () => {
-    if (!backend) return;
+    if (!backend || !currentVault || isLockedRef.current) return;
+    const request = ++tagRefreshSeqRef.current;
     try {
       const dbTags = await backend.getTags();
+      if (isLockedRef.current || request !== tagRefreshSeqRef.current) return;
       setRawTags(
         dbTags.map((t) => ({
           id: t.id,
@@ -267,7 +258,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error('Failed to load tags:', e);
     }
-  }, [backend]);
+  }, [backend, currentVault]);
 
   // Auto-refresh when vault unlocks or changes
   useEffect(() => {

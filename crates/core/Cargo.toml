@@ -1,6 +1,6 @@
 [package]
 name = "yntra-vault-core"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 description = "Yntra Vault - Core cryptographic engine"
 license = "MIT"
@@ -45,6 +45,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 url = "2"
+semver = "1"
+tempfile = "3"
 
 # HTTP client for HIBP breach checking
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
@@ -90,6 +92,7 @@ security-framework = "3"
 libc = "0.2"
 
 [dev-dependencies]
+rpassword = "7"
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }

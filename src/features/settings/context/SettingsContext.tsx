@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AppSettings } from '@/types';
 import { DEFAULT_KEYBINDS } from '@/lib/keybinds';
 import { isTauri, getBackend } from '@/lib/backend';
@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   minimizeToTray: true,
   launchOnStartup: false,
   disableSkeletonDelays: false,
-  autoBreachCheck: true,
+  autoBreachCheck: false,
   showBreachInList: true,
   autotypeCharDelayMs: 15,
   autotypeFieldDelayMs: 300,
@@ -39,17 +39,21 @@ export const DEFAULT_SETTINGS: AppSettings = {
   p2pAutoSyncWifi: false,
   p2pAutoSyncIntervalMinutes: 5,
   externalFaviconsEnabled: true,
+  autoCheckUpdates: false,
   operationMode: 'standard',
 };
 
 export interface SettingsContextType {
   settings: AppSettings;
   updateSettings: (partial: Partial<AppSettings>) => void;
+  externalFaviconsReady: boolean;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
+  const [externalFaviconsReady, setExternalFaviconsReady] = useState(false);
+  const faviconSync = useRef(Promise.resolve());
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('yntra-vault-settings');
@@ -71,6 +75,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   });
 
   const updateSettings = useCallback((partial: Partial<AppSettings>) => {
+    if (partial.externalFaviconsEnabled !== undefined && partial.externalFaviconsEnabled !== settings.externalFaviconsEnabled) {
+      setExternalFaviconsReady(false);
+    }
     setSettings((prev) => {
       const next = { ...prev, ...partial };
       try {
@@ -80,7 +87,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-  }, []);
+  }, [settings.externalFaviconsEnabled]);
 
   // Sync minimizeToTray setting to backend
   useEffect(() => {
@@ -128,27 +135,19 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   // Sync externalFaviconsEnabled setting to backend and notify UI cache
   useEffect(() => {
-    const isEnabled = settings.externalFaviconsEnabled !== false;
-    if (typeof window !== 'undefined') {
-      if (isEnabled) {
-        window.dispatchEvent(new CustomEvent('yntra-favicons-reset'));
-      } else {
-        window.dispatchEvent(new CustomEvent('yntra-favicons-cleared'));
+    const isEnabled = settings.externalFaviconsEnabled === true;
+    let cancelled = false;
+    if (!isEnabled) window.dispatchEvent(new CustomEvent('yntra-favicons-cleared'));
+    // Serialize toggles and wait for the native gate before any icon request.
+    faviconSync.current = faviconSync.current.catch(() => {}).then(async () => {
+      if (cancelled) return;
+      if (isTauri()) await (await getBackend()).setExternalFaviconsEnabled(isEnabled);
+      if (!cancelled) {
+        setExternalFaviconsReady(isEnabled);
+        if (isEnabled) window.dispatchEvent(new CustomEvent('yntra-favicons-reset'));
       }
-    }
-    if (isTauri()) {
-      getBackend().then((b) => {
-        b.setExternalFaviconsEnabled(isEnabled)
-          .then(() => {
-            if (isEnabled && typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('yntra-favicons-reset'));
-            }
-          })
-          .catch((err) => {
-            console.error('Failed to sync externalFaviconsEnabled setting:', err);
-          });
-      }).catch(() => {});
-    }
+    }).catch(err => console.error('Failed to sync externalFaviconsEnabled setting:', err));
+    return () => { cancelled = true; };
   }, [settings.externalFaviconsEnabled]);
 
   // Apply font size & density globally to document root
@@ -161,7 +160,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [settings.fontSize, settings.density]);
 
-  const value = useMemo(() => ({ settings, updateSettings }), [settings, updateSettings]);
+  const value = useMemo(() => ({ settings, updateSettings, externalFaviconsReady }), [settings, updateSettings, externalFaviconsReady]);
 
   return (
     <SettingsContext.Provider value={value}>

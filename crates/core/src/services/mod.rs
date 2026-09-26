@@ -5,3 +5,4 @@ pub mod autofill;
 pub mod sync;
 pub mod autostart;
 pub mod favicon;
+pub mod updater;

@@ -1,5 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from '@/contexts/LanguageContext';
+import { smartLoginResultView } from '../smartLoginResult';
 import {
   Zap, X, Loader2, CheckCircle2, AlertTriangle,
   XCircle, MonitorX, ChevronRight, Copy, Check,
@@ -42,6 +44,7 @@ export default function SmartLoginModal({
   dontAskAgain, onDontAskAgainChange,
   onConfirmClose, onCancel,
 }: SmartLoginModalProps) {
+  const { t } = useTranslation();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -53,11 +56,10 @@ export default function SmartLoginModal({
     }
   }, [events]);
 
-  // Result analysis
-  const isSuccess = result && typeof result === 'object' && 'Success' in (result as Record<string, unknown>);
-  const isCaptcha = result === 'RequiresCaptcha';
-  const isMfa = result && typeof result === 'object' && 'RequiresMfa' in (result as Record<string, unknown>);
-  const isCancelled = result === 'Cancelled';
+  const resultView = smartLoginResultView(error ? { BrowserError: error } : result);
+  const latestState = events.at(-1)?.state;
+  const waitingFor = latestState && typeof latestState === 'object' && 'RequiresManualAction' in latestState
+    ? latestState.RequiresManualAction : null;
 
   const handleCopyLog = async () => {
     const text = events.map(e => e.message).join('\n');
@@ -234,6 +236,11 @@ export default function SmartLoginModal({
             {/* ───── Phase: Preparing / Running ───── */}
             {(phase === 'preparing' || phase === 'running') && (
               <div className="px-4 py-3 bg-[var(--bg-elevated)]">
+                {(waitingFor === 'Captcha' || waitingFor === 'TwoFactorAuth') && (
+                  <p role="status" className="mb-3 text-[12px] text-[var(--text-primary)]">
+                    {t(waitingFor === 'Captcha' ? 'smart_login.result_captcha' : 'smart_login.result_mfa')}
+                  </p>
+                )}
                 <div
                   ref={scrollRef}
                   className="max-h-[260px] overflow-y-auto scrollbar-thin"
@@ -271,43 +278,14 @@ export default function SmartLoginModal({
 
                 {/* Result */}
                 <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)]">
-                  {isSuccess ? (
-                    <>
-                      <CheckCircle2 size={14} className="text-[var(--text-primary)] shrink-0 mt-[1px]" />
-                      <span className="text-[12px] text-[var(--text-primary)] font-medium select-text">Login successful</span>
-                    </>
-                  ) : isCaptcha ? (
-                    <>
-                      <AlertTriangle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
-                      <div>
-                        <p className="text-[12px] text-[var(--text-primary)] font-medium">CAPTCHA required</p>
-                        <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 select-text">Complete it in the browser window.</p>
-                      </div>
-                    </>
-                  ) : isMfa ? (
-                    <>
-                      <AlertTriangle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
-                      <div>
-                        <p className="text-[12px] text-[var(--text-primary)] font-medium">Two-factor authentication</p>
-                        <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 select-text">Complete 2FA in the browser window.</p>
-                      </div>
-                    </>
-                  ) : isCancelled ? (
-                    <>
-                      <XCircle size={14} className="text-[var(--text-tertiary)] shrink-0 mt-[1px]" />
-                      <span className="text-[12px] text-[var(--text-tertiary)] select-text">Cancelled</span>
-                    </>
+                  {resultView.tone === 'success' ? (
+                    <CheckCircle2 size={14} className="text-[var(--text-primary)] shrink-0 mt-[1px]" />
+                  ) : resultView.tone === 'error' ? (
+                    <XCircle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
                   ) : (
-                    <>
-                      <XCircle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
-                      <div className="min-w-0">
-                        <p className="text-[12px] text-[var(--text-primary)] font-medium">Login failed</p>
-                        {error && (
-                          <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 break-words select-text">{error}</p>
-                        )}
-                      </div>
-                    </>
+                    <AlertTriangle size={14} className="text-[var(--text-secondary)] shrink-0 mt-[1px]" />
                   )}
+                  <span className="text-[12px] text-[var(--text-primary)] font-medium select-text">{t(resultView.key)}</span>
                 </div>
 
                 <div className="flex justify-end mt-3 pt-2.5 border-t border-[var(--border)]">

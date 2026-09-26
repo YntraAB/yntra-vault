@@ -1,3 +1,4 @@
+import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
  * CreateVaultModal — Secure vault creation flow
  * 
@@ -92,8 +93,9 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   const handleBrowse = useCallback(async () => {
     if (!isTauri()) return;
     try {
-      const selected = await saveFileDialog({
-        title: 'Choose vault location',
+      const backend = await getBackend();
+      const selected = await backend.getMobileVaultPath(name || 'vault') ?? await saveFileDialog({
+        title: t('create_vault.location'),
         defaultPath: `${name || 'vault'}.vdb`,
         filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
       });
@@ -104,14 +106,14 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     } catch (e) {
       console.error('Browse failed:', e);
     }
-  }, [name]);
+  }, [name, t]);
 
   const handleBrowseKeyFile = useCallback(async () => {
     if (!isTauri()) return;
     try {
       if (generateNewKeyFile) {
         const selected = await saveFileDialog({
-          title: 'Save New Key File',
+          title: t('create_vault.gen_new_keyfile'),
           defaultPath: `${name || 'vault'}.key`,
           filters: [{ name: 'Key File (*.key)', extensions: ['key'] }],
         });
@@ -120,7 +122,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
         }
       } else {
         const selected = await openFileDialog({
-          title: 'Select Existing Key File',
+          title: t('create_vault.use_existing_keyfile'),
           multiple: false,
           filters: [{ name: 'Key File (*.key, *.*)', extensions: ['key', '*'] }],
         });
@@ -131,7 +133,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     } catch (e) {
       console.error('Key file browse failed:', e);
     }
-  }, [name, generateNewKeyFile]);
+  }, [name, generateNewKeyFile, t]);
 
   const validate = (checkPath: string, passLength: number): string | null => {
     if (name.trim().length < 2) return t('create_vault.err_name_short') || 'Vault name must be at least 2 characters';
@@ -148,15 +150,27 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     setError(null);
 
     let targetPath = path.trim();
-    const secretBytes = passInputRef.current?.getSecretBytes();
-    const passBytes = secretBytes && secretBytes.length > 0 ? secretBytes : new TextEncoder().encode(password);
+
+    if (isTauri()) {
+      try {
+        const backend = await getBackend();
+        const mobilePath = await backend.getMobileVaultPath(name || 'vault');
+        if (mobilePath) {
+          targetPath = mobilePath;
+          setPath(mobilePath);
+        }
+      } catch (err) {
+        setError(String(err));
+        return;
+      }
+    }
 
     // If in Tauri and the path is relative or not explicitly modified by the user,
     // force the browse dialog to open so they choose a real location.
-    if (isTauri() && (!pathModified || !targetPath || (!targetPath.includes('/') && !targetPath.includes('\\')))) {
+    if (isTauri() && (!targetPath || (!targetPath.includes('/') && !targetPath.includes('\\')))) {
       try {
         const selected = await saveFileDialog({
-          title: 'Choose vault location',
+          title: t('create_vault.location'),
           defaultPath: `${name || 'vault'}.vdb`,
           filters: [{ name: 'Yntra Vault', extensions: ['vdb', 'db'] }],
         });
@@ -174,12 +188,14 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
       }
     }
 
-    const validationError = validate(targetPath, passBytes.length);
+    const validationError = validate(targetPath, password.length);
     if (validationError) {
       setError(validationError);
       return;
     }
 
+    const secretBytes = passInputRef.current?.getSecretBytes();
+    const passBytes = secretBytes && secretBytes.length > 0 ? secretBytes : new TextEncoder().encode(password);
     setLoading(true);
     try {
       let info;
@@ -280,7 +296,8 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                 <input
                   ref={nameRef}
                   type="text"
-                  value={name}
+                  maxLength={MAX_DISPLAY_NAME_LENGTH}
+                    value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t('create_vault.name_placeholder')}
                   className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)]"

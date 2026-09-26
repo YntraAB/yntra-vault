@@ -178,19 +178,11 @@ Vault recovery supports splitting a master password hash into 3 shares where any
 
 ---
 
-## 7. Dual-Repository Release Workflow
+## 7. Release Source and Packages
 
-```
-yntra-vault-private ──── publish-public.ps1 ────► yntra-vault (public)
-```
-
-### Private Repository (`yntra-vault-private`)
-- Full source + `.agents/` + dev docs + git history
-- Commit normally with standard git
-
-### Public Repository (`yntra-vault`)
-- Clean source only — no `.agents/`, no dev `.md` files, no build artifacts
-- All updates via sync script `publish-public.ps1`
+Each release tag identifies its source revision. Download official packages from
+the repository's GitHub Releases page; the published SHA256SUMS file lists package
+checksums. Build instructions are in [Reproducible Builds](REPRODUCIBLE_BUILDS.md).
 
 ---
 

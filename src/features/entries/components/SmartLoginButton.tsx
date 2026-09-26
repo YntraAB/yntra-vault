@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Zap } from 'lucide-react';
 import { getBackend, isTauri } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
@@ -29,13 +29,19 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
   const [error, setError] = useState<string | null>(null);
   const [browserName, setBrowserName] = useState('');
   const [browserNeedsClose, setBrowserNeedsClose] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [, setBrowserIndex] = useState(0);
   const [dontAskAgain, setDontAskAgain] = useState(false);
+  const attempt = useRef(0);
+  const running = useRef(false);
+  const openRequested = useRef(false);
+  const subscriptions = useRef<Array<() => void>>([]);
+  const clearSubscriptions = useCallback(() => {
+    subscriptions.current.forEach(stop => stop());
+    subscriptions.current = [];
+  }, []);
 
   const runPrecheck = useCallback(async () => {
     const backend = await getBackend();
-    const precheck = await backend.smartLoginPrecheck();
+    const precheck = await backend.smartLoginPrecheck(entryId);
 
     if (precheck.error || precheck.browsers.length === 0) {
       throw new Error(precheck.error || 'No Chromium browser found');
@@ -44,20 +50,38 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
     const idx = precheck.recommended_index ?? 0;
     const browser = precheck.browsers[idx];
     setBrowserName(browser.name);
-    setBrowserNeedsClose(browser.is_running);
-    setBrowserIndex(idx);
+    setBrowserNeedsClose(precheck.needs_close);
 
-    return { browser, idx };
-  }, []);
+    return { browser, idx, needsClose: precheck.needs_close };
+  }, [entryId]);
 
   const executeLogin = useCallback(async () => {
+    if (!openRequested.current || running.current) return;
+    const currentAttempt = ++attempt.current;
+    running.current = true;
+    clearSubscriptions();
     setPhase('preparing');
 
     try {
       const backend = await getBackend();
 
+      // Install listeners before starting: fast existing-session results must not be lost.
+      const stopProgress = await backend.onSmartLoginProgress((event: SmartLoginEvent) => {
+        if (attempt.current === currentAttempt) setEvents(prev => [...prev.slice(-199), event]);
+      });
+      if (attempt.current !== currentAttempt) { stopProgress(); return; }
+      subscriptions.current.push(stopProgress);
+      const stopResult = await backend.onSmartLoginResult((res: unknown) => {
+        if (attempt.current !== currentAttempt) return;
+        running.current = false;
+        setResult(res);
+        setPhase('done');
+        clearSubscriptions();
+      });
+      if (attempt.current !== currentAttempt) { stopResult(); return; }
+      subscriptions.current.push(stopResult);
       // Re-check in case state changed
-      const precheck = await backend.smartLoginPrecheck();
+      const precheck = await backend.smartLoginPrecheck(entryId);
       if (precheck.error || precheck.browsers.length === 0) {
         throw new Error(precheck.error || 'No Chromium browser found');
       }
@@ -74,14 +98,20 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
         message: `Connecting to ${browser.name}...`,
       }]);
 
+      if (attempt.current !== currentAttempt) return;
       await backend.smartLoginStart(entryId, idx);
     } catch (err) {
+      if (attempt.current !== currentAttempt) return;
+      running.current = false;
+      clearSubscriptions();
       setError(String(err));
       setPhase('done');
     }
-  }, [entryId]);
+  }, [entryId, clearSubscriptions]);
 
   const handleOpen = useCallback(async () => {
+    openRequested.current = true;
+    if (running.current) { setIsModalOpen(true); return; }
     setEvents([]);
     setResult(null);
     setError(null);
@@ -89,11 +119,11 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
     setDontAskAgain(false);
 
     try {
-      const { browser } = await runPrecheck();
+      const { needsClose } = await runPrecheck();
 
       // If browser needs closing and user hasn't opted to skip warning
       const skipWarning = localStorage.getItem(STORAGE_KEY) === 'true';
-      if (browser.is_running && !skipWarning) {
+      if (needsClose && !skipWarning) {
         setPhase('confirm');
         return;
       }
@@ -114,39 +144,26 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
   }, [dontAskAgain, executeLogin]);
 
   const handleCancel = useCallback(async () => {
-    try {
-      const backend = await getBackend();
-      await backend.smartLoginCancel();
-    } catch { /* ignore */ }
+    openRequested.current = false;
+    attempt.current += 1;
+    clearSubscriptions();
+    const wasRunning = running.current;
+    running.current = false;
     setIsModalOpen(false);
-  }, []);
+    if (wasRunning) {
+      try { await (await getBackend()).smartLoginCancel(); } catch { /* best effort */ }
+    }
+  }, [clearSubscriptions]);
 
-  useEffect(() => {
-    if (!isModalOpen) return;
-
-    let unlisten: (() => void) | undefined;
-    let unlistenResult: (() => void) | undefined;
-
-    const setup = async () => {
-      try {
-        const backend = await getBackend();
-        unlisten = await backend.onSmartLoginProgress((event: SmartLoginEvent) => {
-          setEvents(prev => [...prev, event]);
-        });
-        unlistenResult = await backend.onSmartLoginResult((res: unknown) => {
-          setResult(res);
-          setPhase('done');
-        });
-      } catch { /* not in Tauri */ }
-    };
-
-    setup();
-    return () => {
-      unlisten?.();
-      unlistenResult?.();
-    };
-  }, [isModalOpen]);
-
+  useEffect(() => () => {
+    attempt.current += 1;
+    openRequested.current = false;
+    clearSubscriptions();
+    if (running.current) {
+      running.current = false;
+      void getBackend().then(backend => backend.smartLoginCancel()).catch(() => {});
+    }
+  }, [clearSubscriptions]);
   if (!isTauri()) return null;
 
   if (!hasUrl) {
@@ -181,7 +198,7 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
 
       <SmartLoginModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={handleCancel}
         entryTitle={entryTitle}
         phase={phase}
         events={events}

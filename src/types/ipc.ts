@@ -107,6 +107,18 @@ export interface EntryPreview {
   attachment_count?: number;
 }
 
+export interface CheckUpdateResult {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_notes?: string | null;
+  pub_date?: string | null;
+  download_url?: string | null;
+  sha256?: string | null;
+  signature?: string | null;
+  target_platform: string;
+}
+
 export interface DecryptedEntry {
   id: string;
   title: string;
@@ -419,6 +431,10 @@ export interface IpcCommands {
   create_vault: {
     args: { name: string; password: string; path: string; keyFilePath?: string | null };
     return: VaultInfo;
+  };
+  get_mobile_vault_path: {
+    args: { name: string };
+    return: string | null;
   };
   open_vault: {
     args: { path: string; password: string; keyFilePath?: string | null };
@@ -919,7 +935,7 @@ export interface IpcCommands {
     return: void;
   };
   smart_login_precheck: {
-    args: Record<string, never> | undefined;
+    args: { entryId?: string } | undefined;
     return: import('@/lib/backend').SmartLoginPreCheckResult;
   };
   smart_login_close_browser: {
@@ -933,6 +949,22 @@ export interface IpcCommands {
   smart_login_cancel: {
     args: Record<string, never> | undefined;
     return: void;
+  };
+  check_app_update: {
+    args: { customEndpoint?: string | null } | undefined;
+    return: CheckUpdateResult;
+  };
+  download_and_install_apk: {
+    args: { apkUrl: string; expectedSha256?: string | null };
+    return: string;
+  };
+  install_portable_update: {
+    args: { url: string; expectedSha256?: string | null };
+    return: void;
+  };
+  get_app_version: {
+    args: Record<string, never> | undefined;
+    return: string;
   };
 }
 

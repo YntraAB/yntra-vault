@@ -55,6 +55,7 @@ const PROBE_PATHS: &[&str] = &[
 /// These bypass the main page (which may show a dashboard when logged in)
 /// and go directly to the login/add-account flow.
 const SERVICE_LOGIN_URLS: &[(&str, &str)] = &[
+    ("github.com", "https://github.com/login"),
     ("gmail.com", "https://accounts.google.com/AddSession?service=mail"),
     ("google.com", "https://accounts.google.com/AddSession"),
     ("youtube.com", "https://accounts.google.com/AddSession?service=youtube"),
@@ -108,14 +109,14 @@ pub fn has_login_form(snapshot: &PageSnapshot) -> bool {
     let is_simple_page = snapshot.buttons.len() <= 10 && snapshot.links.len() <= 20;
 
     // Direct: password field on a simple page
-    let has_password = snapshot.inputs.iter().any(|i| i.input_type == "password");
+    let has_password = snapshot.inputs.iter().any(|i| i.is_visible && !i.is_readonly && i.input_type == "password");
     if has_password && is_simple_page {
         return true;
     }
 
     // Check for identifier inputs (email, tel, or text with user/email hints)
     let has_email_or_tel = snapshot.inputs.iter().any(|i| {
-        matches!(i.input_type.as_str(), "email" | "tel")
+        i.is_visible && !i.is_readonly && matches!(i.input_type.as_str(), "email" | "tel")
     });
 
     let has_identifier = snapshot.inputs.iter().any(is_likely_identifier_input);
@@ -191,7 +192,7 @@ pub fn has_login_form(snapshot: &PageSnapshot) -> bool {
 /// Detect if the user is already logged into a dashboard/inbox
 /// (no login form, no login links, but has user-specific content).
 pub fn is_likely_logged_in(snapshot: &PageSnapshot) -> bool {
-    let has_password = snapshot.inputs.iter().any(|i| i.input_type == "password");
+    let has_password = snapshot.inputs.iter().any(|i| i.is_visible && !i.is_readonly && i.input_type == "password");
     if has_password {
         return false;
     }
@@ -212,6 +213,7 @@ pub fn is_likely_logged_in(snapshot: &PageSnapshot) -> bool {
 }
 
 fn is_likely_identifier_input(input: &InputInfo) -> bool {
+    if !input.is_visible || input.is_readonly { return false; }
     let t = input.input_type.as_str();
     if matches!(t, "email" | "tel") {
         return true;
@@ -251,6 +253,7 @@ pub fn find_login_links(
     let mut candidates: Vec<ScoredLoginLink> = Vec::new();
 
     for link in &snapshot.links {
+        if !link.is_visible || (!link.href.is_empty() && !login_target_allowed(&snapshot.url, &link.href)) { continue; }
         let score = score_login_link(link);
         if score > 0.25 {
             candidates.push(ScoredLoginLink {
@@ -261,6 +264,7 @@ pub fn find_login_links(
     }
 
     for button in &snapshot.buttons {
+        if !button.is_visible { continue; }
         let score = score_login_button_as_nav(button);
         if score > 0.25 {
             candidates.push(ScoredLoginLink {
@@ -458,6 +462,19 @@ pub fn get_probe_urls(base_url: &str) -> Vec<String> {
     urls
 }
 
+/// Content platforms own arbitrary user/repository paths. Do not infer their
+/// authentication routes from a repository name or its "login" link text.
+pub fn login_target_allowed(entry_url: &str, target_url: &str) -> bool {
+    if !is_allowed_auth_domain(entry_url, target_url) { return false; }
+    let github = reqwest::Url::parse(&normalize_url(entry_url)).is_ok_and(|u| matches!(u.host_str(), Some("github.com" | "www.github.com")));
+    if !github { return true; }
+    reqwest::Url::parse(target_url).is_ok_and(|u| {
+        u.scheme() == "https" && u.host_str() == Some("github.com")
+            && u.username().is_empty() && u.password().is_none()
+            && (matches!(u.path(), "/login" | "/session") || u.path().starts_with("/login/") || u.path().starts_with("/sessions/"))
+    })
+}
+
 /// Extract the domain from a URL for comparison.
 pub fn extract_domain(url: &str) -> Option<String> {
     let url = url.trim();
@@ -560,6 +577,15 @@ pub fn domains_match(url_a: &str, url_b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_discovery_never_probes_user_or_repository_paths() {
+        assert_eq!(get_probe_urls("https://github.com/demo/project"), vec!["https://github.com/login"]);
+        assert!(login_target_allowed("https://github.com", "https://github.com/login?return_to=%2F"));
+        for target in ["https://github.com/signin", "https://github.com/auth/login", "https://github.com/demo/login", "https://gist.github.com/login", "https://github.com.evil.test/login", "http://github.com/login", "https://user@github.com/login"] {
+            assert!(!login_target_allowed("https://github.com", target), "{target}");
+        }
+    }
 
     #[test]
     fn test_extract_domain() {

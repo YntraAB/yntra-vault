@@ -331,6 +331,10 @@ impl VaultManager {
 
     /// Add a new entry to the vault.
     pub fn add_entry(&mut self, new: NewEntry) -> crate::Result<Uuid> {
+        crate::vault::validation::validate_display_name(&new.title)?;
+        for field in &new.custom_fields {
+            crate::vault::validation::validate_display_name(&field.name)?;
+        }
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
 
         let now = Utc::now();
@@ -453,6 +457,18 @@ impl VaultManager {
                 .ok_or_else(|| VaultError::EntryNotFound(id.to_string()))?;
 
             // If password changed, save old one to history and reset breach status
+            if let Some(title) = &update.title {
+                if title != &entry.title {
+                    crate::vault::validation::validate_display_name(title)?;
+                }
+            }
+            if let Some(fields) = &update.custom_fields {
+                for field in fields {
+                    if !entry.custom_fields.iter().any(|old| old.id == field.id && old.name == field.name) {
+                        crate::vault::validation::validate_display_name(&field.name)?;
+                    }
+                }
+            }
             if let Some(ref new_password) = update.password {
                 let old_password_bytes = Self::decrypt_entry_field(
                     &entry.encrypted_password,
@@ -460,10 +476,7 @@ impl VaultManager {
                     &id,
                     FieldScope::Password,
                 )?;
-                let old_password = String::from_utf8(old_password_bytes.to_vec())
-                    .map_err(|e| crate::error::VaultError::DecryptionError(e.to_string()))?;
-
-                if &old_password != new_password {
+                if old_password_bytes.as_slice() != new_password.as_bytes() {
                     content_changed = true;
                     // Save current password to history before overwriting (encrypted under scope "history")
                     let history_encrypted = Self::encrypt_entry_field(
@@ -640,7 +653,7 @@ impl VaultManager {
                 }
 
             if content_changed {
-                entry.updated_at = now;
+                entry.updated_at = now.max(entry.updated_at + chrono::Duration::nanoseconds(1));
             }
         }
 

@@ -33,7 +33,7 @@ export function formatShortcutKeys(shortcut: KeybindShortcut | undefined): strin
   const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
   const keys: string[] = [];
 
-  if (shortcut.ctrlKey) keys.push(isMac ? 'Ctrl' : 'Ctrl');
+  if (shortcut.ctrlKey) keys.push(isMac ? 'Cmd' : 'Ctrl');
   if (shortcut.metaKey) keys.push(isMac ? 'Cmd' : 'Win');
   if (shortcut.altKey) keys.push(isMac ? 'Option' : 'Alt');
   if (shortcut.shiftKey) keys.push('Shift');
@@ -79,7 +79,9 @@ export function matchesShortcut(e: KeyboardEvent, shortcut: KeybindShortcut | un
 
   // Allow Ctrl or Cmd for cross-platform convenience
   const isControlPressed = Boolean(e.ctrlKey || e.metaKey);
-  const hasControl = ctrlMatch ? isControlPressed : !e.ctrlKey && !e.metaKey;
+  const hasControl = shortcut.metaKey
+    ? Boolean(e.metaKey) && Boolean(e.ctrlKey) === ctrlMatch
+    : ctrlMatch ? isControlPressed : !e.ctrlKey && !e.metaKey;
 
   const hasAlt = Boolean(e.altKey) === altMatch;
   const hasShift = Boolean(e.shiftKey) === shiftMatch;

@@ -65,6 +65,7 @@ interface QueueItem {
 
 const requestQueue: QueueItem[] = [];
 let activeFetches = 0;
+let cacheGeneration = 0;
 
 function processQueue() {
   while (activeFetches < MAX_CONCURRENT_FETCHES && requestQueue.length > 0) {
@@ -94,13 +95,15 @@ function enqueueFaviconFetch(
   const existing = inFlightRequests.get(domain);
   if (existing) return existing;
 
+  const generation = cacheGeneration;
   const promise = new Promise<string | null>((resolve) => {
     requestQueue.push({
       domain,
       backend,
       resolve: (res) => {
+        if (generation !== cacheGeneration) { resolve(null); return; }
         inFlightRequests.delete(domain);
-        if (res && res.startsWith('data:')) {
+        if (res && res.startsWith('data:image/')) {
           faviconCache.set(domain, res);
           failedCooldowns.delete(domain);
           schedulePersist();
@@ -108,7 +111,7 @@ function enqueueFaviconFetch(
         } else {
           failedCooldowns.set(domain, Date.now() + COOLDOWN_MS);
         }
-        resolve(res);
+        resolve(res?.startsWith('data:image/') ? res : null);
       },
     });
     processQueue();
@@ -119,12 +122,17 @@ function enqueueFaviconFetch(
 }
 
 export function clearFaviconCache() {
+  cacheGeneration++;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  inFlightRequests.clear();
+  for (const item of requestQueue.splice(0)) item.resolve(null);
   faviconCache.clear();
   failedCooldowns.clear();
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
-    } catch {}
+    } catch { /* Storage may be unavailable. */ }
   }
   updateListeners.forEach((fn) => fn());
 }
@@ -160,73 +168,46 @@ export function Favicon({
   textClass = 'text-[11px]',
 }: FaviconProps) {
   const { backend } = useBackend();
-  const { settings } = useSettings();
-  const isEnabled = settings.externalFaviconsEnabled !== false;
+  const { settings, externalFaviconsReady } = useSettings();
+  const isEnabled = settings.externalFaviconsEnabled === true && externalFaviconsReady;
   const domain = extractDomain(url, title);
 
-  const [imgUrl, setImgUrl] = useState<string | null>(() => {
-    if (!domain || !isEnabled) return null;
-    return faviconCache.get(domain) ?? null;
-  });
+  const [image, setImage] = useState<{ domain: string; url: string } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const imgUrl = isEnabled && image?.domain === domain ? image.url : null;
 
   useEffect(() => {
-    if (!domain || !isEnabled) {
-      setImgUrl(null);
-      return;
-    }
-
-    const cached = faviconCache.get(domain);
-    if (cached) {
-      setImgUrl(cached);
-      return;
-    }
-
-    const cooldownUntil = failedCooldowns.get(domain);
-    if (cooldownUntil && Date.now() < cooldownUntil) {
-      setImgUrl(null);
-      return;
-    }
-
-    if (!backend) return;
-
-    let isMounted = true;
-    enqueueFaviconFetch(domain, backend).then((res) => {
-      if (isMounted) {
-        setImgUrl(res);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [domain, backend, isEnabled]);
-
-  useEffect(() => {
-    if (!domain || !isEnabled) return;
-    let isMounted = true;
-    const onUpdate = () => {
-      if (!isMounted) return;
-      const cached = faviconCache.get(domain) ?? null;
+    if (!domain || !isEnabled || !backend) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      clearTimeout(timer);
+      const cached = faviconCache.get(domain);
       if (cached) {
-        setImgUrl(cached);
-      } else if (backend) {
-        const cooldownUntil = failedCooldowns.get(domain);
-        if (!cooldownUntil || Date.now() >= cooldownUntil) {
-          enqueueFaviconFetch(domain, backend).then((res) => {
-            if (isMounted) {
-              setImgUrl(res);
-            }
-          });
-        }
+        setImage({ domain, url: cached });
+        return;
       }
+      setImage(null);
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      const remaining = (failedCooldowns.get(domain) ?? 0) - Date.now();
+      if (remaining > 0) {
+        timer = setTimeout(load, remaining + 1);
+        return;
+      }
+      enqueueFaviconFetch(domain, backend).then(res => {
+        if (cancelled) return;
+        if (res) setImage({ domain, url: res });
+        else timer = setTimeout(load, COOLDOWN_MS);
+      });
     };
-    updateListeners.add(onUpdate);
+    updateListeners.add(load);
+    load();
     return () => {
-      isMounted = false;
-      updateListeners.delete(onUpdate);
+      cancelled = true;
+      clearTimeout(timer);
+      updateListeners.delete(load);
     };
-  }, [domain, backend, isEnabled]);
-
+  }, [domain, backend, isEnabled, retry]);
   if (imgUrl) {
     return (
       <div
@@ -241,7 +222,8 @@ export function Favicon({
               failedCooldowns.set(domain, Date.now() + COOLDOWN_MS);
               schedulePersist();
             }
-            setImgUrl(null);
+            setImage(null);
+            setRetry(value => value + 1);
           }}
           className="h-full w-full object-contain p-0.5"
           loading="lazy"

@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::env;
 use std::io::Write;
+use std::time::Duration;
 use clap::{Parser, Subcommand, Args, CommandFactory};
 use clap_complete::{generate, Shell};
 use colored::*;
@@ -16,6 +17,7 @@ use rpassword::prompt_password;
 use zeroize::Zeroizing;
 use uuid::Uuid;
 use sha2::{Sha256, Digest};
+use serde::{Deserialize, Serialize};
 
 use yntra_vault_core::{
     VaultError, Result,
@@ -63,7 +65,7 @@ use keychain::clear_session_token;
 #[command(
     name = "yntra",
     author = "Yntra Vault Team",
-    version = "0.1.0",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Yntra Vault — High-Security Offline-First Password Manager CLI",
     long_about = None
 )]
@@ -144,6 +146,21 @@ enum Commands {
     ChangePassword(ChangePasswordArgs),
     /// Manage biometric unlock options
     Biometric(BiometricArgs),
+    /// Check for updates and upgrade yntra CLI in-place
+    Update(UpdateArgs),
+}
+
+#[derive(Args)]
+struct UpdateArgs {
+    /// Only check if an update is available without installing
+    #[arg(short, long)]
+    check: bool,
+    /// Automatically proceed with installation without interactive prompt
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// Custom update manifest endpoint URL
+    #[arg(long, hide = true)]
+    endpoint: Option<String>,
 }
 
 #[derive(Args)]
@@ -544,6 +561,12 @@ async fn run(cli: Cli) -> Result<()> {
         }
     };
 
+    cleanup_old_binary_if_present();
+
+    if !matches!(command, Commands::Update(_) | Commands::Completions(_) | Commands::NativeHost(_) | Commands::GitCredential(_)) {
+        maybe_print_update_tip().await;
+    }
+
     match command {
         Commands::Unlock => handle_unlock(&vault_path, cli.password, cli.keyfile).await,
         Commands::Lock => handle_lock().await,
@@ -572,6 +595,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Autotype(args) => handle_autotype(&vault_path, &args, cli.password, cli.keyfile.as_deref()).await,
         Commands::ChangePassword(args) => handle_change_password(&vault_path, &args, cli.password, cli.keyfile.as_deref()),
         Commands::Biometric(args) => handle_biometric(&vault_path, &args, cli.password, cli.keyfile.as_deref()),
+        Commands::Update(args) => handle_update(args, cli.json).await,
     }
 }
 
@@ -1452,4 +1476,224 @@ fn handle_biometric(
         }
     }
     Ok(())
+}
+
+async fn handle_update(args: UpdateArgs, json: bool) -> Result<()> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let target_platform = if cfg!(windows) {
+        "windows-cli"
+    } else {
+        "linux-cli"
+    };
+
+    if !json {
+        println!("{}", "Checking for Yntra Vault updates...".cyan());
+    }
+
+    let check_result = yntra_vault_core::services::updater::check_for_updates(
+        current_version,
+        target_platform,
+        args.endpoint.as_deref(),
+    )
+    .await?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&check_result).map_err(VaultError::JsonError)?
+        );
+        return Ok(());
+    }
+
+    if !check_result.has_update {
+        println!(
+            "{} Yntra Vault CLI is up to date (v{}).",
+            "✓".green().bold(),
+            current_version
+        );
+        return Ok(());
+    }
+
+    println!(
+        "\n{} Newer version available: {} (current: v{})",
+        "★".yellow().bold(),
+        check_result.latest_version.bold().green(),
+        current_version
+    );
+
+    if let Some(ref notes) = check_result.release_notes {
+        println!("\n{}", "Release Notes:".bold().underline());
+        let count = notes.lines().count();
+        for line in notes.lines().take(15) {
+            println!("  {}", line);
+        }
+        if count > 15 {
+            println!("  ... (see GitHub release for full notes)");
+        }
+    }
+
+    if args.check {
+        return Ok(());
+    }
+
+    let download_url = match check_result.download_url {
+        Some(url) => url,
+        None => {
+            eprintln!(
+                "{}",
+                "No prebuilt CLI binary available for this platform in latest release.".red()
+            );
+            return Ok(());
+        }
+    };
+
+    if !args.yes {
+        print!(
+            "\nDo you want to update to v{} now? [y/N]: ",
+            check_result.latest_version
+        );
+        std::io::stdout().flush().map_err(VaultError::IoError)?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).map_err(VaultError::IoError)?;
+        if !input.trim().eq_ignore_ascii_case("y") && !input.trim().eq_ignore_ascii_case("yes") {
+            println!("Update cancelled.");
+            return Ok(());
+        }
+    }
+
+    println!("Downloading {}...", download_url.cyan());
+    let new_bytes = yntra_vault_core::services::updater::download_file(&download_url).await?;
+
+    let expected_sha = match check_result.sha256 {
+        Some(ref s) if !s.trim().is_empty() => s.trim(),
+        _ => {
+            return Err(VaultError::UpdateError(
+                "Update aborted: Mandatory SHA-256 checksum missing from update manifest.".to_string(),
+            ));
+        }
+    };
+
+    print!("Verifying cryptographic integrity (SHA-256)... ");
+    if !yntra_vault_core::services::updater::verify_sha256(&new_bytes, expected_sha) {
+        eprintln!("{}", "FAILED".red().bold());
+        return Err(VaultError::UpdateError(
+            "Downloaded binary SHA-256 hash does not match published manifest!".to_string(),
+        ));
+    }
+    println!("{}", "OK".green().bold());
+
+    print!("Applying update to current binary... ");
+    replace_current_exe(&new_bytes).map_err(VaultError::IoError)?;
+    println!("{}", "DONE".green().bold());
+
+    save_update_cache(&check_result.latest_version, false);
+
+    println!(
+        "\n{} Successfully upgraded yntra CLI to v{}!",
+        "✓".green().bold(),
+        check_result.latest_version.green().bold()
+    );
+
+    Ok(())
+}
+
+fn replace_current_exe(new_bytes: &[u8]) -> std::io::Result<()> {
+    yntra_vault_core::services::updater::replace_executable(&std::env::current_exe()?, new_bytes)
+}
+
+fn cleanup_old_binary_if_present() {
+    if let Ok(current_exe) = std::env::current_exe() {
+        let old_exe = current_exe.with_extension("exe.old");
+        if old_exe.exists() {
+            let _ = std::fs::remove_file(&old_exe);
+        }
+    }
+}
+
+fn get_update_cache_path() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|p| p.join("YntraVault").join("cli_update_cache.json"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+            .map(|p| p.join("yntra").join("update_cache.json"))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CliUpdateCache {
+    last_check_timestamp: u64,
+    latest_version: String,
+    has_update: bool,
+}
+
+fn save_update_cache(latest_version: &str, has_update: bool) {
+    if let Some(path) = get_update_cache_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let cache = CliUpdateCache {
+            last_check_timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            latest_version: latest_version.to_string(),
+            has_update,
+        };
+        if let Ok(serialized) = serde_json::to_string(&cache) {
+            let _ = std::fs::write(path, serialized);
+        }
+    }
+}
+
+async fn maybe_print_update_tip() {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let cache_path = match get_update_cache_path() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    if cache_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&cache_path)
+            && let Ok(cache) = serde_json::from_str::<CliUpdateCache>(&content) {
+            if cache.has_update && yntra_vault_core::services::updater::is_newer_version(current_version, &cache.latest_version) {
+                eprintln!(
+                    "{} Yntra Vault v{} is available. Run '{}' to upgrade.",
+                    "💡 Tip:".yellow().bold(),
+                    cache.latest_version.green(),
+                    "yntra update".cyan()
+                );
+            }
+            if now_secs.saturating_sub(cache.last_check_timestamp) < 86400 {
+                return;
+            }
+        }
+    }
+
+    let target_platform = if cfg!(windows) { "windows-cli" } else { "linux-cli" };
+    if let Ok(Ok(result)) = tokio::time::timeout(
+        Duration::from_secs(3),
+        yntra_vault_core::services::updater::check_for_updates(current_version, target_platform, None),
+    ).await {
+        save_update_cache(&result.latest_version, result.has_update);
+        if result.has_update {
+            eprintln!(
+                "{} Yntra Vault v{} is available. Run '{}' to upgrade.",
+                "💡 Tip:".yellow().bold(),
+                result.latest_version.green(),
+                "yntra update".cyan()
+            );
+        }
+    }
 }

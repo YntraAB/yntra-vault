@@ -13,9 +13,23 @@ use yntra_vault_core::smartlogin::{
 
 use super::AppState;
 
+struct RunningLogin(Arc<std::sync::atomic::AtomicBool>);
+impl Drop for RunningLogin {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+}
+
 #[tauri::command]
-pub async fn smart_login_precheck() -> Result<PreCheckResult, String> {
-    Ok(smartlogin::browser::precheck())
+pub async fn smart_login_precheck(entry_id: Option<String>, state: State<'_, AppState>) -> Result<PreCheckResult, String> {
+    let mut result = smartlogin::browser::precheck();
+    if let Some(entry_id) = entry_id {
+        let vault = state.vault.lock().map_err(|e| e.to_string())?;
+        let manager = vault.as_ref().ok_or("Vault is locked")?;
+        let uuid = Uuid::parse_str(&entry_id).map_err(|e| e.to_string())?;
+        let entry = manager.list_entries().map_err(|e| e.to_string())?.into_iter()
+            .find(|entry| entry.id == uuid).ok_or("Entry not found")?;
+        if smartlogin::engine::uses_native_browser(&entry.url) { result.needs_close = false; }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -34,6 +48,9 @@ pub async fn smart_login_start(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    state.smart_login_running.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| "A Smart Login attempt is already running")?;
+    let running = RunningLogin(Arc::clone(&state.smart_login_running));
     // Discover browsers and pick the selected one
     let browsers = smartlogin::browser::discover_browsers();
     let browser_info = browsers
@@ -53,7 +70,9 @@ pub async fn smart_login_start(
         let mut entry = manager.get_entry(uuid).map_err(|e| e.to_string())?;
 
         let url = entry.url.clone();
-        let ident = if !entry.username.is_empty() {
+        let ident = if smartlogin::engine::uses_native_browser(&entry.url) && !entry.email.is_empty() {
+            entry.email.clone()
+        } else if !entry.username.is_empty() {
             entry.username.clone()
         } else {
             entry.email.clone()
@@ -85,6 +104,7 @@ pub async fn smart_login_start(
     // Spawn the login flow as a background task
     let app_handle = app.clone();
     tokio::spawn(async move {
+        let _running = running;
         let result = engine.execute(&url, identifier, password, totp_secret, &browser_info).await;
         let _ = app_handle.emit("smart-login-result", &result);
     });

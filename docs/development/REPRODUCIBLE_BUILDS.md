@@ -101,7 +101,7 @@ docker run --rm yntra-vault-reproducible
 ```
 
 ### 4.2 GitHub Actions Continuous Integration
-Automated reproducible build verification is configured in [`.github/workflows/reproducible-builds.yml`](file:///c:/Users/hellich/Desktop/yntra-vault-private/.github/workflows/reproducible-builds.yml). Every commit, pull request, and release tag triggers automated Linux containerized and Windows native dual-build attestations.
+Automated reproducible build verification is configured in [`.github/workflows/reproducible-builds.yml`](../../.github/workflows/reproducible-builds.yml). Commits, pull requests and release tags trigger the configured checks. Inspect their results before treating a package as independently reproduced.
 
 ---
 

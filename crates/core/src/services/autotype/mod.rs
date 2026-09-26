@@ -6,6 +6,14 @@
 #[cfg(target_os = "windows")]
 mod sys_windows;
 #[cfg(target_os = "windows")]
+pub(crate) use sys_windows::{foreground_browser_token, send_enter_guarded, type_browser_field};
+#[cfg(target_os = "windows")]
+pub(crate) use sys_windows::verify_browser_submit;
+#[cfg(target_os = "windows")]
+pub(crate) use sys_windows::run_native_google_login;
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) use sys_windows::observe_test_window;
+#[cfg(target_os = "windows")]
 use sys_windows::WindowsAutotypeDriver as PlatformDriver;
 
 #[cfg(any(not(target_os = "windows"), test))]
@@ -86,18 +94,6 @@ pub fn run_smart_autotype_with_delays(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_autotype_stub() {
-        let res = autotype_text("test-typing");
-        assert!(res.is_ok() || res.is_err());
-    }
-
-    #[test]
-    fn test_autotype_with_delay_zero() {
-        let res = autotype_text_with_delay("test", 0, 0);
-        assert!(res.is_ok() || res.is_err());
-    }
 
     #[test]
     fn test_stub_driver() {

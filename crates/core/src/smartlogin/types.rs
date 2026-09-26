@@ -159,8 +159,11 @@ pub enum ManualActionType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LoginResult {
     Success { final_url: String },
+    AlreadySignedIn { final_url: String },
+    DifferentAccount,
     WrongCredentials { error_message: Option<String> },
     RequiresCaptcha,
+    RequiresManualAction,
     RequiresMfa { mfa_type: String },
     AccountLocked { message: String },
     LoginFormNotFound,

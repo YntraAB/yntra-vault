@@ -25,10 +25,14 @@ pub fn run() {
             lock_on_focus_loss: std::sync::atomic::AtomicBool::new(false),
             lock_on_system_lock: std::sync::atomic::AtomicBool::new(true),
             smart_login_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            smart_login_running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pairing_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             qr_pairing_session: Mutex::new(None),
             pending_adopted_vault: Mutex::new(None),
         });
+
+    #[cfg(target_os = "android")]
+    { builder = builder.plugin(commands::updater::android_installer_plugin()); }
 
     #[cfg(not(mobile))]
     {
@@ -40,6 +44,7 @@ pub fn run() {
                     if state.lock_on_focus_loss.load(std::sync::atomic::Ordering::Relaxed) {
                         if let Ok(mut vault) = state.vault.lock() {
                             if let Some(ref mut manager) = *vault {
+                                state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
                                 manager.lock();
                             }
                             *vault = None;
@@ -58,6 +63,7 @@ pub fn run() {
                         // Lock the vault on close-to-tray
                         if let Ok(mut vault) = state.vault.lock() {
                             if let Some(ref mut manager) = *vault {
+                                state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
                                 manager.lock();
                             }
                             *vault = None;
@@ -75,6 +81,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Vault
             commands::create_vault,
+            commands::get_mobile_vault_path,
             commands::open_vault,
             commands::lock_vault,
             commands::get_vault_info,
@@ -209,6 +216,11 @@ pub fn run() {
             commands::smart_login_close_browser,
             commands::smart_login_start,
             commands::smart_login_cancel,
+            // App Updates (Desktop, Mobile, Portable)
+            commands::check_app_update,
+            commands::download_and_install_apk,
+            commands::install_portable_update,
+            commands::get_app_version,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
@@ -220,6 +232,14 @@ pub fn run() {
                     && let Ok(hwnd) = window.hwnd() {
                         let _ = yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, true);
                     }
+
+                // Clean up any leftover .exe.old from previous portable self-update
+                if let Ok(current_exe) = std::env::current_exe() {
+                    let old_exe = current_exe.with_extension("exe.old");
+                    if old_exe.exists() {
+                        let _ = std::fs::remove_file(&old_exe);
+                    }
+                }
             }
 
             #[cfg(not(mobile))]
@@ -289,6 +309,7 @@ pub fn run() {
                             && let Ok(mut vault) = state.vault.lock()
                                 && vault.is_some() {
                                     if let Some(ref mut manager) = *vault {
+                                        state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
                                         manager.lock();
                                     }
                                     *vault = None;

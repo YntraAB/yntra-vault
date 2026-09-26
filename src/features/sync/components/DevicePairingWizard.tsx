@@ -657,7 +657,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                           idx <= currentStepIdx ? 'bg-[var(--text-primary)]' : 'bg-[var(--border-subtle)]'
                         }`}
                       />
-                      <span
+                      <span title={title}
                         className={`text-[10px] font-medium transition-colors whitespace-nowrap truncate ${
                           idx === currentStepIdx ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'
                         }`}

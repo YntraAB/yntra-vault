@@ -119,14 +119,9 @@ if (initialLanguage !== DEFAULT_LANGUAGE) {
  */
 export function getTranslation(lang: string, key: string, params?: Record<string, string | number>): string {
   const dict = translations[lang] || translations[DEFAULT_LANGUAGE];
-  let text = dict?.[key] || translations[DEFAULT_LANGUAGE]?.[key] || key;
-
-  if (params) {
-    Object.entries(params).forEach(([paramKey, value]) => {
-      const escapedKey = paramKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      text = text.replace(new RegExp(`{\\s*${escapedKey}\\s*}`, 'g'), String(value));
-    });
-  }
-
-  return text;
+  const text = dict?.[key] ?? translations[DEFAULT_LANGUAGE]?.[key] ?? key;
+  // Replace once: user values may contain dollar signs or other placeholders.
+  return params ? text.replace(/\{\s*(\w+)\s*\}/g, (match, name: string) =>
+    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match
+  ) : text;
 }

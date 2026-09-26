@@ -59,6 +59,9 @@ pub enum VaultError {
     #[error("Import failed: {0}")]
     ImportError(String),
 
+    #[error("Update failed: {0}")]
+    UpdateError(String),
+
     #[error("Export failed: {0}")]
     ExportError(String),
 
@@ -156,6 +159,7 @@ impl VaultError {
             VaultError::Hardware2FaCanceled => "error.hardware_2fa_canceled",
             VaultError::InvalidState(_) => "error.invalid_state",
             VaultError::SmartLoginError(_) => "error.smart_login_failed",
+            VaultError::UpdateError(_) => "error.update_failed",
         }
     }
 

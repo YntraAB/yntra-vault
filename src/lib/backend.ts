@@ -11,8 +11,8 @@
  * - MockBackend (development) — uses in-memory data
  */
 
-import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult } from '@/types/ipc';
-export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult };
+import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult, CheckUpdateResult } from '@/types/ipc';
+export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult, CheckUpdateResult };
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -525,7 +525,7 @@ export interface YntraVaultBackend {
   getAutofillCredentialsForPackage(packageName: string, webDomain?: string): Promise<AutofillDatasetPayload>;
 
   // Smart Login
-  smartLoginPrecheck(): Promise<SmartLoginPreCheckResult>;
+  smartLoginPrecheck(entryId?: string): Promise<SmartLoginPreCheckResult>;
   smartLoginCloseBrowser(processName: string): Promise<void>;
   smartLoginStart(entryId: string, browserIndex: number): Promise<void>;
   smartLoginCancel(): Promise<void>;
@@ -535,6 +535,13 @@ export interface YntraVaultBackend {
   // File Dialogs
   openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null>;
   saveFileDialog(options?: SaveDialogOptions): Promise<string | null>;
+  getMobileVaultPath(name: string): Promise<string | null>;
+
+  // App Updates
+  checkAppUpdate(customEndpoint?: string): Promise<CheckUpdateResult>;
+  downloadAndInstallApk(apkUrl: string, expectedSha256?: string): Promise<string>;
+  installPortableUpdate(url: string, expectedSha256?: string): Promise<void>;
+  getAppVersion(): Promise<string>;
 }
 
 // ─── Smart Login Types ──────────────────────────────────────────────────

@@ -164,7 +164,7 @@ export function TrashTab() {
                 className="flex items-center justify-between bg-[var(--bg-elevated)] p-3 text-left transition-colors hover:bg-[var(--bg-hover)]"
               >
                 <div className="flex flex-col gap-1 min-w-0">
-                  <span className="truncate text-[13px] font-medium text-[var(--text-primary)] select-text">
+                  <span title={item.title} className="truncate text-[13px] font-medium text-[var(--text-primary)] select-text">
                     {item.title}
                   </span>
                   <span className="text-[10px] text-[var(--text-secondary)]">

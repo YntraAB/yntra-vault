@@ -30,3 +30,17 @@ reproducible-*/
 *.njsproj
 *.sln
 *.sw?
+
+# Release output and signing/authentication material never belong in either repo.
+release-assets/
+RELEASE_NOTES.md
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.dpapi
+__pycache__/

@@ -24,7 +24,7 @@ import type { PasswordEntry, Tag } from '@/types';
 import { isToday, isYesterday } from '@/lib/utils';
 import { Skeleton } from '@/components/ui';
 import { ActionTooltip } from '@/components/ui/tooltip';
-import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
+import { matchesShortcut, getKeybinds, formatShortcut } from '@/lib/keybinds';
 
 export interface PasswordListProps {
   onResizeStart?: (e: React.MouseEvent) => void;
@@ -289,7 +289,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
             id="search-input"
             ref={searchInputRef}
             type="text"
-            placeholder={t('app.search_placeholder')}
+            placeholder={t('app.search_placeholder', { shortcut: formatShortcut(getKeybinds(settings.keybinds).search) })}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={(e) => {
@@ -538,13 +538,13 @@ function ListItem({
 
       {/* Text */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className={`truncate ${titleTextClass} font-medium leading-tight text-[var(--text-primary)]`}>
+        <span title={entry.title} className={`truncate ${titleTextClass} font-medium leading-tight text-[var(--text-primary)]`}>
           {entry.title}
         </span>
         {(() => {
           if (entry.username) {
             return (
-              <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
+              <span title={entry.username} className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
                 {entry.username}
               </span>
             );
@@ -557,13 +557,13 @@ function ListItem({
               const domain = text.slice(atIndex);
               return (
                 <span className={`flex min-w-0 ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
-                  <span className="truncate">{local}</span>
+                  <span title={text} className="truncate">{local}</span>
                   <span className="shrink-0">{domain}</span>
                 </span>
               );
             }
             return (
-              <span className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
+              <span title={text} className={`truncate ${subTextClass} leading-tight text-[var(--text-secondary)] mt-0.5`}>
                 {text}
               </span>
             );

@@ -1,4 +1,5 @@
 pub mod types;
+pub mod validation;
 pub mod format;
 pub mod manager;
 pub mod entry;

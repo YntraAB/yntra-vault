@@ -123,7 +123,7 @@ export default function Onboarding() {
                   idx <= step ? 'bg-[var(--text-primary)]' : 'bg-[var(--border-subtle)]'
                 }`}
               />
-              <span
+              <span title={title}
                 className={`text-[10px] font-medium transition-colors whitespace-nowrap truncate ${
                   idx === step ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'
                 }`}
@@ -205,10 +205,10 @@ export default function Onboarding() {
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className="text-[16px]">{lang.flag}</span>
                                 <div className="truncate">
-                                  <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">
+                                  <p title={lang.nativeName} className="text-[12px] font-medium text-[var(--text-primary)] truncate">
                                     {lang.nativeName}
                                   </p>
-                                  <p className="text-[10px] text-[var(--text-tertiary)] truncate">{lang.name}</p>
+                                  <p title={lang.name} className="text-[10px] text-[var(--text-tertiary)] truncate">{lang.name}</p>
                                 </div>
                               </div>
                               {isSelected && <Check size={14} className="text-[var(--text-primary)] shrink-0 ml-1" />}

@@ -5,6 +5,117 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-09-26
+
+### Added
+- Extend opt-in browser regressions for native identifier/password entry, hidden and read-only fields, focus loss, account identity and live result verification. A separate hidden-terminal password opt-in keeps authorized test credentials out of source, command-line arguments and application logs; normal test runs do not perform live account login.
+- **Universal Multi-Platform Auto-Update Engine**:
+  - Implemented core update engine in `crates/core/src/services/updater.rs` supporting Desktop (Windows Installer/MSI/Portable, Linux AppImage/deb, macOS), Mobile (Android APK), and CLI (`yntra-cli`).
+  - Added robust semantic version comparison (`is_newer_version`, `parse_version`) supporting major, minor, patch, pre-release tags, and normalization for both `v` and `V` prefixes.
+  - Added pre-release isolation in `is_newer_version`: ensures users on stable releases are never prompted to update to unstable pre-release builds (`-rc`, `-beta`).
+  - Implemented universal `UpdateManifest` (`latest.json`) ingestion with dedicated platforms mapping for Tauri updater and `extra` platform payloads for Android APK, CLI, and portable Windows executables.
+  - Added constant-time SHA-256 cryptographic verification (`verify_sha256`) using `subtle::ConstantTimeEq` against hex strings, preventing timing side-channel attacks during download validation.
+  - Added HTTPS manifest retrieval with a GitHub Releases fallback for the default endpoint. Custom endpoint failures do not silently contact another provider.
+  - Enforced strict HTTPS scheme validation and a 250 MB package size limit (`MAX_UPDATE_PACKAGE_SIZE`) to safeguard against transport tampering and memory exhaustion attacks.
+- **Tauri Native Updater IPC Bridge**:
+  - Implemented commands in `src-tauri/src/commands/updater.rs`: `check_app_update`, `download_and_install_apk`, `install_portable_update`, and `get_app_version`.
+  - Added automatic operating system and distribution detection (`android`, `windows-portable`, `windows-x86_64`, `linux-x86_64`, `darwin`).
+  - Native in-place replacement for portable Windows executables using a staged file, backup rename and rollback attempt, with automatic startup cleanup of lingering `.exe.old` binaries in `src-tauri/src/lib.rs`.
+  - Added sandboxed Android APK download via native Rust HTTPS with mandatory SHA-256 pre-verification before launching system package installer.
+- **CLI In-Place Self-Updater (`yntra update`)**:
+  - Added CLI subcommand `yntra update` in `crates/cli/src/main.rs` with `--check` (query only), `-y/--yes` (unattended batch upgrade), and `--json` (machine-readable scripting format).
+  - Implemented Windows-safe running executable replacement (`replace_current_exe`): stages and flushes the verified binary before renaming the running executable to `.old`, with rollback on replacement failure and startup cleanup.
+  - Added non-intrusive terminal tip notification: caches update checks in local user cache (`update_cache.json`) for 24 hours, displaying a gentle one-line recommendation to `stderr` without disrupting standard output streams or piped JSON execution.
+  - Dynamic package version reporting via `env!("CARGO_PKG_VERSION")`.
+- **Frontend Reactive Updater Slice & Settings UI**:
+  - Created state management hook `useUpdater` in `src/features/updater/useUpdater.ts` managing update lifecycle (`idle`, `checking`, `available`, `downloading`, `ready`, `up-to-date`, `error`).
+  - Created glassmorphic `UpdateModal` in `src/features/updater/UpdateModal.tsx` featuring version diff badges (`v0.2.2 → v0.2.3`), published dates, release notes preview, and real-time download feedback.
+  - Added "App Updates & Version" section to `src/features/settings/components/GeneralTab.tsx` with current version display, manual "Check for Updates" trigger, and automatic background check toggle (`autoCheckUpdates`).
+  - Completed missing UI keys in all 24 language catalogs, with 1,087 matching keys and automated parameter checks.
+- **Android APK Direct Package Installation Bridge**:
+  - Added `<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />` in `src-tauri/android-overrides/AndroidManifest.xml`.
+  - Updated build hook `scripts/apply-android-customizations.js` to automatically verify and inject installation permissions into Android platform files on build.
+- **CI/CD Universal Release Manifest Generation & Publishing Verification**:
+  - Updated `.github/workflows/release.yml` to automatically generate `release-assets/latest.json` containing SHA-256 checksums and asset download URLs for all 7 platform release targets, downloading the universal APK to populate exact checksums.
+  - Enhanced `publish-public.ps1` (`-VerifyAssets`) to verify that `latest.json` is published and active alongside all 7 multi-platform binaries.
+
+### Changed
+- Share evidence-based Smart Login result assessment between native and CDP observers. Check existing sessions before login, distinguish the selected account from another account, wait for post-password results and report explicit errors/challenges instead of treating missing password fields as success. Unrecognized states remain unconfirmed.
+- Subscribe to Smart Login results before starting, reject overlapping attempts, cancel on vault lock and provide localized result messages across all 24 language catalogs.
+- **General Settings Tab**:
+  - Integrated application update checking card and configurable auto-check preference into `GeneralTab.tsx`.
+  - Added `autoCheckUpdates` setting to `SettingsContext.tsx` defaulting to `false` while preserving saved preferences.
+- **Tauri Application Setup**:
+  - Registered updater IPC commands in `src-tauri/src/lib.rs` invoke handler.
+- **Segregated HTTP Client Timeouts**:
+  - Differentiated network timeouts: 15-second timeout for lightweight manifest queries and 300-second (5 min) extended timeout for large binary package downloads to prevent premature disconnects on standard connections.
+
+### Fixed
+- Preserve existing vault files and remembered vault paths during portable executable replacement; add a regression against the production replacement function. Restore desktop installer links in the GitHub update-check fallback. Android now opens verified packages through a cache-only FileProvider and rejects mismatched application/signing identities without uninstalling or deleting data.
+- Publish update metadata only after all seven required packages are present, with verified SHA-256 checksums. Build the exact requested tag, keep incomplete releases as drafts and prevent overwriting published releases.
+- Use a permanent Android signing identity for future updates. Older APKs signed with temporary build keys may reject in-place installation: export and verify a vault backup before any manual migration, and do not uninstall an existing app merely to retry an update.
+- Stop GitHub Smart Login from probing profile/repository paths when a session already exists. Recognize closed account menus and GitHub viewer metadata, match saved usernames, stop discovery on existing sessions, and restrict GitHub fallback navigation to its authentication routes. Re-evaluate results across delayed redirects after password/TOTP submission instead of ending on the first unconfirmed frame; preserve explicit account mismatches and challenges.
+- Speed up Google account selection: select a unique visible match immediately, advance from a stable non-matching list after 250 ms, and keep a bounded loading fallback for unrecognized lists. Reset observations on navigation and poll active login steps more frequently. An authorized live Brave test completed identifier/password entry and confirmed the selected account; the separate session-reuse test selected its account 766 ms after start.
+- Continue Smart Login from an exact account-chooser selection to the password step. Remove email-prefill URL hints, recognize redirected chooser paths, and correctly read Brave's elided address-bar scheme when Google redirect parameters contain nested URLs or email addresses. Bind the newly opened window before acting; unresolved direct password steps fall back to blank sign-in instead of silently stalling.
+- Keep Google Smart Login account-specific: reuse the selected account's session, allow adding another account while existing sessions stay signed in, and remove stale numeric account selectors. Require matching account identity before filling a directly opened password step; bound fallback navigation and never retry submitted credentials.
+- Bind native keyboard input to the selected CDP document's address as well as the focused field. Reject hidden/read-only fields, ambiguous account evidence and unexpected pages; use explicit MFA evidence before TOTP autofill.
+- Restore website icons by default while respecting a saved disabled preference. Wait for the native setting before fetching, retry temporary failures, share requests for identical domains, and discard late results after disabling icons.
+- Remove unused Tauri imports in pairing commands. Resolve the local missing-MSVC-linker build blocker through Windows C++ build-tool setup; subsequent native development builds pass without the reported warnings.
+- Refresh existing entry details after synchronization, including unchanged timestamps, and discard stale frontend refreshes after locking or switching vaults.
+- Merge completed P2P transfers into the current vault instead of replacing its in-memory data. App P2P transfers use temporary encrypted snapshots, captured after peer connection on the listener, to isolate network writes from active vault saves.
+- Fetch and authenticate the current WebDAV revision before uploading. Conditional writes use the ETag from the same download response, with bounded conflict retries and create-only writes for new remote files. Uploads use an encrypted local snapshot.
+- Create mobile vaults inside application storage and create missing parent directories. Propagate storage failures instead of silently falling back to an unsuitable directory.
+- Use Windows keyboard-layout scan codes for Auto-type and Smart Login credentials, with Unicode fallback and focus checks. Identifier-only diagnostics reached the password step; a later explicitly authorized full Brave test typed both credentials and confirmed the selected account.
+- Open Google/Gmail Smart Login in an ordinary Windows browser window without CDP, browser termination or profile replacement. Observe account-matched results after submission, leave CAPTCHA/2FA to the user and use a localized manual-action result when evidence is insufficient. Other providers retain CDP with the shared result policy.
+- Correct AltGr/right-Alt and Caps Lock mappings, validate characters against the active Windows layout, and separate key-down/key-up with an 8 ms minimum hold. Local Brave regressions cover actual input, rejected input, hidden password fields and focus changes, without clipboard use.
+- Ignore hidden/read-only credential fields and reject password input into unprotected fields. Auto-type checks the browser's address-bar hostname instead of trusting the page title; web-document controls cannot impersonate the native address bar.
+- Validate emitted scan codes across 27 Windows keyboard layouts, including AZERTY/QWERTZ, Dvorak, AltGr and non-Latin layouts. Avoid Num Lock-dependent numpad mappings by finding a verified regular-key alternative; preserve Unicode fallback for characters without a direct mapping. Local Brave testing also covers non-ASCII characters and surrogate pairs.
+- Show the shared password generator's options by default in its standalone view. Keep generated replacements synchronized with the secure input buffer and discard outdated generation results.
+- Show full truncated display labels on hover, limit new or renamed vault/entry/tag/custom-field names to 128 UTF-16 units, and show the configured search shortcut on desktop and mobile.
+- Complete missing translation keys across all 24 language catalogs. Add key, duplicate, interpolation-parameter and source-reference checks; preserve literal user values and intentionally empty translations.
+- Correct semantic version ordering, stream download size checks, and stage executable updates before replacing the installed file. Require native installation requests to match the official update manifest.
+- Describe updater verification accurately and disable downloads when no package is available for the platform.
+
+- **Mandatory Pre-Execution SHA-256 Enforcement & Verification Bypass Elimination**:
+  - Strictly enforced non-empty 64-character hex SHA-256 verification in `src-tauri/src/commands/updater.rs` (`download_and_install_apk`, `install_portable_update`) and CLI `crates/cli/src/main.rs` (`handle_update`), rejecting updates if manifest checksums are missing or mismatched rather than silently bypassing verification.
+- **Android Customization Script Incomplete Injections**:
+  - Resolved bug in `scripts/apply-android-customizations.js` where permission injection short-circuited when `CAMERA` was already present in `AndroidManifest.xml`; script now verifies each required permission and feature individually and injects all missing entries.
+- **Unix In-Place Portable Binary Replacement**:
+  - The shared executable replacement helper stages a temporary file, preserves executable permissions and atomically persists it on Unix. The portable Windows IPC command is restricted to Windows.
+- **Platform Update Deserialization Resiliency**:
+  - Added `#[serde(default)]` to `PlatformUpdate.signature` and multi-tier platform key fallbacks in `crates/core/src/services/updater.rs`, enabling seamless parsing of third-party or custom manifest endpoints.
+- **Windows File Lock Avoidance During In-Place Upgrades**:
+  - Resolved Windows error 32 (sharing violation) during self-update by renaming active binaries to `.old` after staging and flushing the complete replacement payload.
+
+### Security
+- Disable automatic breach lookups and update checks by default, while preserving saved preferences. Password generation no longer makes an unconditional breach request.
+- Limit favicon downloads to HTTPS icon providers, reject unrelated redirect hosts, and enforce the image size limit while streaming. Direct requests to entry hostnames are no longer used as a fallback.
+- Zeroize additional temporary plaintext serialization and password buffers.
+- Restrict native credential input to the bound browser/window, trusted document address and visible writable field. Reject password input into unprotected fields and explicit account mismatches; stop on focus/cancellation changes and never retry submitted credentials automatically. Google-native verification remains manual for CAPTCHA/MFA.
+- Keep password diagnostics opt-in with hidden terminal input and in-memory Zeroizing values; the blank-login diagnostic override is test-only. No test account identity, password or session token is embedded in these release notes.
+- Reject WebDAV redirects and enforce HTTPS throughout updater requests.
+
+- **Strict Mandatory Pre-Execution SHA-256 Verification**:
+  - Packages installed through the native updater or CLI are checked in constant time (`subtle::ConstantTimeEq`) against manifest hashes before installation or replacement of the active executable. Native and CLI installations lacking valid hashes are aborted; browser downloads are outside this verification path.
+- **Strict HTTPS Transport Security**:
+  - All updater download URLs are validated to strictly enforce `https://`, preventing plaintext transport downgrades or MITM injection attacks.
+- **Resource Exhaustion Bounds**:
+  - Binary downloads enforce a strict 250 MB ceiling (`MAX_UPDATE_PACKAGE_SIZE`), preventing denial-of-service via memory exhaustion from oversized payloads.
+- **Zero-Telemetry & Offline-First Protocol**:
+  - Update checks transmit zero user identifiers, vault metadata, telemetry, or device IDs; automatic checks can be toggled off at any time.
+- **Native HTTPS Transport**:
+  - Manifest checks and native package downloads use Rust networking via `rustls`. Standard desktop package downloads open in the browser.
+- **Android Package Signature Validation**:
+  - Android requires compatible signing certificates when replacing an installed app. Actual APK installer launch and permissions still require device testing.
+
+### Compatibility and verification
+- Automatic WebDAV merging requires a strong ETag. Servers that do not provide one now return an explicit error instead of permitting an unsafe overwrite.
+- Standard desktop updates open a browser download. Native installation validates SHA-256 against the official HTTPS manifest; Ed25519 signature verification is not implemented.
+- Latest recorded checks: 116 frontend tests, 33 Smart Login tests, nine Auto-type tests, the local real-Brave input/outcome regression, a live favicon download and the existing-password synchronization regression passed. Frontend production and Windows native development builds passed; the existing large frontend bundle warning remains.
+- An explicitly authorized full Gmail test in ordinary Brave typed identifier and password and confirmed the selected account at 12,891 ms from engine start, including a verification-page interval. A separate existing-session test selected the account at 766 ms and confirmed it at 2,901 ms. These are single-run measurements, not latency guarantees or proof of universal website support.
+- Full workspace/release tests and mobile/device/browser matrix checks remain outstanding. Broader lint issues and the reviewed device-revocation, manual-pairing lifecycle, whole-entry sync-conflict and independent updater-signature findings remain open; successful builds and focused tests are not a complete security certification.
+- No new version, tag, package or public release was created for these follow-ups; all entries remain under 0.2.3.
+
 ## [0.2.2] - 2026-09-19
 
 ### Added

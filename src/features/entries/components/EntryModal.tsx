@@ -1,3 +1,4 @@
+import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
  * EntryModal — Create / Edit password entry
  * 
@@ -718,6 +719,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                   <input
                     ref={titleRef}
                     type="text"
+                    maxLength={MAX_DISPLAY_NAME_LENGTH}
                     value={form.title}
                     onChange={(e) => updateField('title', e.target.value)}
                     placeholder={deriveTitle('', form.url, form.email, form.username)}
@@ -960,7 +962,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
                                         {getAttachmentIcon(att.mime_type || att.mimeType, att.name)}
-                                        <span className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
+                                        <span title={att.name} className="truncate font-medium text-[var(--text-primary)] text-[12px]">{att.name}</span>
                                         <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
                                       </div>
                                       <ActionTooltip content={t('entry.remove_attachment')}>
@@ -994,7 +996,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                       className="flex items-center gap-2 min-w-0 cursor-pointer group/att"
                                     >
                                       {getAttachmentIcon(att.mimeType, att.name)}
-                                      <span className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors text-[12px]">{att.name}</span>
+                                      <span title={att.name} className="truncate font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors text-[12px]">{att.name}</span>
                                       <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">({formatBytes(att.size)})</span>
                                       <span className="rounded-[3px] bg-[var(--bg-elevated)] border border-[var(--border)] px-1.5 py-0.5 text-[9px] font-mono text-[var(--text-secondary)] uppercase tracking-wider shrink-0">New</span>
                                     </div>
@@ -1081,7 +1083,8 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                         <div className="flex gap-1.5 items-center w-full">
                           <input
                             type="text"
-                            value={currentPrefix}
+                            maxLength={MAX_DISPLAY_NAME_LENGTH}
+                    value={currentPrefix}
                             onChange={(e) => {
                               const newPrefix = e.target.value;
                               const otherFields = form.customFields.filter(f => f.type === cf.type && f.id !== cf.id);

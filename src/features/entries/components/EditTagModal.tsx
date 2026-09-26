@@ -1,3 +1,4 @@
+import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
  * EditTagModal — Edit or delete an existing tag
  *
@@ -151,6 +152,7 @@ export function EditTagModal({ open, onClose, tag }: EditTagModalProps) {
                   <input
                     ref={nameRef}
                     type="text"
+                    maxLength={MAX_DISPLAY_NAME_LENGTH}
                     value={name}
                     onChange={(e) => {
                       setName(e.target.value);

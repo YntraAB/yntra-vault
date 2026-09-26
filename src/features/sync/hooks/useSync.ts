@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useEntries } from '@/features/entries';
 import { useBackend } from '@/lib/useBackend';
 import { useAuth } from '@/features/auth';
 import { useToast } from '@/contexts/ToastContext';
@@ -6,6 +7,7 @@ import { useTranslation } from '@/contexts/LanguageContext';
 import { saveFileDialog } from '@/lib/backend';
 
 export function useSync() {
+  const { refreshEntries, refreshTags } = useEntries();
   const { backend } = useBackend();
   const { currentVault } = useAuth();
   const { addToast } = useToast();
@@ -39,6 +41,7 @@ export function useSync() {
       setIsSyncingWebdav(true);
       try {
         const stats = await backend.webdavSync(url, user, pass || null);
+        await Promise.all([refreshEntries(), refreshTags()]);
         if (stats.entries_added > 0 || stats.entries_updated > 0 || stats.trash_merged > 0) {
           addToast({
             message: `Cloud sync merged: ${stats.entries_added} added, ${stats.entries_updated} updated, ${stats.trash_merged} trashed.`,
@@ -55,7 +58,7 @@ export function useSync() {
         setIsSyncingWebdav(false);
       }
     },
-    [backend, currentVault, addToast, t]
+    [backend, currentVault, addToast, t, refreshEntries, refreshTags]
   );
 
   const exportVaultFile = useCallback(async () => {

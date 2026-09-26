@@ -1,3 +1,5 @@
+import { useSettings } from '@/features/settings';
+import { formatShortcut, getKeybinds } from '@/lib/keybinds';
 import { useRef, useEffect } from 'react';
 import { Menu, Plus, Search, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '@/features/auth';
@@ -18,6 +20,7 @@ export function MobileHeader({
   isSearchVisible,
 }: MobileHeaderProps) {
   const { t } = useTranslation();
+  const { settings } = useSettings();
   const { currentVault } = useAuth();
   const { filterCategory } = useUi();
   const { searchTerm, setSearchTerm } = useSearch();
@@ -51,7 +54,7 @@ export function MobileHeader({
         <div className="flex flex-1 items-center justify-center px-2 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <ShieldCheck size={16} className="text-[var(--text-primary)] shrink-0" />
-            <span className="truncate text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+            <span title={title} className="truncate text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
               {title}
             </span>
           </div>
@@ -90,7 +93,7 @@ export function MobileHeader({
             <input
               ref={searchInputRef}
               type="text"
-              placeholder={t('app.search_placeholder')}
+              placeholder={t('app.search_placeholder', { shortcut: formatShortcut(getKeybinds(settings.keybinds).search) })}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="flex-1 bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"

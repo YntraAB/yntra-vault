@@ -16,6 +16,7 @@ impl VaultManager {
 
     /// Add a new tag to the vault.
     pub fn add_tag(&mut self, name: &str, color: &str, icon: &str) -> crate::Result<Uuid> {
+        crate::vault::validation::validate_display_name(name)?;
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -69,6 +70,9 @@ impl VaultManager {
             return Err(VaultError::VaultLocked);
         }
         if let Some(tag) = self.data.tags.iter_mut().find(|t| t.id == id) {
+            if tag.name != name {
+                crate::vault::validation::validate_display_name(name)?;
+            }
             let old_name = tag.name.clone();
             tag.name = name.to_string();
             tag.color = color.to_string();

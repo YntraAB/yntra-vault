@@ -220,7 +220,7 @@ export function AttachmentPreviewModal({
             </div>
 
             <div className="flex flex-col min-w-0">
-              <span className="truncate text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
+              <span title={attachment.name} className="truncate text-[13px] font-semibold text-[var(--text-primary)] tracking-tight">
                 {attachment.name}
               </span>
               <span className="text-[11px] text-[var(--text-tertiary)] font-mono">
@@ -381,7 +381,7 @@ export function AttachmentPreviewModal({
                         ) : (
                           <File size={14} className="text-[var(--text-tertiary)] shrink-0" />
                         )}
-                        <span className="truncate font-mono text-[12px] text-[var(--text-primary)]">
+                        <span title={entry.path} className="truncate font-mono text-[12px] text-[var(--text-primary)]">
                           {entry.path}
                         </span>
                       </div>

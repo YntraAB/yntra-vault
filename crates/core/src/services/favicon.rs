@@ -104,32 +104,28 @@ fn is_internal_or_private(domain: &str) -> bool {
     }
 }
 
-fn get_http_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(6))
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 3 {
-                    attempt.stop()
-                } else if let Some(host) = attempt.url().host_str() {
-                    if is_internal_or_private(host) {
-                        attempt.stop()
-                    } else {
-                        attempt.follow()
-                    }
-                } else {
-                    attempt.stop()
-                }
-            }))
-            .build()
-            .unwrap_or_default()
-    })
+fn get_http_client() -> crate::Result<&'static reqwest::Client> {
+    if let Some(client) = HTTP_CLIENT.get() { return Ok(client); }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .https_only(true)
+        .user_agent("YntraVault/0.2")
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let host = attempt.url().host_str().unwrap_or("");
+            let trusted = host == "icons.duckduckgo.com" || host == "www.google.com"
+                || host.ends_with(".gstatic.com");
+            if attempt.previous().len() < 3 && attempt.url().scheme() == "https" && trusted {
+                attempt.follow()
+            } else { attempt.stop() }
+        }))
+        .build()?;
+    let _ = HTTP_CLIENT.set(client);
+    HTTP_CLIENT.get().ok_or_else(|| crate::VaultError::SyncError("Favicon HTTP client unavailable".into()))
 }
-
 /// Helper to fetch and convert an image response to a base64 Data URI
 async fn try_fetch_candidate(client: &reqwest::Client, url: &str) -> Option<String> {
-    let resp = client.get(url).send().await.ok()?;
+    if !is_external_favicons_enabled() { return None; }
+    let mut resp = client.get(url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -151,7 +147,13 @@ async fn try_fetch_candidate(client: &reqwest::Client, url: &str) -> Option<Stri
         return None;
     }
 
-    let bytes = resp.bytes().await.ok()?;
+    const MAX_IMAGE_SIZE: usize = 512 * 1024;
+    if resp.content_length().is_some_and(|size| size > MAX_IMAGE_SIZE as u64) { return None; }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = resp.chunk().await.ok()? {
+        if chunk.len() > MAX_IMAGE_SIZE.saturating_sub(bytes.len()) { return None; }
+        bytes.extend_from_slice(&chunk);
+    }
     // Reject tiny corrupt responses (< 32 bytes) or unreasonably large responses (> 512 KB)
     if bytes.len() < 32 || bytes.len() > 512 * 1024 {
         return None;
@@ -266,7 +268,8 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
 
     // 3. Rate-limited / bounded concurrent network resolution (max 6 parallel fetches)
     let _permit = get_semaphore().acquire().await.ok();
-    let client = get_http_client();
+    if !is_external_favicons_enabled() { return Ok(None); }
+    let client = get_http_client()?;
 
     // Multi-tier fallback strategy:
     // Candidate 1: DuckDuckGo favicon CDN (fast, crisp multi-size ICOs, privacy-focused)
@@ -277,12 +280,6 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
     if result.is_none() {
         let google_url = format!("https://www.google.com/s2/favicons?domain={clean_domain}&sz=64");
         result = try_fetch_candidate(client, &google_url).await;
-    }
-
-    // Candidate 3: Direct host favicon
-    if result.is_none() {
-        let direct_url = format!("https://{clean_domain}/favicon.ico");
-        result = try_fetch_candidate(client, &direct_url).await;
     }
 
     // Candidate 4: Parent domain fallback (e.g. login.live.com -> live.com)
@@ -311,6 +308,7 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
         }
     }
 
+    if !is_external_favicons_enabled() { return Ok(None); }
     // 4. If successful, persist to both memory and disk caches
     if let Some(ref data_uri) = result {
         if let Ok(mut guard) = get_cache().lock() {
@@ -330,6 +328,17 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "Requires internet access; run separately from the offline toggle tests"]
+    async fn public_favicon_network_smoke() {
+        EXTERNAL_FAVICONS_ENABLED.store(true, Ordering::Relaxed);
+        let icon = try_fetch_candidate(get_http_client().unwrap(), "https://icons.duckduckgo.com/ip3/github.com.ico").await;
+        EXTERNAL_FAVICONS_ENABLED.store(false, Ordering::Relaxed);
+        let icon = icon.expect("Public website icon should resolve");
+        assert!(icon.starts_with("data:image/"));
+        assert!(icon.len() < 750_000);
+    }
 
     #[tokio::test]
     async fn test_favicon_offline_first_default() {

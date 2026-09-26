@@ -1,11 +1,36 @@
 use std::path::PathBuf;
-use tauri::State;
-use zeroize::Zeroize;
+use tauri::{Manager, State};
+use zeroize::{Zeroize, Zeroizing};
 
 use yntra_vault_core::vault::manager::VaultManager;
 use yntra_vault_core::vault::types::VaultInfo;
 
 use super::AppState;
+
+fn decode_password_bytes(bytes: Zeroizing<Vec<u8>>) -> Result<Zeroizing<String>, String> {
+    let password = std::str::from_utf8(&bytes).map_err(|_| "Password not valid UTF-8".to_string())?;
+    Ok(Zeroizing::new(password.to_owned()))
+}
+
+pub(super) fn vault_storage_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let base = app.path().app_data_dir();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let base = app.path().document_dir().or_else(|_| app.path().app_data_dir());
+    let directory = base.map_err(|e| e.to_string())?.join("YntraVault");
+    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    Ok(directory)
+}
+
+#[tauri::command]
+pub fn get_mobile_vault_path(app: tauri::AppHandle, name: String) -> Result<Option<String>, String> {
+    if !cfg!(any(target_os = "android", target_os = "ios")) {
+        return Ok(None);
+    }
+    let name = yntra_vault_core::services::sync::sanitize_vault_filename(&name);
+    let path = vault_storage_dir(&app)?.join(format!("{}-{}.vdb", name, uuid::Uuid::new_v4()));
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
 
 #[tauri::command]
 pub async fn create_vault(
@@ -270,6 +295,7 @@ pub async fn generate_key_file(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
+    state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     if let Some(ref mut manager) = *vault {
         manager.lock();
@@ -353,14 +379,12 @@ pub async fn reset_emergency_kit_audit(
 #[tauri::command]
 pub async fn create_vault_bytes(
     name: String,
-    mut password_bytes: Vec<u8>,
+    password_bytes: Vec<u8>,
     path: String,
     key_file_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<VaultInfo, String> {
-    let password = String::from_utf8(password_bytes.clone())
-        .map_err(|_| "Password not valid UTF-8".to_string())?;
-    password_bytes.zeroize();
+    let password = decode_password_bytes(Zeroizing::new(password_bytes))?;
 
     let vault_path = PathBuf::from(&path);
     let kf_path = key_file_path.as_ref().map(PathBuf::from);
@@ -378,13 +402,11 @@ pub async fn create_vault_bytes(
 #[tauri::command]
 pub async fn open_vault_bytes(
     path: String,
-    mut password_bytes: Vec<u8>,
+    password_bytes: Vec<u8>,
     key_file_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<VaultInfo, String> {
-    let password = String::from_utf8(password_bytes.clone())
-        .map_err(|_| "Password not valid UTF-8".to_string())?;
-    password_bytes.zeroize();
+    let password = decode_password_bytes(Zeroizing::new(password_bytes))?;
 
     let vault_path = PathBuf::from(&path);
     let kf_path = key_file_path.as_ref().map(PathBuf::from);
@@ -401,18 +423,16 @@ pub async fn open_vault_bytes(
 
 #[tauri::command]
 pub async fn change_master_password_bytes(
-    mut current_bytes: Vec<u8>,
-    mut new_password_bytes: Vec<u8>,
+    current_bytes: Vec<u8>,
+    new_password_bytes: Vec<u8>,
     current_key_file: Option<String>,
     new_key_file: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let current = String::from_utf8(current_bytes.clone())
-        .map_err(|_| "Current password not valid UTF-8".to_string())?;
-    let new_password = String::from_utf8(new_password_bytes.clone())
-        .map_err(|_| "New password not valid UTF-8".to_string())?;
-    current_bytes.zeroize();
-    new_password_bytes.zeroize();
+    let current_bytes = Zeroizing::new(current_bytes);
+    let new_password_bytes = Zeroizing::new(new_password_bytes);
+    let current = decode_password_bytes(current_bytes)?;
+    let new_password = decode_password_bytes(new_password_bytes)?;
 
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;

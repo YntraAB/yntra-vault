@@ -19,6 +19,25 @@ pub const DISCOVERY_BEACON_MAGIC: [u8; 4] = *b"YBEA";
 pub const PAIRING_QUERY_MAGIC: [u8; 4] = *b"YQRY";
 pub const DISCOVERY_MULTICAST_ADDR: &str = "239.255.53.23";
 
+/// Isolate the file-based sync protocol from concurrent saves in the application.
+pub struct SyncSnapshot {
+    directory: tempfile::TempDir,
+}
+
+impl SyncSnapshot {
+    /// The caller must hold its vault lock while saving and copying the source.
+    pub fn create(path: &Path) -> crate::Result<Self> {
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let directory = tempfile::tempdir_in(parent)?;
+        fs::copy(path, directory.path().join("vault.vdb"))?;
+        Ok(Self { directory })
+    }
+
+    pub fn path(&self) -> std::path::PathBuf {
+        self.directory.path().join("vault.vdb")
+    }
+}
+
 pub mod pairing;
 pub use pairing::{
     PairingStats, generate_pairing_code, normalize_pairing_code,
@@ -231,6 +250,7 @@ pub async fn webdav_get_etag(
 
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("HTTP client init: {}", e)))?;
@@ -291,6 +311,7 @@ pub async fn webdav_test_connection(
 
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("HTTP client init: {}", e)))?;
@@ -321,10 +342,22 @@ pub async fn webdav_upload(
     db_filepath: &Path,
     if_match_etag: Option<&str>,
 ) -> crate::Result<Option<String>> {
+    webdav_upload_conditional(url, username, password, db_filepath, if_match_etag, false).await
+}
+
+pub async fn webdav_upload_conditional(
+    url: &str,
+    username: &str,
+    password: Option<&str>,
+    db_filepath: &Path,
+    if_match_etag: Option<&str>,
+    create_only: bool,
+) -> crate::Result<Option<String>> {
     validate_webdav_url(url)?;
 
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("HTTP client init: {}", e)))?;
@@ -343,6 +376,8 @@ pub async fn webdav_upload(
             let etag_header = format!("\"{}\"", norm);
             req = req.header("If-Match", etag_header);
         }
+    } else if create_only {
+        req = req.header("If-None-Match", "*");
     }
 
     let response = req.send().await
@@ -386,6 +421,7 @@ pub async fn webdav_download(
 
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| crate::error::VaultError::DecryptionError(format!("HTTP client init: {}", e)))?;
@@ -405,8 +441,7 @@ pub async fn webdav_download(
         )));
     }
 
-    let bytes = response.bytes().await
-        .map_err(|e| crate::error::VaultError::DecryptionError(format!("WebDAV body retrieval: {}", e)))?;
+    let bytes = read_vault_response(response).await?;
 
     // Pre-flight validation: verify downloaded payload is a valid .vdb vault file
     VaultFile::from_bytes(&bytes).map_err(|e| {
@@ -431,6 +466,45 @@ pub async fn webdav_download(
 }
 
 /// Download raw vault bytes from a WebDAV server into memory.
+pub async fn webdav_download_snapshot(
+    url: &str,
+    username: &str,
+    password: Option<&str>,
+) -> crate::Result<Option<(Vec<u8>, String)>> {
+    validate_webdav_url(url)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build().map_err(crate::error::VaultError::NetworkError)?;
+    let mut request = client.get(url);
+    if !username.is_empty() { request = request.basic_auth(username, password); }
+    let response = request.send().await.map_err(crate::error::VaultError::NetworkError)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
+    if !response.status().is_success() {
+        return Err(crate::error::VaultError::SyncError(format!("WebDAV GET failed: {}", response.status())));
+    }
+    // Obtain data and its version from the same response, preventing HEAD/GET races.
+    let etag = response.headers().get("ETag").and_then(|v| v.to_str().ok())
+        .map(str::trim).filter(|v| !v.is_empty() && !v.starts_with("W/") && !v.starts_with("w/"))
+        .ok_or_else(|| crate::error::VaultError::SyncError("WebDAV sync requires a strong ETag to avoid overwriting concurrent changes".into()))?
+        .to_string();
+    Ok(Some((read_vault_response(response).await?, etag)))
+}
+
+async fn read_vault_response(mut response: reqwest::Response) -> crate::Result<Vec<u8>> {
+    if response.content_length().is_some_and(|size| size > MAX_DB_SIZE as u64) {
+        return Err(crate::error::VaultError::SyncError("Remote vault exceeds size limit".into()));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(crate::error::VaultError::NetworkError)? {
+        if chunk.len() > MAX_DB_SIZE.saturating_sub(bytes.len()) {
+            return Err(crate::error::VaultError::SyncError("Remote vault exceeds size limit".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 pub async fn webdav_download_bytes(
     url: &str,
     username: &str,
@@ -440,6 +514,7 @@ pub async fn webdav_download_bytes(
 
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| crate::error::VaultError::DecryptionError(format!("HTTP client init: {}", e)))?;
@@ -459,8 +534,7 @@ pub async fn webdav_download_bytes(
         )));
     }
 
-    let bytes = response.bytes().await
-        .map_err(|e| crate::error::VaultError::DecryptionError(format!("WebDAV body retrieval: {}", e)))?;
+    let bytes = read_vault_response(response).await?;
 
     Ok(bytes.to_vec())
 }
@@ -887,6 +961,25 @@ pub fn run_p2p_sync_listener_with_timeout(
     db_filepath: &Path,
     accept_timeout: std::time::Duration,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
+    run_p2p_sync_listener_prepared(listen_addr, subkeys, db_filepath, accept_timeout, || Ok(None))
+}
+
+/// Capture the application vault after a peer connects, not before waiting for it.
+pub fn run_p2p_sync_listener_with_snapshot(
+    listen_addr: &str,
+    subkeys: &crate::crypto::SubKeys,
+    prepare: impl FnOnce() -> crate::Result<SyncSnapshot>,
+) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
+    run_p2p_sync_listener_prepared(listen_addr, subkeys, Path::new(""), std::time::Duration::from_secs(45), || prepare().map(Some))
+}
+
+fn run_p2p_sync_listener_prepared(
+    listen_addr: &str,
+    subkeys: &crate::crypto::SubKeys,
+    db_filepath: &Path,
+    accept_timeout: std::time::Duration,
+    prepare: impl FnOnce() -> crate::Result<Option<SyncSnapshot>>,
+) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
     let listener = TcpListener::bind(listen_addr)
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("Failed to bind TCP listener on {}: {}", listen_addr, e)))?;
 
@@ -928,6 +1021,10 @@ pub fn run_p2p_sync_listener_with_timeout(
     let timeout = Some(std::time::Duration::from_secs(30));
     let _ = stream.set_read_timeout(timeout);
     let _ = stream.set_write_timeout(timeout);
+
+    let snapshot = prepare()?;
+    let snapshot_path = snapshot.as_ref().map(SyncSnapshot::path);
+    let db_filepath = snapshot_path.as_deref().unwrap_or(db_filepath);
 
     let local_salt = if db_filepath.exists() && fs::metadata(db_filepath).map(|m| m.len() > 0).unwrap_or(false) {
         fs::read(db_filepath)
@@ -1395,6 +1492,67 @@ mod tests {
         let client_titles: Vec<String> = opened_client.data.entries.iter().map(|e| e.title.clone()).collect();
         assert!(client_titles.contains(&"Server Item".to_string()));
         assert!(client_titles.contains(&"Client Item".to_string()));
+    }
+
+    #[test]
+    fn existing_password_updates_round_trip_without_readopting_the_vault() {
+        use crate::vault::{VaultManager, NewEntry, UpdateEntry};
+        let directory = tempdir().unwrap();
+        let desktop_path = directory.path().join("nested/desktop.vdb");
+        let mobile_path = directory.path().join("mobile.vdb");
+        let password = "Test-only-master-password-2026";
+        let mut desktop = VaultManager::create("Test Vault", password, &desktop_path).unwrap();
+        let id = desktop.add_entry(NewEntry {
+            title: "Account".into(), username: "test".into(), password: "initial".into(),
+            url: String::new(), email: String::new(), notes: String::new(), tags: vec![],
+            totp_secret: None, custom_fields: vec![], entry_type: None, generate_passkey: None, attachments: None,
+        }).unwrap();
+        fs::copy(&desktop_path, &mobile_path).unwrap();
+        let mut mobile = VaultManager::open(&mobile_path, password).unwrap();
+        let keys = desktop.get_subkeys().unwrap().clone();
+
+        desktop.update_entry(id, UpdateEntry { password: Some("desktop-update".into()), ..Default::default() }).unwrap();
+        let snapshot = SyncSnapshot::create(&mobile_path).unwrap();
+        let original_mobile = fs::read(&mobile_path).unwrap();
+        let (stats, merged, _) = apply_and_save_remote_vault(&fs::read(&desktop_path).unwrap(), &keys, &snapshot.path(), None).unwrap();
+        assert_eq!(stats.entries_updated, 1);
+        assert_eq!(stats.entries_added, 0);
+        assert_eq!(fs::read(&mobile_path).unwrap(), original_mobile);
+        mobile.update_entry(id, UpdateEntry { title: Some("Edited during sync".into()), ..Default::default() }).unwrap();
+        merge_vault_data(&mut mobile.data, merged);
+        mobile.save().unwrap();
+        mobile.reload().unwrap();
+        // A newer concurrent local edit wins without being overwritten by the snapshot.
+        assert_eq!(mobile.get_entry(id).unwrap().title, "Edited during sync");
+        assert_eq!(mobile.get_entry(id).unwrap().password, "initial");
+
+        desktop.update_entry(id, UpdateEntry { password: Some("desktop-update-2".into()), ..Default::default() }).unwrap();
+        let (stats, _, _) = apply_and_save_remote_vault(&fs::read(&desktop_path).unwrap(), &keys, &mobile_path, None).unwrap();
+        assert_eq!(stats.entries_updated, 1);
+        mobile.reload().unwrap();
+        assert_eq!(mobile.get_entry(id).unwrap().password, "desktop-update-2");
+
+        mobile.update_entry(id, UpdateEntry { password: Some("mobile-update".into()), ..Default::default() }).unwrap();
+        apply_and_save_remote_vault(&fs::read(&mobile_path).unwrap(), &keys, &desktop_path, None).unwrap();
+        desktop.reload().unwrap();
+        assert_eq!(desktop.get_entry(id).unwrap().password, "mobile-update");
+        assert_eq!(desktop.data.entries.len(), 1);
+        assert_eq!(desktop.data.entries[0].password_history.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn webdav_snapshot_rejects_missing_etag_without_uploading() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata").unwrap();
+        });
+        let result = webdav_download_snapshot(&format!("http://{address}/vault.vdb"), "", None).await;
+        assert!(result.unwrap_err().to_string().contains("strong ETag"));
+        server.join().unwrap();
     }
 
     #[test]

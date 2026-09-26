@@ -86,6 +86,10 @@ impl VaultManager {
         key_file_path: Option<&Path>,
         path: &Path,
     ) -> crate::Result<Self> {
+        crate::vault::validation::validate_display_name(name)?;
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            fs::create_dir_all(parent)?;
+        }
         let salt = generate_salt();
 
         let key_file_bytes = match key_file_path {
@@ -307,8 +311,8 @@ impl VaultManager {
         self.data.trash.retain(|t| t.deleted_at > cutoff);
 
         // Serialize vault data as MessagePack (self-describing)
-        let serialized = rmp_serde::to_vec(&self.data)
-            .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {}", e)))?;
+        let serialized = Zeroizing::new(rmp_serde::to_vec(&self.data)
+            .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {}", e)))?);
 
         let mut flags = 0u16;
         if self.biometric.is_some() {

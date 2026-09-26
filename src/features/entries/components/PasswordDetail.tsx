@@ -1,3 +1,4 @@
+import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -525,14 +526,15 @@ export function PasswordDetail() {
                   {isEditing && editData ? (
                     <input
                       type="text"
-                      value={editData.title}
+                      maxLength={MAX_DISPLAY_NAME_LENGTH}
+                    value={editData.title}
                       onChange={(e) => setEditData({ ...editData, title: e.target.value })}
                       className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[18px] sm:text-[20px] font-semibold outline-none focus:border-[var(--border-focus)]"
                     />
                   ) : (
                     <div className="min-w-0 max-w-full">
-                      <ActionTooltip content={t('detail.copy_title_tooltip')}>
-                        <h1
+                      <ActionTooltip content={data.title}>
+                        <h1 title={data.title}
                           onClick={handleCopyTitle}
                           className="text-[18px] sm:text-[20px] font-semibold leading-tight tracking-tight text-[var(--text-primary)] truncate max-w-full cursor-pointer select-text hover:text-[var(--text-secondary)] transition-colors inline-block"
                         >
@@ -544,11 +546,11 @@ export function PasswordDetail() {
                   {data.url && !isEditing && (
                     <div className="min-w-0 max-w-full">
                       {isAppPath(data.url) ? (
-                        <span className="mt-0.5 inline-block truncate text-[12px] text-[var(--text-secondary)] max-w-full font-mono select-text">
+                        <span title={data.url} className="mt-0.5 inline-block truncate text-[12px] text-[var(--text-secondary)] max-w-full font-mono select-text">
                           {data.url}
                         </span>
                       ) : (
-                        <a
+                        <a title={data.url}
                           href={/^https?:\/\//i.test(data.url) ? data.url : `https://${data.url}`}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -708,7 +710,7 @@ export function PasswordDetail() {
                               className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-0.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                             />
                           ) : (
-                            <div className="truncate text-[13px] text-[var(--text-primary)] select-text">
+                            <div title={data.username} className="truncate text-[13px] text-[var(--text-primary)] select-text">
                               {data.username}
                             </div>
                           )}
@@ -804,7 +806,7 @@ export function PasswordDetail() {
                               className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-0.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono text-[12px]"
                             />
                           ) : (
-                            <div className="truncate text-[13px] text-[var(--text-primary)] font-mono text-[12px] select-text">
+                            <div title={data.url} className="truncate text-[13px] text-[var(--text-primary)] font-mono text-[12px] select-text">
                               {data.url}
                             </div>
                           )}
@@ -1092,7 +1094,7 @@ export function PasswordDetail() {
                       >
                         <span className="shrink-0 select-none">{getAttachmentIcon(att.mime_type || att.mimeType, att.name)}</span>
                         <div className="flex flex-col min-w-0">
-                          <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors select-text">
+                          <span title={att.name} className="truncate text-[12.5px] font-medium text-[var(--text-primary)] group-hover/att:text-[var(--accent-hover)] transition-colors select-text">
                             {att.name}
                           </span>
                           <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono select-none">

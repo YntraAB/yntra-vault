@@ -8,6 +8,7 @@ pub mod attachments;
 pub mod sync;
 pub mod tools;
 pub mod smartlogin;
+pub mod updater;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -19,6 +20,7 @@ pub use attachments::*;
 pub use sync::*;
 pub use tools::*;
 pub use smartlogin::*;
+pub use updater::*;
 
 /// Shared vault state across all IPC commands.
 pub struct AppState {
@@ -27,6 +29,7 @@ pub struct AppState {
     pub lock_on_focus_loss: AtomicBool,
     pub lock_on_system_lock: AtomicBool,
     pub smart_login_cancel: Arc<AtomicBool>,
+    pub smart_login_running: Arc<AtomicBool>,
     pub pairing_cancel: Arc<AtomicBool>,
     pub qr_pairing_session: Mutex<Option<yntra_vault_core::services::sync::QrPairingSession>>,
     pub pending_adopted_vault: Mutex<Option<yntra_vault_core::services::sync::PendingAdoptedVault>>,

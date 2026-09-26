@@ -29,32 +29,50 @@ const manifestPath = path.join(mainDir, 'AndroidManifest.xml');
 if (fs.existsSync(manifestPath)) {
   let manifestContent = fs.readFileSync(manifestPath, 'utf8');
 
-  const requiredPermissions = [
-    '    <!-- Camera for optical QR pairing and TOTP 2FA secret scanning -->',
-    '    <uses-permission android:name="android.permission.CAMERA" />',
-    '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />',
-    '    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />',
-    '    <uses-feature android:name="android.hardware.camera" android:required="false" />',
-    '    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
+  if (!manifestContent.includes('${applicationId}.updates')) {
+    if (!manifestContent.includes('</application>')) throw new Error('Android application element missing');
+    manifestContent = manifestContent.replace('</application>', `
+        <provider android:name="com.yntravault.app.UpdateFileProvider"
+            android:authorities="\${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+    </application>`);
+    fs.writeFileSync(manifestPath, manifestContent, 'utf8');
+  }
+  const xmlDir = path.join(mainDir, 'res', 'xml');
+  fs.mkdirSync(xmlDir, { recursive: true });
+  fs.writeFileSync(path.join(xmlDir, 'update_paths.xml'), '<paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="verified_updates" path="updates/" /></paths>');
+
+  const requiredEntries = [
+    { name: 'android.permission.INTERNET', tag: '    <uses-permission android:name="android.permission.INTERNET" />' },
+    { name: 'android.permission.CAMERA', tag: '    <uses-permission android:name="android.permission.CAMERA" />' },
+    { name: 'android.permission.READ_EXTERNAL_STORAGE', tag: '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' },
+    { name: 'android.permission.READ_MEDIA_IMAGES', tag: '    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' },
+    { name: 'android.hardware.camera', tag: '    <uses-feature android:name="android.hardware.camera" android:required="false" />' },
+    { name: 'android.hardware.camera.autofocus', tag: '    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />' },
+    { name: 'android.permission.REQUEST_INSTALL_PACKAGES', tag: '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />' },
   ];
 
-  if (!manifestContent.includes('android.permission.CAMERA')) {
+  const missingEntries = requiredEntries.filter(entry => !manifestContent.includes(entry.name));
+
+  if (missingEntries.length > 0) {
     const manifestTagMatch = manifestContent.match(/<manifest\b[^>]*>/);
     if (manifestTagMatch) {
       const insertIdx = manifestTagMatch.index + manifestTagMatch[0].length;
+      const injectedTags = missingEntries.map(e => e.tag).join('\n');
       manifestContent =
         manifestContent.slice(0, insertIdx) +
         '\n' +
-        requiredPermissions.join('\n') +
+        injectedTags +
         manifestContent.slice(insertIdx);
 
       fs.writeFileSync(manifestPath, manifestContent, 'utf8');
-      console.log('✓ Injected camera and storage permissions into AndroidManifest.xml');
+      console.log(`✓ Injected missing permissions/features into AndroidManifest.xml: ${missingEntries.map(e => e.name).join(', ')}`);
     } else {
       console.warn('⚠️ Could not find <manifest> tag in AndroidManifest.xml');
     }
   } else {
-    console.log('✓ Camera permission already present in AndroidManifest.xml');
+    console.log('✓ All required permissions and features already present in AndroidManifest.xml');
   }
 } else {
   console.warn(`⚠️ AndroidManifest.xml not found at ${manifestPath}`);
@@ -70,6 +88,7 @@ if (fs.existsSync(overrideMainActivityPath)) {
   const overrideContent = fs.readFileSync(overrideMainActivityPath, 'utf8');
 
   fs.writeFileSync(targetMainActivityPath, overrideContent, 'utf8');
+  fs.copyFileSync(path.join(rootDir, 'src-tauri', 'android-overrides', 'UpdateInstallerPlugin.kt'), path.join(targetKotlinDir, 'UpdateInstallerPlugin.kt'));
   console.log(`✓ Applied customized MainActivity.kt to ${targetMainActivityPath}`);
 } else {
   console.warn(`⚠️ Override MainActivity.kt not found at ${overrideMainActivityPath}`);

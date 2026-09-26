@@ -303,13 +303,13 @@ export function AppPickerModal({ open, onClose, onSelectApp }: AppPickerModalPro
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-[12px] font-medium text-[var(--text-primary)] truncate min-w-0">
+                            <span title={app.name} className="text-[12px] font-medium text-[var(--text-primary)] truncate min-w-0">
                               {app.name}
                             </span>
                             {getCategoryBadge(app.category, app.is_system)}
                           </div>
                           <ActionTooltip content={app.path}>
-                            <div className="text-[10.5px] font-mono text-[var(--text-tertiary)] truncate mt-0.5 max-w-full">
+                            <div title={app.path} className="text-[10.5px] font-mono text-[var(--text-tertiary)] truncate mt-0.5 max-w-full">
                               {app.path}
                             </div>
                           </ActionTooltip>

@@ -499,7 +499,7 @@ function TagItem({
         className="h-2 w-2 shrink-0 rounded-full"
         style={{ backgroundColor: tag.color }}
       />
-      <span className="flex-1 truncate text-left">{tag.name}</span>
+      <span title={tag.name} className="flex-1 truncate text-left">{tag.name}</span>
       {showCount && (
         <span className="text-[11px] tabular-nums text-[var(--text-tertiary)]">{tag.count}</span>
       )}

@@ -20,9 +20,9 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
-  const { password, generate } = usePasswordGenerator();
+  const { password, error, generate } = usePasswordGenerator();
   const [mode, setMode] = useState<'Random' | 'Diceware'>('Random');
-  const [showOptions, setShowOptions] = useState(false);
+  const [showOptions, setShowOptions] = useState(!onSelect);
 
   // Random options
   const [length, setLength] = useState(20);
@@ -140,6 +140,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
       </div>
 
       {/* Strength & Breach Indicators */}
+      {error && <p role="alert" className="text-[12px] text-[var(--destructive)]">{error}</p>}
       {password && (
         <div className="flex flex-col gap-1.5 px-0.5">
           <PasswordStrength password={password} compact />
@@ -275,6 +276,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
         <button
           type="button"
           onClick={handleSelect}
+          disabled={!password}
           className="mt-1 rounded-[3px] bg-[var(--text-primary)] py-2 text-[12px] font-medium text-[var(--bg-base)] transition-colors hover:opacity-90 cursor-pointer"
         >
           {t('generator.use_password')}

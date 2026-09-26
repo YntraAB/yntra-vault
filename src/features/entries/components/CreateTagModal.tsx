@@ -1,3 +1,4 @@
+import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
  * CreateTagModal — Create a new tag (vault category)
  *
@@ -137,7 +138,8 @@ export function CreateTagModal({ open, onClose }: CreateTagModalProps) {
                 <input
                   ref={nameRef}
                   type="text"
-                  value={name}
+                  maxLength={MAX_DISPLAY_NAME_LENGTH}
+                    value={name}
                   onChange={(e) => {
                     setName(e.target.value);
                     setError('');

@@ -177,7 +177,7 @@ export default function VaultSelect() {
                     <Database size={18} className="shrink-0 text-[var(--text-secondary)]" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-[14px] font-medium text-[var(--text-primary)]">
+                        <span title={vault.name} className="truncate text-[14px] font-medium text-[var(--text-primary)]">
                           {vault.name}
                         </span>
                         {missingVaults.has(vault.id) && (
@@ -189,7 +189,7 @@ export default function VaultSelect() {
                           </ActionTooltip>
                         )}
                       </div>
-                      <div className="truncate text-[12px] text-[var(--text-tertiary)] select-text">{vault.path}</div>
+                      <div title={vault.path} className="truncate text-[12px] text-[var(--text-tertiary)] select-text">{vault.path}</div>
                     </div>
                   </button>
 
