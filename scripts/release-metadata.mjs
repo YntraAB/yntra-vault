@@ -40,4 +40,4 @@ for (const [suffix, platform] of Object.entries(macPlatforms)) {
 }
 writeFileSync(join(directory, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n');
 writeFileSync(join(directory, 'SHA256SUMS'), suffixes.map(suffix => `${packages[suffix].sha256}  Yntra.Vault_${version}_${suffix}`).join('\n') + '\n');
-writeFileSync('RELEASE_NOTES.md', `${notes}\n\n### Downloads\n${suffixes.map(suffix => `- [Yntra.Vault_${version}_${suffix}](${packages[suffix].url})`).join('\n')}\n`);
+writeFileSync('RELEASE_NOTES.md', `${notes}\n`);
