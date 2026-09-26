@@ -32,6 +32,6 @@ jobs:
           echo "Build tools: $(basename "$BUILD_TOOLS")"
           curl --fail --location --proto '=https' --proto-redir '=https' 'https://github.com/YntraAB/yntra-vault/releases/download/v0.2.3/Yntra.Vault_0.2.3_universal.apk' --output "$RUNNER_TEMP/published.apk"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/published.apk" > "$RUNNER_TEMP/public-certificates.txt"
-          grep -E '^(Signer|Number of signers)' "$RUNNER_TEMP/public-certificates.txt"
+          cat "$RUNNER_TEMP/public-certificates.txt"
           "$BUILD_TOOLS/aapt" dump badging "$RUNNER_TEMP/published.apk" > "$RUNNER_TEMP/badging.txt"
           node scripts/verify-android-update.mjs "$RUNNER_TEMP/badging.txt" "$RUNNER_TEMP/public-certificates.txt" '0.2.3'
