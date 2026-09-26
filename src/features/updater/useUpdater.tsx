@@ -1,4 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from 'react';
+import { appMetadata } from '@/lib/appMetadata';
+import { UpdateModal } from './UpdateModal';
 import { openExternalUrl } from '@/lib/utils';
 import { useBackend } from '@/lib/useBackend';
 import { useSettings } from '@/features/settings/context/SettingsContext';
@@ -15,7 +17,7 @@ export type UpdateStatus =
   | 'up-to-date'
   | 'error';
 
-export function useUpdater() {
+function useUpdaterState() {
   const { backend } = useBackend();
   const { settings } = useSettings();
   const { addToast } = useToast();
@@ -23,12 +25,13 @@ export function useUpdater() {
 
   const [status, setStatus] = useState<UpdateStatus>('idle');
   const [updateInfo, setUpdateInfo] = useState<CheckUpdateResult | null>(null);
-  const [currentVersion, setCurrentVersion] = useState<string>('0.2.3');
+  const [currentVersion, setCurrentVersion] = useState<string>('0.2.4');
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
   const hasAutoChecked = useRef(false);
+  const operation = useRef(false);
 
   // Load current app version on mount
   useEffect(() => {
@@ -39,7 +42,9 @@ export function useUpdater() {
   }, [backend]);
 
   const checkForUpdates = useCallback(async (silent = false) => {
-    if (!backend) return;
+    if (!backend || operation.current) return;
+    operation.current = true;
+    hasAutoChecked.current = true;
     setStatus('checking');
     setError(null);
 
@@ -79,12 +84,13 @@ export function useUpdater() {
         });
       }
     }
+    finally { operation.current = false; }
   }, [backend, addToast, t]);
 
   // Automatic background update check on app launch if enabled
   useEffect(() => {
     if (hasAutoChecked.current || !backend) return;
-    if (settings.autoCheckUpdates === true) {
+    if (settings.autoCheckUpdates === true && settings.operationMode !== 'airgap') {
       // Slight delay so initial vault UI loads smoothly
       const timer = setTimeout(() => {
         hasAutoChecked.current = true;
@@ -92,15 +98,18 @@ export function useUpdater() {
       }, 2500);
       return () => clearTimeout(timer);
     }
-  }, [backend, settings.autoCheckUpdates, checkForUpdates]);
+  }, [backend, settings.autoCheckUpdates, settings.operationMode, checkForUpdates]);
 
   const installUpdate = useCallback(async () => {
-    if (!backend || !updateInfo || !updateInfo.download_url) return;
+    if (!backend || !updateInfo?.has_update || !updateInfo.download_url || operation.current) return;
+    operation.current = true;
 
     setIsDownloading(true);
     setStatus('downloading');
+    setError(null);
 
     try {
+      await appMetadata.flush();
       if (updateInfo.target_platform === 'android') {
         addToast({
           message: t('updater.downloading_apk_toast') || 'Downloading Android update package...',
@@ -138,6 +147,7 @@ export function useUpdater() {
         await openExternalUrl(updateInfo.download_url);
         setStatus('ready');
       }
+      setIsModalOpen(false);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err || 'Installation failed');
       setError(errMsg);
@@ -147,6 +157,7 @@ export function useUpdater() {
         type: 'error',
       });
     } finally {
+      operation.current = false;
       setIsDownloading(false);
     }
   }, [backend, updateInfo, addToast, t]);
@@ -162,4 +173,20 @@ export function useUpdater() {
     checkForUpdates,
     installUpdate,
   };
+}
+
+const UpdaterContext = createContext<ReturnType<typeof useUpdaterState> | null>(null);
+export function UpdaterProvider({ children }: { children: ReactNode }) {
+  const updater = useUpdaterState();
+  return <UpdaterContext.Provider value={updater}>
+    {children}
+    <UpdateModal isOpen={updater.isModalOpen} onClose={() => updater.setIsModalOpen(false)}
+      updateInfo={updater.updateInfo} currentVersion={updater.currentVersion}
+      isDownloading={updater.isDownloading} onInstall={updater.installUpdate} error={updater.error} />
+  </UpdaterContext.Provider>;
+}
+export function useUpdater() {
+  const value = useContext(UpdaterContext);
+  if (!value) throw new Error('useUpdater must be used within UpdaterProvider');
+  return value;
 }

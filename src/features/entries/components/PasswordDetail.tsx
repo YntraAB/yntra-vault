@@ -1,3 +1,5 @@
+import { useCapabilities } from '@/lib/platform';
+import { saveFileDialog } from '@/lib/backend';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
@@ -52,6 +54,7 @@ import { ActionTooltip } from '@/components/ui/tooltip';
 import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
 
 export function PasswordDetail() {
+  const capabilities = useCapabilities();
   const { t } = useTranslation();
   const {
     selectedEntry,
@@ -160,6 +163,13 @@ export function PasswordDetail() {
     if (!backend || !selectedEntry) return;
     setDownloadingAttId(attachment.id);
     try {
+      if (isTauri()) {
+        const path = await saveFileDialog({ defaultPath: attachment.name });
+        if (!path) return;
+        await backend.exportAttachment(selectedEntry.id, attachment.id, path);
+        addToast({ message: t('toast.downloaded_attachment', { name: attachment.name }), type: 'success' });
+        return;
+      }
       const cached = previewCacheRef.current.get(attachment.id);
       let uint8: Uint8Array;
       let shouldZero = false;
@@ -235,14 +245,16 @@ export function PasswordDetail() {
         if (!hasSelection && !isInputFocused && selectedEntry.password) {
           e.preventDefault();
           e.stopPropagation();
+          try {
           if (isTauri() && backend) {
-            backend.copyEntryPassword(selectedEntry.id, settings.clipboardClearSeconds).catch(() => {});
+            await backend.copyEntryPassword(selectedEntry.id, settings.clipboardClearSeconds);
           } else if (backend) {
-            backend.copyToClipboard(selectedEntry.password, true, settings.clipboardClearSeconds).catch(() => {});
+            await backend.copyToClipboard(selectedEntry.password, true, settings.clipboardClearSeconds);
           } else {
-            navigator.clipboard.writeText(selectedEntry.password).catch(() => {});
+            await navigator.clipboard.writeText(selectedEntry.password);
           }
           addToast({ message: t('toast.copied_password'), type: 'info' });
+          } catch { addToast({ message: t('toast.copy_failed'), type: 'error' }); }
         }
         return;
       }
@@ -252,14 +264,16 @@ export function PasswordDetail() {
         if (selectedEntry.username) {
           e.preventDefault();
           e.stopPropagation();
+          try {
           if (isTauri() && backend) {
-            backend.copyEntryUsername(selectedEntry.id).catch(() => {});
+            await backend.copyEntryUsername(selectedEntry.id);
           } else if (backend) {
-            backend.copyToClipboard(selectedEntry.username, false).catch(() => {});
+            await backend.copyToClipboard(selectedEntry.username, false);
           } else {
-            navigator.clipboard.writeText(selectedEntry.username).catch(() => {});
+            await navigator.clipboard.writeText(selectedEntry.username);
           }
           addToast({ message: t('toast.copied_username'), type: 'info' });
+          } catch { addToast({ message: t('toast.copy_failed'), type: 'error' }); }
         }
         return;
       }
@@ -269,12 +283,14 @@ export function PasswordDetail() {
         if (selectedEntry.url) {
           e.preventDefault();
           e.stopPropagation();
+          try {
           if (backend) {
-            backend.copyToClipboard(selectedEntry.url, false).catch(() => {});
+            await backend.copyToClipboard(selectedEntry.url, false);
           } else {
-            navigator.clipboard.writeText(selectedEntry.url).catch(() => {});
+            await navigator.clipboard.writeText(selectedEntry.url);
           }
           addToast({ message: t('toast.copied_url'), type: 'info' });
+          } catch { addToast({ message: t('toast.copy_failed'), type: 'error' }); }
         }
         return;
       }
@@ -813,7 +829,7 @@ export function PasswordDetail() {
                         </div>
                         {!isEditing && (
                           <div className="flex items-center gap-1">
-                            {data.url && (
+                            {data.url && (!isApp || capabilities.desktop) && (
                               <ActionTooltip content={isApp ? t('detail.launch_app') : t('detail.open_website')}>
                                 <button
                                   type="button"
@@ -1276,9 +1292,8 @@ function RecoveryCodesCard({
                     await navigator.clipboard.writeText(codes);
                   }
                 } catch {
-                  if (!isTauri()) {
-                    navigator.clipboard.writeText(codes).catch(() => {});
-                  }
+                  addToast({ message: t('toast.copy_failed'), type: 'error' });
+                  return;
                 }
                 addToast({ message: t('detail.copied_all_recovery'), type: 'success' });
               }}
@@ -1307,9 +1322,7 @@ function RecoveryCodeItem({ code, index, onCopy }: { code: string; index: number
         await navigator.clipboard.writeText(code);
       }
     } catch {
-      if (!isTauri()) {
-        await navigator.clipboard.writeText(code).catch(() => {});
-      }
+      return;
     }
     setCopied(true);
     onCopy();

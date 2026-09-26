@@ -1,6 +1,6 @@
 //! Cross-Platform Updater Engine for Yntra Vault
 //!
-//! Provides cryptographic update checks, semantic version comparisons,
+//! Provides HTTPS update checks, semantic version comparisons,
 //! manifest fetching (with GitHub Releases API fallback), SHA-256 integrity verification,
 //! and asset resolution for Desktop, Android, and CLI distributions.
 
@@ -279,6 +279,13 @@ pub async fn check_for_updates(
         }
     };
 
+    resolve_update(current_version, target_platform, manifest, custom_endpoint.is_none())
+}
+
+fn resolve_update(current_version: &str, target_platform: &str, manifest: UpdateManifest, official: bool) -> Result<CheckUpdateResult> {
+    if semver::Version::parse(manifest.version.trim_start_matches(['v', 'V'])).is_err() {
+        return Err(VaultError::UpdateError("Invalid release version".into()));
+    }
     let latest_ver = manifest.version.clone();
     let has_update = is_newer_version(current_version, &latest_ver);
 
@@ -291,6 +298,7 @@ pub async fn check_for_updates(
         "android" => {
             if let Some(ref extra) = manifest.extra
                 && let Some(ref android) = extra.android {
+                require_asset_version(&latest_ver, &android.version)?;
                 download_url = Some(android.url.clone());
                 sha256 = if !android.sha256.is_empty() {
                     Some(android.sha256.clone())
@@ -302,6 +310,7 @@ pub async fn check_for_updates(
         "windows-cli" => {
             if let Some(ref extra) = manifest.extra
                 && let Some(cli) = extra.cli.get("windows-x86_64") {
+                require_asset_version(&latest_ver, &cli.version)?;
                 download_url = Some(cli.url.clone());
                 sha256 = if !cli.sha256.is_empty() {
                     Some(cli.sha256.clone())
@@ -318,6 +327,7 @@ pub async fn check_for_updates(
         "windows-portable" => {
             if let Some(ref extra) = manifest.extra
                 && let Some(port) = extra.portable.get("windows-x86_64") {
+                require_asset_version(&latest_ver, &port.version)?;
                 download_url = Some(port.url.clone());
                 sha256 = if !port.sha256.is_empty() {
                     Some(port.sha256.clone())
@@ -339,6 +349,14 @@ pub async fn check_for_updates(
         }
     }
 
+    if let Some(url) = download_url.as_deref() {
+        validate_update_url(url)?;
+        if official { validate_official_asset_url(url, &latest_ver)?; }
+    }
+    if let Some(hash) = sha256.as_deref()
+        && (hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err(VaultError::UpdateError("Invalid release checksum".into()));
+    }
     Ok(CheckUpdateResult {
         current_version: current_version.to_string(),
         latest_version: latest_ver,
@@ -350,6 +368,28 @@ pub async fn check_for_updates(
         signature,
         target_platform: target_platform.to_string(),
     })
+}
+
+fn require_asset_version(release: &str, asset: &str) -> Result<()> {
+    if release.trim_start_matches(['v', 'V']) != asset.trim_start_matches(['v', 'V']) {
+        return Err(VaultError::UpdateError("Package version differs from release version".into()));
+    }
+    Ok(())
+}
+
+/// The official channel must point to a versioned asset in our release repository.
+/// This is a source restriction, not an independent publisher signature.
+fn validate_official_asset_url(raw: &str, version: &str) -> Result<()> {
+    let url = url::Url::parse(raw).map_err(|_| VaultError::UpdateError("Invalid release URL".into()))?;
+    let prefix = format!("/YntraAB/yntra-vault/releases/download/v{}/", version.trim_start_matches(['v', 'V']));
+    if url.host_str() != Some("github.com") || url.port().is_some()
+        || url.query().is_some() || url.fragment().is_some()
+        || !url.path().starts_with(&prefix)
+        || url.path()[prefix.len()..].is_empty()
+        || url.path()[prefix.len()..].contains('/') {
+        return Err(VaultError::UpdateError("Package is not a versioned official release asset".into()));
+    }
+    Ok(())
 }
 
 /// Download binary file payload into memory
@@ -422,6 +462,27 @@ pub fn replace_executable(path: &std::path::Path, bytes: &[u8]) -> std::io::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_resolution_rejects_mixed_versions_untrusted_assets_and_bad_hashes() {
+        let url = "https://github.com/YntraAB/yntra-vault/releases/download/v0.2.4/Yntra.Vault_0.2.4_universal.apk";
+        let mut manifest = UpdateManifest { version: "0.2.4".into(), notes: None, pub_date: None,
+            platforms: HashMap::new(), extra: Some(ExtraAssets { android: Some(AndroidUpdateAsset {
+                version: "0.2.4".into(), url: url.into(), sha256: "a".repeat(64), size_bytes: None,
+            }), ..Default::default() }) };
+        assert!(resolve_update("0.2.3", "android", manifest.clone(), true).unwrap().has_update);
+        manifest.extra.as_mut().unwrap().android.as_mut().unwrap().version = "0.2.3".into();
+        assert!(resolve_update("0.2.3", "android", manifest.clone(), true).is_err());
+        manifest.extra.as_mut().unwrap().android.as_mut().unwrap().version = "0.2.4".into();
+        manifest.extra.as_mut().unwrap().android.as_mut().unwrap().sha256 = "invalid".into();
+        assert!(resolve_update("0.2.3", "android", manifest.clone(), true).is_err());
+        manifest.version = "invalid".into();
+        assert!(resolve_update("0.2.3", "android", manifest, true).is_err());
+        for bad in [url.replace("YntraAB", "attacker"), url.replace("v0.2.4/", "v0.2.3/"),
+            url.replace("github.com", "github.com.example.org"), format!("{url}?redirect=elsewhere")] {
+            assert!(validate_official_asset_url(&bad, "0.2.4").is_err());
+        }
+    }
 
     #[test]
     fn github_fallback_resolves_desktop_installers_without_a_manifest() {

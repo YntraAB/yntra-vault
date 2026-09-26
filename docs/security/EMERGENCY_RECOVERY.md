@@ -1,85 +1,44 @@
-# Cryptographic Emergency Recovery Kit Specification
+# Emergency recovery specification: v2 and legacy compatibility
 
-> Technical specification of Yntra Vault's 2-of-3 Shamir Secret Sharing recovery kit, threshold algebra, self-verification, and reconstruction procedures.
+Implementation: 0.2.4. Source: [emergency.rs](../../crates/core/src/vault/emergency.rs), [storage.rs](../../crates/core/src/vault/storage.rs), and [sharing.rs](../../crates/crypto/src/sharing.rs). For user steps and limits, see [USB binding and recovery](USB-RECOVERY.md).
 
----
+## What recovery restores
 
-## 1. Overview
+New kits split an independent random **256-bit recovery secret**, not the master password. Two distinct compatible shares plus the encrypted vault file unwrap that replica's protected key material and establish a new password. They cannot recreate a deleted vault. Recovery deliberately clears unavailable USB/keyfile requirements and consumes the active kit; generate a new kit and re-enroll desired factors afterwards.
 
-Yntra Vault operates on an offline-first, zero-knowledge architecture. There are no central servers, recovery hotlines, or backdoor password reset mechanisms. To protect users against catastrophic loss of their master password without introducing third-party escrow risk, Yntra Vault provides a **Cryptographic Emergency Kit**.
+Legacy kits shared password material. Their decoding remains a compatibility path for old files, not the scheme used for new kits. Never describe recovery v2 as displaying or reconstructing the original password.
 
-The Emergency Kit generates three physical recovery shares using Shamir's Secret Sharing scheme ($k = 2, n = 3$).
-- **Threshold**: Any two shares can reconstruct the original master password.
-- **Information-Theoretic Secrecy**: Any single share reveals zero mathematical information about the master password ($H(S \mid S_i) = H(S)$).
-- **Physical Distribution**: Users can store Share A in a home fireproof safe, Share B in a bank deposit box, and Share C with a trusted family member or legal representative. Compromising any single location yields zero access.
+## Threshold sharing and framing
 
----
+The random secret is split 2-of-3 over GF(256), using polynomial `0x11B` and evaluation points 1, 2 and 3. Each byte uses a uniformly random coefficient from the full field, including zero. Any two distinct evaluation points reconstruct the secret; a single raw Shamir share does not determine it. Metadata/checksums and the wider application are not covered by a blanket information-theoretic security claim. The implementation avoids secret-indexed multiplication tables.
 
-## 2. Mathematical Foundation
+Each exported v2 record has this form (placeholders only):
 
-### Galois Field $\text{GF}(2^8)$ Arithmetic
-All operations are evaluated over the finite field $\text{GF}(2^8)$ defined by the AES Rijndael irreducible polynomial:
+```text
+YNTRA2:<replica UUID>:<kit UUID>:<encoded Shamir share>:<checksum>
+```
 
-$$P(x) = x^8 + x^4 + x^3 + x + 1 \quad (0\text{x}11\text{B})$$
+The checksum is the first eight bytes of BLAKE3 over the preceding framed body, encoded as sixteen lowercase hex characters. It detects transcription/corruption errors; it is not a signature or proof of ownership. Decoding bounds input and validates structure, UUIDs, checksum and 32-byte share payload. Reconstruction rejects duplicate share indices and mixed replica/kit identities. The encrypted recovery slot must also authenticate successfully.
 
-For each byte $s$ of the master password, an ephemeral linear polynomial is constructed using hardware cryptographically secure random bytes ($a_1 \leftarrow \text{OsRng}$):
+The generator reconstructs a share pair and compares it with the generated secret before returning the kit. Transient buffers use zeroizing wrappers; debug output redacts share values. GUI display/export still crosses the frontend/OS boundary, so this is not a guarantee against a compromised host or all plaintext memory exposure.
 
-$$f(x) = s + a_1 x \pmod{P(x)}$$
+## Authentication, rotation and local policy
 
-### Share Evaluation Points
-The shares are evaluated at non-zero field points $x \in \{1, 2, 3\}$:
-- **Share 1 ($x=1$)**: $y_1 = f(1) = s \oplus a_1$
-- **Share 2 ($x=2$)**: $y_2 = f(2) = s \oplus (a_1 \bullet 2)$
-- **Share 3 ($x=3$)**: $y_3 = f(3) = s \oplus (a_1 \bullet 3)$
+- Generation and revocation require verification of the current password and any selected keyfile. Invalid authentication aborts without mutating the kit.
+- First migration installs the authenticated `YNS2` local envelope, clears biometric enrollment and requires device re-pairing. Hardware-key enrollment and this recovery/USB mode cannot currently be combined.
+- Each replacement kit has a fresh generation UUID and rotates local storage protection. Revocation likewise changes local protection. Old shares stop opening the updated file but may still open old backups; offline snapshots cannot be revoked retroactively.
+- Ordinary password/USB changes preserve the active v2 kit. State transitions roll back in memory if saving fails; stale sessions cannot overwrite a newer recovery header.
+- Recovery audit history lives encrypted in the vault. Its active `verification_hash`/fingerprint field contains the v2 kit UUID, not a hash of the master password. Local audit/wrapping records are omitted from sync snapshots.
+- GUI setup shows one share at a time and requires two distinct saved-share confirmations. Native export writes a selected share to a separate document and refuses existing content. Never keep all shares together with the vault or put real shares in documentation/tests/logs.
 
-### Lagrange Interpolation
-Given any pair of shares $(x_A, y_A)$ and $(x_B, y_B)$ with $x_A \neq x_B$, the secret byte $s = f(0)$ is recovered in constant time via:
+## Entry points
 
-$$s = y_A \frac{0 - x_B}{x_A - x_B} + y_B \frac{0 - x_A}{x_B - x_A} = y_A \frac{x_B}{x_A \oplus x_B} \oplus y_B \frac{x_A}{x_A \oplus x_B}$$
+Core methods include `generate_emergency_kit_with_keyfile`, `revoke_emergency_kit` and `recover_with_shares`. Their current definitions in the source are authoritative; password/keyfile handling differs between native document URIs and ordinary file paths.
 
----
+The typed native/frontend contract is [src/types/ipc.ts](../../src/types/ipc.ts), implemented by [native auth commands](../../src-tauri/src/commands/auth.rs). It includes generation, selected-share export, recovery revocation, protected vault recovery and local-protection status. Resetting an audit view must never substitute for cryptographic revocation. The CLI exposes `recovery` generation/revocation/restore operations; use its current help for arguments instead of a historical `recover` command example.
 
-## 3. Self-Verification & Checksums
+## Security and validation limits
 
-To guarantee that a generated recovery sheet contains valid, reconstitutable shares prior to being exported or printed:
-1. **Automated Round-Trip Validation**:
-   The generator immediately pairs Share 1 and Share 2, reconstructs the secret, and compares it against the input password.
-2. **Share Fingerprinting**:
-   Each share includes a truncated SHA-256 fingerprint (8 hexadecimal characters) displayed alongside the share data. This allows users to confirm share integrity and prevent transcription errors.
-3. **Memory Safety**:
-   Transient secret buffers are held in hardware page-locked memory (`LockedBuffer`) and immediately zeroed upon completion (`zeroize`).
-4. **Pre-Generation Cryptographic Verification**:
-   Before generating recovery shares or writing audit logs, `VaultManager::generate_emergency_kit` validates the candidate master password against active session keys via Argon2id, HKDF, and constant-time comparison (`subtle::ConstantTimeEq`). Invalid passwords immediately return `VaultError::InvalidPassword` without modifying vault state.
-5. **Encrypted In-Vault Audit Trail**:
-   All kit generations, manual resets, and rekey invalidations are tracked with SHA-256 fingerprints and UTC timestamps inside `EmergencyKitAudit` within the encrypted `.vdb` settings payload.
+A recovery kit is an intentional alternative route to access, including when a USB factor is unavailable. Protect two-share access as carefully as an unlocked vault. Public USB serial binding does not defeat identifier spoofing or a RAT; separately supported hardware security keys use a different protection model.
 
----
-
-## 4. Emergency Kit Layout
-
-The generator outputs a structured Markdown recovery sheet containing:
-1. **Vault Identity**: Vault title, unique vault UUID, and creation timestamp.
-2. **Security Advisories**: Clear instructions on split storage and physical handling.
-3. **Recovery Shares**:
-   - Share 1 (Evaluation point $x=1$ with fingerprint)
-   - Share 2 (Evaluation point $x=2$ with fingerprint)
-   - Share 3 (Evaluation point $x=3$ with fingerprint)
-4. **Reconstruction Steps**: Step-by-step CLI commands (`yntra recover`) and GUI input instructions.
-
----
-
-## 5. API & IPC Surface
-
-- **Rust Core**: `crates/core/src/vault/emergency.rs` & `crates/core/src/vault/manager.rs`
-  - `VaultManager::verify_master_password(&self, candidate: &str) -> crate::Result<bool>`
-  - `VaultManager::generate_emergency_kit(&mut self, master_password: &str) -> crate::Result<EmergencyKit>`
-  - `VaultManager::get_emergency_kit_audit(&self) -> Option<EmergencyKitAudit>`
-  - `VaultManager::reset_emergency_kit_audit(&mut self) -> crate::Result<()>`
-- **Tauri IPC Commands**:
-  - `generate_emergency_kit`: `{ masterPassword: string }` -> `EmergencyKit`
-  - `get_emergency_kit_audit`: `()` -> `Option<EmergencyKitAudit>`
-  - `reset_emergency_kit_audit`: `()` -> `()`
-- **Frontend SDK**:
-  - `backend.generateEmergencyKit(masterPassword)`
-  - `backend.getEmergencyKitAudit()`
-  - `backend.resetEmergencyKitAudit()`
+Tests cover share reconstruction, malformed/mixed/duplicate shares, authentication, rotation/revocation, old-backup behavior, password changes, rollback and protected desktop/mobile synchronization. They do not establish universal USB-controller stability or successful Android document-provider/device behavior. See [the update guide](UPDATES.md) for latest aggregate verification and [the USB guide](USB-RECOVERY.md) for recovery-specific test limits. No independent security audit is implied.

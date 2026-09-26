@@ -11,6 +11,8 @@ An offline-first, zero-knowledge desktop password manager engineered with Rust, 
 
 All credentials remain fully local on your device. Yntra Vault operates with zero cloud servers, zero telemetry, and zero mandatory third-party network connections. Full binary format specification is available in [VDB_SPEC.md](docs/architecture/VDB_SPEC.md).
 
+For current source behavior, see [USB binding and recovery v2](docs/security/USB-RECOVERY.md) and [updates and preserved application data](docs/security/UPDATES.md). See the 0.2.4 changelog for the source changes; published packages are listed on GitHub Releases. Android implementation, device verification and independently signed desktop updates are separate milestones; see those guides for what remains unverified or unimplemented.
+
 ---
 
 > [!WARNING]

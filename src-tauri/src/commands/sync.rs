@@ -2,6 +2,21 @@ use tauri::{Manager, State};
 
 use super::AppState;
 
+async fn stop_operation(slot: &yntra_vault_core::services::sync::lifecycle::OperationSlot) -> Result<(), String> {
+    slot.cancel();
+    for _ in 0..250 {
+        if slot.is_idle() { return Ok(()); }
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    }
+    Err("Previous connection is still closing. Retry shortly.".into())
+}
+
+#[tauri::command]
+pub async fn cancel_p2p_sync_listener(state: State<'_ , AppState>) -> Result<(), String> {
+    stop_operation(&state.sync_listener_operation).await
+}
+
+
 fn ensure_sync_target(manager: &yntra_vault_core::vault::VaultManager, path: &std::path::Path, salt: &[u8; 32]) -> Result<(), String> {
     if !manager.is_unlocked() || manager.path != path || manager.salt() != *salt {
         return Err("Active vault changed during synchronization".into());
@@ -135,7 +150,7 @@ pub async fn webdav_sync(
             }
             manager.rebuild_search_index();
             manager.save().map_err(|e| e.to_string())?;
-            sync::SyncSnapshot::create(&path).map_err(|e| e.to_string())?
+            sync::SyncSnapshot::from_manager(manager).map_err(|e| e.to_string())?
         };
         let etag = snapshot.as_ref().map(|(_, etag)| etag.as_str());
         match sync::webdav_upload_conditional(&url, &username, credentials, &upload_snapshot.path(), etag, snapshot.is_none()).await {
@@ -173,11 +188,16 @@ pub async fn run_p2p_sync_listener(
         return Err("Synchronization is restricted to the active vault".into());
     }
     let target_path = path.clone();
+    let operation = std::sync::Arc::new(state.sync_listener_operation.begin()?);
+    let worker_operation = operation.clone();
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::sync::run_p2p_sync_listener_with_snapshot(
+        let _operation = worker_operation;
+        yntra_vault_core::services::sync::run_p2p_sync_listener_cancellable(
             &listen_addr,
             &subkeys,
+            _operation.cancel.clone(),
+            || { use tauri::Emitter; let _ = app.emit("p2p-listener-ready", ()); },
             || {
                 use yntra_vault_core::{services::sync::SyncSnapshot, VaultError};
                 let state = app.state::<AppState>();
@@ -185,7 +205,7 @@ pub async fn run_p2p_sync_listener(
                 let manager = vault.as_mut().ok_or(VaultError::VaultLocked)?;
                 ensure_sync_target(manager, &target_path, &salt).map_err(VaultError::SyncError)?;
                 manager.save()?;
-                SyncSnapshot::create(&target_path)
+                SyncSnapshot::from_manager(manager)
             },
         )
     })
@@ -209,14 +229,15 @@ pub async fn run_p2p_sync_client(
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
         let manager = vault.as_mut().ok_or("Vault is locked")?;
         manager.save().map_err(|e| e.to_string())?;
-        let snapshot = yntra_vault_core::services::sync::SyncSnapshot::create(&manager.path).map_err(|e| e.to_string())?;
+        let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(manager).map_err(|e| e.to_string())?;
         (manager.get_subkeys().map_err(|e| e.to_string())?.clone(), manager.path.clone(), manager.salt(), snapshot)
     };
 
     if !db_path.is_empty() && std::path::Path::new(&db_path) != path {
         return Err("Synchronization is restricted to the active vault".into());
     }
-    let dev_uuid = device_id.and_then(|d| uuid::Uuid::parse_str(&d).ok());
+    let _ = device_id; // Kept for IPC compatibility; identity is resolved locally.
+    let dev_uuid = None;
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
         yntra_vault_core::services::sync::run_p2p_sync_client_with_device(
@@ -322,10 +343,12 @@ pub async fn start_pairing_host(
         manager.path.clone()
     };
 
-    state.pairing_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
-    let cancel_flag = state.pairing_cancel.clone();
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
+    let worker_operation = operation.clone();
+    let cancel_flag = operation.cancel.clone();
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
+        let _operation = worker_operation;
         yntra_vault_core::services::sync::pairing::run_p2p_pairing_host_with_device_and_cancel(
             &listen_addr,
             &password,
@@ -357,9 +380,8 @@ pub async fn start_pairing_host(
 }
 
 #[tauri::command]
-pub fn cancel_pairing_host(state: State<'_, AppState>) -> Result<(), String> {
-    state.pairing_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-    Ok(())
+pub async fn cancel_pairing_host(state: State<'_, AppState>) -> Result<(), String> {
+    stop_operation(&state.pairing_operation).await
 }
 
 #[tauri::command]
@@ -403,33 +425,36 @@ pub async fn start_pairing_client(
         }
     };
 
-    let pass_clone = password.clone();
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
+    let worker_operation = operation.clone();
+    let pass_clone = zeroize::Zeroizing::new(password.clone());
     let (stats, _merged_data) = tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::sync::pairing::run_p2p_pairing_client_with_device(
+        let _operation = worker_operation;
+        yntra_vault_core::services::sync::pairing::run_p2p_pairing_client_cancellable(
             &server_addr,
             &pass_clone,
             &pairing_code,
             mode,
             device_name,
+            Some(_operation.cancel.clone()),
         )
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
+    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
     // Open newly adopted vault or update active manager in AppState
     if let Some(ref saved_path_str) = stats.vault_path {
         let saved_path = std::path::PathBuf::from(saved_path_str);
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-        if let Some(manager) = vault.as_mut() {
-            if manager.path == saved_path {
-                // Pairing may change the root keys; reopen instead of retaining old keys.
-                *manager = yntra_vault_core::vault::VaultManager::open(&saved_path, &password)
-                    .map_err(|e| e.to_string())?;
-            }
-        } else if let Ok(manager) = yntra_vault_core::vault::manager::VaultManager::open(&saved_path, &password) {
-            *vault = Some(manager);
+        if vault.as_ref().is_some_and(|manager| manager.path != saved_path) {
+            return Err("Active vault changed during pairing".into());
         }
+        // Pairing may change the root keys; reopen instead of retaining old keys.
+        let manager = yntra_vault_core::vault::VaultManager::open(&saved_path, &password).map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
+        *vault = Some(manager);
     }
 
     Ok(stats)
@@ -475,12 +500,18 @@ pub fn generate_qr_pairing_session(
         })
         .collect();
 
-    let (session, info) = yntra_vault_core::services::sync::generate_qr_pairing_session(
+    // Reserve before showing the QR: an advertised code always has a bound socket.
+    let listener = std::net::TcpListener::bind("0.0.0.0:5324")
+        .or_else(|_| std::net::TcpListener::bind("0.0.0.0:0"))
+        .map_err(|e| format!("Unable to prepare QR listener: {}", e))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let (mut session, info) = yntra_vault_core::services::sync::generate_qr_pairing_session(
         local_ips,
-        yntra_vault_core::services::sync::DEFAULT_PAIRING_PORT,
+        port,
         device_name,
     );
 
+    session.listener = Some(std::sync::Arc::new(listener));
     let mut guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
     *guard = Some(session);
 
@@ -495,8 +526,8 @@ pub async fn start_qr_pairing_host(
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
     let session = {
-        let guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
-        guard.as_ref().cloned().ok_or("Ingen aktiv QR-parningssession hittades. Generera en QR-kod först.")?
+        let mut guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
+        guard.take().ok_or("Ingen aktiv QR-parningssession hittades. Generera en QR-kod först.")?
     };
 
     let host_db_path = {
@@ -506,10 +537,12 @@ pub async fn start_qr_pairing_host(
         manager.path.clone()
     };
 
-    state.pairing_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
-    let cancel_flag = state.pairing_cancel.clone();
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
+    let worker_operation = operation.clone();
+    let cancel_flag = operation.cancel.clone();
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
+        let _operation = worker_operation;
         yntra_vault_core::services::sync::run_p2p_qr_pairing_host(
             &session,
             &host_db_path,
@@ -537,23 +570,19 @@ pub async fn start_qr_pairing_host(
         }
     }
 
-    if let Ok(mut guard) = state.qr_pairing_session.lock() {
-        *guard = None;
-    }
-
     Ok(stats)
 }
 
 #[tauri::command]
-pub fn cancel_qr_pairing_host(state: State<'_, AppState>) -> Result<(), String> {
-    state.pairing_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+pub async fn cancel_qr_pairing_host(state: State<'_, AppState>) -> Result<(), String> {
+    state.pairing_operation.cancel();
     if let Ok(mut guard) = state.qr_pairing_session.lock() {
         *guard = None;
     }
     if let Ok(mut guard) = state.pending_adopted_vault.lock() {
         *guard = None;
     }
-    Ok(())
+    stop_operation(&state.pairing_operation).await
 }
 
 #[tauri::command]
@@ -571,35 +600,42 @@ pub async fn start_qr_pairing_client(
     // QR pairing adopts into a dedicated collision-free file in vault_dir to avoid destroying existing open vaults
     let mode = ClientPairingMode::AdoptIntoDir { target_dir: vault_dir };
 
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
+    let worker_operation = operation.clone();
+    let cancel = operation.cancel.clone();
+    let worker_cancel = cancel.clone();
+    let initial_path = state.vault.lock().map_err(|e| e.to_string())?.as_ref().map(|m| m.path.clone());
     let mut res = tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::sync::run_p2p_qr_pairing_client(
+        let _operation = worker_operation;
+        yntra_vault_core::services::sync::pairing::run_p2p_qr_pairing_client_cancellable(
             &qr_payload,
             mode,
             device_name,
             password,
+            Some(worker_cancel),
         )
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
-    // If a master password was provisioned in-transit, unlock the vault in AppState immediately
-    if let Some(ref saved_path_str) = res.stats.vault_path
-        && let Some(ref pwd) = res.master_password {
-            let saved_path = std::path::PathBuf::from(saved_path_str);
-            let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-            if let Some(manager) = vault.as_mut() {
-                if manager.path == saved_path {
-                    let _ = manager.reload();
-                }
-            } else if let Ok(manager) = yntra_vault_core::vault::manager::VaultManager::open(&saved_path, pwd) {
-                *vault = Some(manager);
-            }
-        }
+    use zeroize::Zeroizing;
+    let received_password = res.master_password.take().map(Zeroizing::new);
+    if cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
+    // A late result must neither unlock after cancellation nor replace a different active vault.
+    if let (Some(saved_path), Some(pwd)) = (&res.stats.vault_path, received_password.as_ref()) {
+        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if vault.as_ref().map(|m| m.path.clone()) != initial_path { return Err("Active vault changed during pairing".into()); }
+        let manager = yntra_vault_core::vault::VaultManager::open(std::path::Path::new(saved_path), pwd)
+            .map_err(|e| e.to_string())?;
+        if cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
+        *vault = Some(manager);
+    }
 
     // If the host did not provide a master password, store the pending vault in memory for manual completion
     if let Some(pending) = res.pending_vault.take() {
         let mut guard = state.pending_adopted_vault.lock().map_err(|e| e.to_string())?;
+        if cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         *guard = Some(pending);
     }
 
@@ -614,6 +650,8 @@ pub async fn complete_adopted_vault(
     password: String,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
+    let worker_operation = operation.clone();
     let pending = {
         let mut guard = state.pending_adopted_vault.lock().map_err(|e| e.to_string())?;
         guard.take().ok_or("Ingen väntande valvadoption hittades.")?
@@ -622,22 +660,33 @@ pub async fn complete_adopted_vault(
     let dest_path = pending.dest_path.clone();
     let entries_count = pending.data.entries.len();
 
-    let pwd_clone = password.clone();
-    tokio::task::spawn_blocking(move || {
+    let pwd_clone = zeroize::Zeroizing::new(password.clone());
+    let retry_pending = pending.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let _operation = worker_operation;
         yntra_vault_core::services::sync::pairing::complete_adopted_vault_save(&pending, &pwd_clone)
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string());
+    if let Err(error) = result {
+        if !operation.cancel.load(std::sync::atomic::Ordering::Acquire) {
+            *state.pending_adopted_vault.lock().map_err(|e| e.to_string())? = Some(retry_pending);
+        }
+        return Err(error);
+    }
+    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
 
     {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
         let manager = yntra_vault_core::vault::manager::VaultManager::open(&dest_path, &password)
             .map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         *vault = Some(manager);
     }
 
     Ok(yntra_vault_core::services::sync::PairingStats {
+        peer_saved: None,
         entries_sent: 0,
         entries_received: entries_count,
         entries_merged: entries_count,

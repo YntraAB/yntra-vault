@@ -1,3 +1,4 @@
+import { useCapabilities } from '@/lib/platform';
 /**
  * EntryContextMenu — Right-click context menu for entry items in PasswordList
  *
@@ -41,6 +42,7 @@ export function EntryContextMenu({
   onBulkEdit,
   onBulkDelete,
 }: EntryContextMenuProps) {
+  const capabilities = useCapabilities();
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +153,7 @@ export function EntryContextMenu({
                 {t('menu.edit')}
               </button>
 
+              {capabilities.automation && (
               <button
                 disabled={!canAutotype}
                 onClick={() => {
@@ -168,6 +171,7 @@ export function EntryContextMenu({
                 <Zap size={13} />
                 {t('menu.autotype')}
               </button>
+              )}
 
               <button
                 onClick={() => {

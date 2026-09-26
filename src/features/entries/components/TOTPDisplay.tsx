@@ -46,9 +46,7 @@ export const TOTPDisplay: React.FC<TOTPDisplayProps> = ({
         await navigator.clipboard.writeText(code.code);
       }
     } catch {
-      if (!isTauri()) {
-        await navigator.clipboard.writeText(code.code).catch(() => {});
-      }
+      return;
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

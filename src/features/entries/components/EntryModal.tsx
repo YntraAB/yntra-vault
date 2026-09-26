@@ -1,3 +1,4 @@
+import { useCapabilities } from '@/lib/platform';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
  * EntryModal — Create / Edit password entry
@@ -73,6 +74,7 @@ const PRESETS = [
 ];
 
 export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
+  const capabilities = useCapabilities();
   const { t } = useTranslation();
   const { addEntry, updateEntry, tags: allTags } = useEntries();
   const { filterCategory } = useUi();
@@ -779,6 +781,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                               placeholder={t('entry_modal.url_app_placeholder')}
                               className="h-8 flex-1 min-w-0 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-focus)] font-mono text-[12px] transition-colors"
                             />
+                            {capabilities.desktop && (
                             <ActionTooltip content={t('entry_modal.browse_apps_tooltip')}>
                               <button
                                 type="button"
@@ -788,6 +791,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                                 <FolderOpen size={14} />
                               </button>
                             </ActionTooltip>
+                            )}
                           </div>
                         );
                       } else if (id === 'totpSecret') {

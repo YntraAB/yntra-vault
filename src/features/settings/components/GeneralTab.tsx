@@ -1,3 +1,5 @@
+import { appMetadata } from '@/lib/appMetadata';
+import { useCapabilities } from '@/lib/platform';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSettings } from '../context/SettingsContext';
@@ -8,7 +10,7 @@ import { SettingSection, SettingRow, Toggle } from './SettingSection';
 import { isTauri } from '@/lib/backend';
 import { useBackend } from '@/lib/useBackend';
 import { RefreshCw, Sparkles, CheckCircle2 } from 'lucide-react';
-import { useUpdater, UpdateModal } from '@/features/updater';
+import { useUpdater } from '@/features/updater';
 
 const AUTO_LOCK_OPTIONS = [
   { value: 1, labelKey: 'time.1_min' },
@@ -36,17 +38,16 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
   const { currentVault, lockVault, setCurrentVault } = useAuth();
   const { settings, updateSettings } = useSettings();
   const { addToast } = useToast();
+  const capabilities = useCapabilities();
   const { t } = useTranslation();
   const { backend } = useBackend();
   const {
     status: updaterStatus,
     updateInfo,
     currentVersion,
-    isModalOpen,
     isDownloading,
     setIsModalOpen,
     checkForUpdates,
-    installUpdate,
   } = useUpdater();
 
   return (
@@ -63,7 +64,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
               <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">{t('settings.file_location')}</span>
               <span className="font-mono text-[11px] text-[var(--text-secondary)] break-all select-all">{currentVault.path}</span>
             </div>
-            {isTauri() && (
+            {isTauri() && capabilities.desktop && (
               <button
                 type="button"
                 onClick={() => {
@@ -182,7 +183,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
       </SettingRow>
 
       {/* System & Application Behavior */}
-      <SettingRow
+      {capabilities.desktop && (<SettingRow
         label={t('settings.autostart_label')}
         description={t('settings.autostart_desc')}
         tooltip={t('settings.tooltip_autostart')}
@@ -191,9 +192,9 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
           checked={launchOnStartup}
           onChange={onToggleLaunch}
         />
-      </SettingRow>
+      </SettingRow>)}
 
-      <SettingRow
+      {capabilities.desktop && (<SettingRow
         label={t('settings.minimize_to_tray')}
         description={t('settings.minimize_to_tray_desc')}
         tooltip={t('settings.tooltip_minimize_to_tray')}
@@ -202,7 +203,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
           checked={settings.minimizeToTray}
           onChange={(v) => updateSettings({ minimizeToTray: v })}
         />
-      </SettingRow>
+      </SettingRow>)}
 
       <SettingRow
         label={t('settings.disable_skeleton_delays')}
@@ -230,7 +231,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
 
 
       {/* Auto-Type Automation */}
-      <SettingSection
+      {capabilities.automation && (<SettingSection
         label={t('settings.autotype_title')}
         tooltip={t('settings.tooltip_autotype')}
       >
@@ -281,9 +282,9 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
             />
           </div>
         </div>
-      </SettingSection>
+      </SettingSection>)}
 
-      <SettingRow
+      {capabilities.automation && (<SettingRow
         label={t('settings.autotype_launch_browser')}
         description={t('settings.autotype_launch_browser_desc')}
         tooltip={t('settings.tooltip_autotype_launch_browser')}
@@ -292,7 +293,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
           checked={settings.autotypeLaunchBrowser !== false}
           onChange={(v) => updateSettings({ autotypeLaunchBrowser: v })}
         />
-      </SettingRow>
+      </SettingRow>)}
 
       {/* Application Updates & Version */}
       <SettingSection label={t('settings.updates_title') || 'App Updates & Version'}>
@@ -310,7 +311,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
             <button
               type="button"
               onClick={() => checkForUpdates(false)}
-              disabled={updaterStatus === 'checking'}
+              disabled={updaterStatus === 'checking' || isDownloading}
               className="h-7 px-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
             >
               {updaterStatus === 'checking' ? (
@@ -373,7 +374,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         <button
           onClick={() => {
             if (!confirm(t('settings.confirm_rerun_setup') || 'Are you sure you want to re-run the initial setup wizard? Your vault will be locked.')) return;
-            localStorage.removeItem('yntra-vault-setup-completed');
+            appMetadata.removeItem('yntra-vault-setup-completed');
             lockVault();
             setCurrentVault(null);
             navigate('/setup');
@@ -384,15 +385,6 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </button>
       </SettingSection>
 
-      {/* Update Details Modal */}
-      <UpdateModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        updateInfo={updateInfo}
-        currentVersion={currentVersion}
-        isDownloading={isDownloading}
-        onInstall={installUpdate}
-      />
     </div>
   );
 }

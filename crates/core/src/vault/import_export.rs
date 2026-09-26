@@ -210,9 +210,14 @@ impl VaultManager {
 
     /// Exports decrypted vault entries to a CSV file.
     pub fn export_csv(&self, dest_path: &Path) -> crate::Result<()> {
-        let mut csv = String::from("Title,Username,Email,Password,URL,Notes,TOTP,Tags\n");
+        write_sensitive_file_safely(dest_path, &self.export_csv_text()?)
+    }
+
+    pub fn export_csv_text(&self) -> crate::Result<zeroize::Zeroizing<String>> {
+        let mut csv = zeroize::Zeroizing::new(String::from("Title,Username,Email,Password,URL,Notes,TOTP,Tags\n"));
         for entry in self.list_entries()? {
-            if let Ok(dec) = self.get_entry(entry.id) {
+            {
+                let dec = self.get_entry(entry.id)?;
                 let esc = |s: &str| {
                     let trimmed = s.trim_start();
                     let safe = if s.starts_with('\t')
@@ -246,20 +251,25 @@ impl VaultManager {
                 ));
             }
         }
-        write_sensitive_file_safely(dest_path, &csv)
+        Ok(csv)
     }
 
     /// Exports decrypted vault entries to a JSON file.
     pub fn export_json(&self, dest_path: &Path) -> crate::Result<()> {
+        write_sensitive_file_safely(dest_path, &self.export_json_text()?)
+    }
+
+    pub fn export_json_text(&self) -> crate::Result<zeroize::Zeroizing<String>> {
         let mut items = Vec::new();
         for entry in self.list_entries()? {
-            if let Ok(dec) = self.get_entry(entry.id) {
+            {
+                let dec = self.get_entry(entry.id)?;
                 items.push(dec);
             }
         }
         let json = serde_json::to_string_pretty(&items)
             .map_err(|e| VaultError::SerializationError(format!("Failed to format JSON: {}", e)))?;
-        write_sensitive_file_safely(dest_path, &json)
+        Ok(zeroize::Zeroizing::new(json))
     }
 }
 

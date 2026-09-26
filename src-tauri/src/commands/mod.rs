@@ -9,6 +9,12 @@ pub mod sync;
 pub mod tools;
 pub mod smartlogin;
 pub mod updater;
+pub mod platform;
+pub mod documents;
+pub mod metadata;
+pub use metadata::*;
+pub use documents::*;
+pub use platform::*;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -30,7 +36,8 @@ pub struct AppState {
     pub lock_on_system_lock: AtomicBool,
     pub smart_login_cancel: Arc<AtomicBool>,
     pub smart_login_running: Arc<AtomicBool>,
-    pub pairing_cancel: Arc<AtomicBool>,
+    pub pairing_operation: Arc<yntra_vault_core::services::sync::lifecycle::OperationSlot>,
+    pub sync_listener_operation: Arc<yntra_vault_core::services::sync::lifecycle::OperationSlot>,
     pub qr_pairing_session: Mutex<Option<yntra_vault_core::services::sync::QrPairingSession>>,
     pub pending_adopted_vault: Mutex<Option<yntra_vault_core::services::sync::PendingAdoptedVault>>,
 }

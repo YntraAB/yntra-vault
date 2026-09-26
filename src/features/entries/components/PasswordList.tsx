@@ -28,6 +28,7 @@ import { matchesShortcut, getKeybinds, formatShortcut } from '@/lib/keybinds';
 
 export interface PasswordListProps {
   onResizeStart?: (e: React.MouseEvent) => void;
+  mobile?: boolean;
 }
 
 interface Section {
@@ -35,7 +36,7 @@ interface Section {
   items: PasswordEntry[];
 }
 
-export function PasswordList({ onResizeStart }: PasswordListProps) {
+export function PasswordList({ onResizeStart, mobile = false }: PasswordListProps) {
   const { t } = useTranslation();
   const { backend } = useBackend();
   const filteredEntries = useFilteredEntries();
@@ -262,8 +263,8 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
   return (
     <div
-      className="relative flex flex-1 h-full w-full min-h-0 flex-col border-r-0 md:border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]"
-      style={{ width: 'var(--passwordlist-width)' }}
+      className="password-list-panel relative flex flex-1 md:flex-none h-full w-full min-w-0 min-h-0 flex-col border-r-0 md:border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+      style={{ width: mobile ? '100%' : 'var(--passwordlist-width)', flex: mobile ? '1 1 0%' : '0 0 auto' }}
     >
       {/* Desktop Header */}
       <div
@@ -407,7 +408,7 @@ export function PasswordList({ onResizeStart }: PasswordListProps) {
 
       {/* Resize handle (desktop only) */}
       <div
-        className="hidden md:block absolute right-0 top-0 z-10 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
+        className={`${mobile ? 'hidden' : 'block'} absolute right-0 top-0 z-10 h-full w-[6px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]`}
         onMouseDown={onResizeStart}
         role="slider"
         aria-label={t('common.resize_password_list')}

@@ -571,6 +571,15 @@ fn test_hardware2fa_enforces_true_2fa() {
     ).unwrap();
     assert!(manager.is_hardware2fa_enabled());
 
+    // Bypass the application guard entirely: a password alone must not decrypt
+    // the actual ciphertext even when the original authenticated header is known.
+    let file = yntra_vault_core::vault::format::VaultFile::from_bytes(&std::fs::read(&vault_path).unwrap()).unwrap();
+    assert_eq!(file.header.version, yntra_vault_core::vault::format::HARDWARE_BOUND_VERSION);
+    let mk = yntra_vault_core::crypto::derive_master_key_with_keyfile(master_pass.as_bytes(), None, &file.header.salt).unwrap();
+    let password_keys = yntra_vault_core::crypto::derive_subkeys(&mk).unwrap();
+    let blob = yntra_vault_core::crypto::cipher::EncryptedBlob { nonce: file.encrypted_payload[..24].to_vec(), ciphertext: file.encrypted_payload[24..].to_vec() };
+    assert!(yntra_vault_core::crypto::decrypt_vault_with_aad(&blob, &password_keys.vault_key, &file.header.aad_bytes().unwrap()).is_err());
+
     // Enabling biometric while Hardware 2FA is active must be rejected (Mutual Exclusivity)
     let bio_res = manager.enable_biometric();
     assert!(matches!(bio_res, Err(VaultError::InvalidState(_))));
@@ -608,6 +617,10 @@ fn test_hardware2fa_enforces_true_2fa() {
     // 7. Enrollment with empty password is strictly rejected
     let empty_enroll_res = unlocked.enable_hardware2fa_with_password("", None, Hardware2FaProtocol::YubiKeyChallengeResponse, "Key", challenge_salt, vec![], &hw_resp);
     assert!(matches!(empty_enroll_res, Err(VaultError::InvalidPassword)));
+
+    assert!(unlocked.verify_master_password(master_pass).unwrap());
+    unlocked.disable_hardware2fa().unwrap();
+    assert!(VaultManager::open(&vault_path, master_pass).is_ok());
 
     set_hardware2fa_mock(false);
 }
@@ -1174,3 +1187,19 @@ fn test_lock_clears_settings_and_sensitive_state() {
 
 
 
+
+#[test]
+fn document_keyfile_bytes_roundtrip_and_non_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault_path = dir.path().join("mobile-keyfile.vdb");
+    let key_path = dir.path().join("factor.key");
+    VaultManager::generate_key_file(&key_path).unwrap();
+    let key = std::fs::read(&key_path).unwrap();
+    assert!(VaultManager::generate_key_file(&key_path).is_err());
+    assert_eq!(std::fs::read(&key_path).unwrap(), key);
+    let password = "document key file password";
+    VaultManager::create_with_keyfile_bytes("Mobile", password, Some(&key), &vault_path).unwrap();
+    assert!(VaultManager::open_with_keyfile_bytes(&vault_path, password, Some(b"wrong")).is_err());
+    assert!(VaultManager::open_with_keyfile_bytes(&vault_path, password, Some(&[])).is_err());
+    assert!(VaultManager::open_with_keyfile(&vault_path, password, Some(&key_path)).is_ok());
+}

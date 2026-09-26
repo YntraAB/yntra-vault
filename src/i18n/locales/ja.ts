@@ -1,4 +1,7 @@
 export const ja = {
+  'toast.copy_failed': 'コピーできませんでした。もう一度お試しください。',
+  'pairing.received_title': "保管庫を受信しました",
+  'pairing.received_pending_password': "相手の端末が保管庫を受信しました。その端末でパスワードを設定し、保存してから同期してください。",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': '高セキュリティ・オフラインパスワードマネージャー',

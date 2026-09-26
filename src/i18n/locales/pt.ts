@@ -1,4 +1,7 @@
 export const pt = {
+  'toast.copy_failed': 'Falha ao copiar. Tente novamente.',
+  'pairing.received_title': "Cofre recebido",
+  'pairing.received_pending_password': "O outro dispositivo recebeu o cofre. Escolha uma senha e salve-o nesse dispositivo antes de sincronizar.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Gerenciador de Senhas Offline Seguro',

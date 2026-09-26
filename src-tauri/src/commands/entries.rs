@@ -262,19 +262,12 @@ pub async fn get_vault_path(state: State<'_, AppState>) -> Result<String, String
 pub async fn query_mobile_autofill_status(
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::autofill::MobileAutofillStatus, String> {
-    let vault = state.vault.lock().map_err(|e| e.to_string())?;
-    let manager = vault.as_ref().ok_or("Vault is locked")?;
-    let entries_count = manager.list_entries().map_err(|e| e.to_string())?.len();
-
+    let _ = state;
     Ok(yntra_vault_core::services::autofill::MobileAutofillStatus {
-        supported: true,
-        enabled: true,
-        active_provider: "Android AutofillService / iOS CredentialProvider".into(),
-        mapped_packages_count: entries_count,
-        strict_domain_matching: true,
-        asset_links_enforced: true,
-        webview_origin_protected: true,
-        biometric_stepup_required: true,
+        supported: false, enabled: false, active_provider: String::new(),
+        mapped_packages_count: 0, strict_domain_matching: false,
+        asset_links_enforced: false, webview_origin_protected: false,
+        biometric_stepup_required: false,
     })
 }
 
@@ -284,19 +277,8 @@ pub async fn get_autofill_credentials_for_package(
     web_domain: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::autofill::AutofillDatasetPayload, String> {
-    let vault = state.vault.lock().map_err(|e| e.to_string())?;
-    let manager = vault.as_ref().ok_or("Vault is locked")?;
-    let items = manager.find_entries_for_mobile_context(&package_name, web_domain.as_deref()).map_err(|e| e.to_string())?;
-    let asset_links_valid = items.iter().any(|item| {
-        yntra_vault_core::services::autofill::verify_digital_asset_links(&item.domain, &package_name, None)
-    });
-
-    Ok(yntra_vault_core::services::autofill::AutofillDatasetPayload {
-        package_name,
-        web_domain,
-        matched_credentials: items,
-        asset_links_verified: asset_links_valid,
-    })
+    let _ = (package_name, web_domain, state);
+    Err("Native mobile autofill is not available in this version".into())
 }
 
 pub fn extract_entry_password(
@@ -339,17 +321,18 @@ pub fn extract_entry_autotype_smart(
 
 #[tauri::command]
 pub async fn copy_entry_password(
+    app: tauri::AppHandle,
     entry_id: String,
     clear_after_secs: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let password = extract_entry_password(&entry_id, &state)?;
-    yntra_vault_core::crypto::copy_to_clipboard_defended(&password, true, clear_after_secs)
-        .map_err(|e| e.to_string())
+    super::platform::copy(&app, &password, true, clear_after_secs)
 }
 
 #[tauri::command]
 pub async fn copy_entry_username(
+    app: tauri::AppHandle,
     entry_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -369,12 +352,12 @@ pub async fn copy_entry_username(
         }
         entry.username
     };
-    yntra_vault_core::crypto::copy_to_clipboard_defended(&username, false, None)
-        .map_err(|e| e.to_string())
+    super::platform::copy(&app, &username, false, None)
 }
 
 #[tauri::command]
 pub async fn copy_entry_totp(
+    app: tauri::AppHandle,
     entry_id: String,
     clear_after_secs: Option<u64>,
     state: State<'_, AppState>,
@@ -400,8 +383,7 @@ pub async fn copy_entry_totp(
         mut_secret.zeroize();
         code
     };
-    yntra_vault_core::crypto::copy_to_clipboard_defended(&code.code, true, clear_after_secs)
-        .map_err(|e| e.to_string())
+    super::platform::copy(&app, &code.code, true, clear_after_secs)
 }
 
 #[tauri::command]

@@ -405,6 +405,10 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
   const shouldListen = (listenerManualOverride !== null ? listenerManualOverride : Boolean(settings.p2pAutoListen)) && !isLocked && Boolean(backend) && Boolean(currentVault);
 
+  const listenerTail = useRef<Promise<void>>(Promise.resolve());
+  const listenerView = useRef({ refreshEntries, refreshTags, addToast, language: settings.language });
+  listenerView.current = { refreshEntries, refreshTags, addToast, language: settings.language };
+
   // P2P Auto-Listener / Background loop
   useEffect(() => {
     if (!shouldListen || !backend || !currentVault || isLocked) {
@@ -413,16 +417,24 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
 
     let isCancelled = false;
-    setIsP2pListening(true);
+    const previous = listenerTail.current;
 
     const runListenerLoop = async () => {
+      await previous.catch(() => {});
+      if (isCancelled || isLockedRef.current) return;
+      const unlisten = await backend.onP2pListenerReady(() => {
+        if (!isCancelled && !isLockedRef.current) setIsP2pListening(true);
+      });
+      try {
       while (!isCancelled && !isLockedRef.current) {
         try {
+          setIsP2pListening(false);
           const addr = settings.p2pAddr || '0.0.0.0:5322';
           const stats = await backend.runP2pSyncListener(addr, currentVault.path);
           if (!isCancelled && !isLockedRef.current) {
+            const { refreshEntries, refreshTags, addToast, language } = listenerView.current;
             await Promise.all([refreshEntries(), refreshTags()]);
-            const lang = settings.language || 'en';
+            const lang = language || 'en';
             const count = (stats?.entries_added || 0) + (stats?.entries_updated || 0);
             const msg = count > 0
               ? getTranslation(lang, 'sync.toast_peer_synced_changes', { count: String(count) })
@@ -430,23 +442,34 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
             addToast({ message: msg, type: 'success' });
             sendDesktopNotification(getTranslation(lang, 'sync.desktop_title'), msg);
           }
-        } catch {
+        } catch (error) {
+          setIsP2pListening(false);
+          if (!isCancelled && String(error).includes('Failed to bind TCP listener')) {
+            listenerView.current.addToast({ message: String(error), type: 'error' });
+            break;
+          }
           // Timeout or connection closed; wait 1.5s before listening again
           if (isCancelled || isLockedRef.current) break;
           await new Promise((r) => setTimeout(r, 1500));
         }
       }
-      if (!isCancelled) {
-        setIsP2pListening(false);
+      } finally {
+        unlisten();
+        if (!isCancelled) setIsP2pListening(false);
       }
     };
 
-    runListenerLoop();
+    const running = runListenerLoop().catch((error) => {
+      if (!isCancelled) { setIsP2pListening(false); listenerView.current.addToast({ message: String(error), type: 'error' }); }
+    });
+    listenerTail.current = running;
     return () => {
       isCancelled = true;
+      const stopping = backend.cancelP2pSyncListener().catch(() => {});
+      listenerTail.current = Promise.all([running, stopping]).then(() => {});
       setIsP2pListening(false);
     };
-  }, [shouldListen, settings.p2pAddr, settings.language, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
+  }, [shouldListen, settings.p2pAddr, backend, currentVault?.path, isLocked]);
 
   // P2P Auto-Sync on Wi-Fi (Periodically scans for beacons and syncs)
   useEffect(() => {
@@ -457,7 +480,10 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     let isCancelled = false;
     const intervalMs = (settings.p2pAutoSyncIntervalMinutes || 5) * 60 * 1000;
 
+    let syncing = false;
     const runDiscoverySync = async () => {
+      if (syncing || isCancelled) return;
+      syncing = true;
       try {
         const peer = await backend.scanP2pDiscovery(2500);
         if (peer && !isCancelled && !isLockedRef.current) {
@@ -479,7 +505,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
             type: 'error',
           });
         }
-      }
+      } finally { syncing = false; }
     };
 
     // Initial check shortly after unlock

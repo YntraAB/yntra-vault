@@ -1,4 +1,7 @@
 export const ar = {
+  'toast.copy_failed': 'تعذّر النسخ. حاول مرة أخرى.',
+  'pairing.received_title': "تم استلام الخزنة",
+  'pairing.received_pending_password': "استلم الجهاز الآخر الخزنة. اختر كلمة مرور واحفظها على ذلك الجهاز قبل المزامنة.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'مدير كلمة المرور الآمن دون اتصال بالإنترنت',

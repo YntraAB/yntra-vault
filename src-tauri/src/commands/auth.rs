@@ -7,6 +7,75 @@ use yntra_vault_core::vault::types::VaultInfo;
 
 use super::AppState;
 
+#[derive(serde::Serialize)]
+pub struct CreatedProtectedVault { info: VaultInfo, kit: yntra_vault_core::vault::EmergencyKit }
+
+#[tauri::command]
+pub async fn create_protected_vault(name:String,password:String,path:String,usb_id:String,key_file_path:Option<String>,state:State<'_,AppState>) -> Result<CreatedProtectedVault,String> {
+    let password=Zeroizing::new(password);let path=PathBuf::from(path);
+    if path.exists(){return Err("A vault already exists at this location".into());}
+    let parent=path.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;
+    let temporary=tempfile::tempdir_in(parent).map_err(|e|e.to_string())?;
+    let kf=key_file_path.as_ref().map(PathBuf::from);
+    let raw=kf.as_ref().map(|p|yntra_vault_core::vault::manager::read_key_file_safely(p)).transpose().map_err(|e|e.to_string())?;
+    let mut manager=VaultManager::create_with_keyfile(&name,&password,kf.as_deref(),&temporary.path().join("new.vdb")).map_err(|e|e.to_string())?;
+    let kit=manager.generate_emergency_kit_with_keyfile(&password,raw.as_ref().map(|b|b.as_slice())).map_err(|e|e.to_string())?;
+    manager.set_usb_binding(&password,raw.as_ref().map(|b|b.as_slice()),Some(&usb_id)).map_err(|e|e.to_string())?;
+    let mut staged=tempfile::NamedTempFile::new_in(parent).map_err(|e|e.to_string())?;
+    use std::io::Write;
+    staged.write_all(&std::fs::read(&manager.path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    staged.as_file().sync_all().map_err(|e|e.to_string())?;
+    staged.persist_noclobber(&path).map_err(|e|e.to_string())?;
+    manager.path=path;let info=manager.info();*state.vault.lock().map_err(|e|e.to_string())?=Some(manager);
+    Ok(CreatedProtectedVault{info,kit})
+}
+
+#[tauri::command]
+pub async fn export_recovery_share(app: tauri::AppHandle, path: String, share: String) -> Result<(),String> {
+    let share=Zeroizing::new(share);
+    if path.starts_with("content://") {
+        let document = yntra_vault_core::vault::emergency::recovery_share_document(&share).map_err(|e|e.to_string())?;
+        if !super::documents::read(&app, &path, 1)?.is_empty() { return Err("Choose a new empty document for each recovery share".into()); }
+        return super::documents::write(&app, &path, document.as_bytes());
+    }
+    yntra_vault_core::vault::emergency::export_recovery_share(std::path::Path::new(&path),&share).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_usb_storage_devices() -> Result<Vec<yntra_vault_core::vault::usb::UsbDevice>,String> {
+    tokio::task::spawn_blocking(yntra_vault_core::vault::usb::list_usb_devices).await.map_err(|e|e.to_string())?.map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+pub fn get_local_protection(state: State<'_,AppState>) -> Result<yntra_vault_core::vault::protection::ProtectionInfo,String> {
+    let vault=state.vault.lock().map_err(|e|e.to_string())?;
+    Ok(vault.as_ref().ok_or("Vault is locked")?.protection_info())
+}
+
+#[tauri::command]
+pub async fn set_usb_binding(app: tauri::AppHandle,password: String,key_file_path: Option<String>,usb_id: Option<String>,state: State<'_,AppState>) -> Result<(),String> {
+    let password=Zeroizing::new(password);
+    let keyfile=key_file_path.as_deref().map(|p|super::documents::read_keyfile(&app,p)).transpose()?;
+    let mut vault=state.vault.lock().map_err(|e|e.to_string())?;
+    vault.as_mut().ok_or("Vault is locked")?.set_usb_binding(&password,keyfile.as_ref().map(|b|b.as_slice()),usb_id.as_deref()).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+pub async fn revoke_recovery(app: tauri::AppHandle,password: String,key_file_path: Option<String>,state: State<'_,AppState>) -> Result<(),String> {
+    let password=Zeroizing::new(password);
+    let keyfile=key_file_path.as_deref().map(|p|super::documents::read_keyfile(&app,p)).transpose()?;
+    let mut vault=state.vault.lock().map_err(|e|e.to_string())?;
+    vault.as_mut().ok_or("Vault is locked")?.revoke_emergency_kit(&password,keyfile.as_ref().map(|b|b.as_slice())).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+pub async fn recover_vault(path: String,share_a: String,share_b: String,new_password: String,state: State<'_,AppState>) -> Result<VaultInfo,String> {
+    let a=Zeroizing::new(share_a);let b=Zeroizing::new(share_b);let password=Zeroizing::new(new_password);
+    let manager=VaultManager::recover_with_shares(std::path::Path::new(&path),&a,&b,&password).map_err(|e|e.to_string())?;
+    let info=manager.info();*state.vault.lock().map_err(|e|e.to_string())?=Some(manager);Ok(info)
+}
+
 fn decode_password_bytes(bytes: Zeroizing<Vec<u8>>) -> Result<Zeroizing<String>, String> {
     let password = std::str::from_utf8(&bytes).map_err(|_| "Password not valid UTF-8".to_string())?;
     Ok(Zeroizing::new(password.to_owned()))
@@ -34,6 +103,7 @@ pub fn get_mobile_vault_path(app: tauri::AppHandle, name: String) -> Result<Opti
 
 #[tauri::command]
 pub async fn create_vault(
+    app: tauri::AppHandle,
     name: String,
     mut password: String,
     path: String,
@@ -41,8 +111,8 @@ pub async fn create_vault(
     state: State<'_, AppState>,
 ) -> Result<VaultInfo, String> {
     let vault_path = PathBuf::from(&path);
-    let kf_path = key_file_path.as_ref().map(PathBuf::from);
-    let res = VaultManager::create_with_keyfile(&name, &password, kf_path.as_deref(), &vault_path)
+    let kf = key_file_path.as_deref().map(|p| super::documents::read_keyfile(&app, p)).transpose()?;
+    let res = VaultManager::create_with_keyfile_bytes(&name, &password, kf.as_ref().map(|b| b.as_slice()), &vault_path)
         .map_err(|e| e.to_string());
     password.zeroize();
     let manager = res?;
@@ -54,14 +124,15 @@ pub async fn create_vault(
 
 #[tauri::command]
 pub async fn open_vault(
+    app: tauri::AppHandle,
     path: String,
     mut password: String,
     key_file_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<VaultInfo, String> {
     let vault_path = PathBuf::from(&path);
-    let kf_path = key_file_path.as_ref().map(PathBuf::from);
-    let res = VaultManager::open_with_keyfile(&vault_path, &password, kf_path.as_deref())
+    let kf = key_file_path.as_deref().map(|p| super::documents::read_keyfile(&app, p)).transpose()?;
+    let res = VaultManager::open_with_keyfile_bytes(&vault_path, &password, kf.as_ref().map(|b| b.as_slice()))
         .map_err(|e| e.to_string());
     password.zeroize();
     let manager = res?;
@@ -288,20 +359,29 @@ pub async fn disable_hardware2fa(state: State<'_, AppState>) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn generate_key_file(path: String) -> Result<(), String> {
+pub async fn generate_key_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if path.starts_with("content://") {
+        if !super::documents::read(&app, &path, 1)?.is_empty() { return Err("Choose a new empty document for the key file".into()); }
+        let bytes = Zeroizing::new(yntra_vault_core::crypto::kdf::generate_salt());
+        return super::documents::write(&app, &path, bytes.as_slice());
+    }
     let kf_path = PathBuf::from(&path);
     VaultManager::generate_key_file(&kf_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn lock_vault(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.pairing_operation.cancel();
+    state.sync_listener_operation.cancel();
     state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     if let Some(ref mut manager) = *vault {
         manager.lock();
     }
     *vault = None;
-    let _ = yntra_vault_core::crypto::clear_clipboard();
+    if let Ok(mut session) = state.qr_pairing_session.lock() { *session = None; }
+    if let Ok(mut pending) = state.pending_adopted_vault.lock() { *pending = None; }
+    let _ = super::platform::clear(&app);
     Ok(())
 }
 
@@ -348,13 +428,16 @@ pub async fn reconstruct_master_password_hash(share_a: String, share_b: String) 
 
 #[tauri::command]
 pub async fn generate_emergency_kit(
-    mut master_password: String,
+    app: tauri::AppHandle,
+    master_password: String,
+    key_file_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::vault::EmergencyKit, String> {
+    let master_password=Zeroizing::new(master_password);
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
-    let res = manager.generate_emergency_kit(&master_password).map_err(|e| e.to_string());
-    master_password.zeroize();
+    let kf=key_file_path.as_deref().map(|p|super::documents::read_keyfile(&app,p)).transpose()?;
+    let res = manager.generate_emergency_kit_with_keyfile(&master_password,kf.as_ref().map(|b|b.as_slice())).map_err(|e| e.to_string());
     res
 }
 
@@ -378,6 +461,7 @@ pub async fn reset_emergency_kit_audit(
 
 #[tauri::command]
 pub async fn create_vault_bytes(
+    app: tauri::AppHandle,
     name: String,
     password_bytes: Vec<u8>,
     path: String,
@@ -387,9 +471,9 @@ pub async fn create_vault_bytes(
     let password = decode_password_bytes(Zeroizing::new(password_bytes))?;
 
     let vault_path = PathBuf::from(&path);
-    let kf_path = key_file_path.as_ref().map(PathBuf::from);
+    let kf = key_file_path.as_deref().map(|p| super::documents::read_keyfile(&app, p)).transpose()?;
     let mut mut_pass = password;
-    let res = VaultManager::create_with_keyfile(&name, &mut_pass, kf_path.as_deref(), &vault_path)
+    let res = VaultManager::create_with_keyfile_bytes(&name, &mut_pass, kf.as_ref().map(|b| b.as_slice()), &vault_path)
         .map_err(|e| e.to_string());
     mut_pass.zeroize();
     let manager = res?;
@@ -401,6 +485,7 @@ pub async fn create_vault_bytes(
 
 #[tauri::command]
 pub async fn open_vault_bytes(
+    app: tauri::AppHandle,
     path: String,
     password_bytes: Vec<u8>,
     key_file_path: Option<String>,
@@ -409,9 +494,9 @@ pub async fn open_vault_bytes(
     let password = decode_password_bytes(Zeroizing::new(password_bytes))?;
 
     let vault_path = PathBuf::from(&path);
-    let kf_path = key_file_path.as_ref().map(PathBuf::from);
+    let kf = key_file_path.as_deref().map(|p| super::documents::read_keyfile(&app, p)).transpose()?;
     let mut mut_pass = password;
-    let res = VaultManager::open_with_keyfile(&vault_path, &mut_pass, kf_path.as_deref())
+    let res = VaultManager::open_with_keyfile_bytes(&vault_path, &mut_pass, kf.as_ref().map(|b| b.as_slice()))
         .map_err(|e| e.to_string());
     mut_pass.zeroize();
     let manager = res?;

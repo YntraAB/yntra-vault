@@ -1,4 +1,7 @@
 export const da = {
+  'toast.copy_failed': 'Kopiering mislykkedes. Prøv igen.',
+  'pairing.received_title': "Boksen er modtaget",
+  'pairing.received_pending_password': "Den anden enhed har modtaget boksen. Vælg en adgangskode, og gem den dér, før I synkroniserer.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Sikker offline adgangskodeadministrator',

@@ -393,12 +393,18 @@ pub async fn is_external_favicons_enabled() -> Result<bool, String> {
 
 #[tauri::command]
 pub async fn export_vault(
+    app: tauri::AppHandle,
     dest_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_ref().ok_or("Vault is locked")?;
+    super::documents::protect_vault_destination(&manager.path, &dest_path)?;
     let source = manager.info().path;
+    if dest_path.starts_with("content://") {
+        let bytes = super::documents::read(&app, &source, 512 * 1024 * 1024)?;
+        return super::documents::write(&app, &dest_path, &bytes);
+    }
     std::fs::copy(&source, &dest_path)
         .map_err(|e| format!("Export failed: {}", e))?;
     Ok(())
@@ -406,32 +412,50 @@ pub async fn export_vault(
 
 #[tauri::command]
 pub async fn export_vault_csv(
+    app: tauri::AppHandle,
     dest_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_ref().ok_or("Vault is locked")?;
+    super::documents::protect_vault_destination(&manager.path, &dest_path)?;
     let path = PathBuf::from(&dest_path);
+    if dest_path.starts_with("content://") {
+        let text = manager.export_csv_text().map_err(|e| e.to_string())?;
+        return super::documents::write(&app, &dest_path, text.as_bytes());
+    }
     manager.export_csv(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn export_vault_json(
+    app: tauri::AppHandle,
     dest_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_ref().ok_or("Vault is locked")?;
+    super::documents::protect_vault_destination(&manager.path, &dest_path)?;
     let path = PathBuf::from(&dest_path);
+    if dest_path.starts_with("content://") {
+        let text = manager.export_json_text().map_err(|e| e.to_string())?;
+        return super::documents::write(&app, &dest_path, text.as_bytes());
+    }
     manager.export_json(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn parse_import_file(
+    app: tauri::AppHandle,
     file_path: String,
     format: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::vault::importer::ImportPreviewResult, String> {
+    if file_path.starts_with("content://") {
+        let bytes = super::documents::read(&app, &file_path, 50 * 1024 * 1024)?;
+        let content = String::from_utf8(bytes.to_vec()).map_err(|_| "Import file is not UTF-8 text")?;
+        return parse_import_content(content, format, state).await;
+    }
     let requested_fmt = match format.as_deref() {
         Some("bitwarden_json") => yntra_vault_core::vault::importer::ImportFormat::BitwardenJson,
         Some("bitwarden_csv") => yntra_vault_core::vault::importer::ImportFormat::BitwardenCsv,
@@ -480,6 +504,7 @@ pub async fn parse_import_content(
         _ => yntra_vault_core::vault::importer::ImportFormat::AutoDetect,
     };
 
+    let content = Zeroizing::new(content);
     let mut preview = yntra_vault_core::vault::importer::Importer::parse_str(&content, requested_fmt)
         .map_err(|e| e.to_string())?;
 
@@ -511,19 +536,19 @@ pub async fn import_entries(
 
 #[tauri::command]
 pub async fn copy_to_clipboard(
+    app: tauri::AppHandle,
     text: String,
     is_sensitive: Option<bool>,
     clear_after_secs: Option<u64>,
 ) -> Result<(), String> {
     let sensitive = is_sensitive.unwrap_or(true);
-    yntra_vault_core::crypto::copy_to_clipboard_defended(&text, sensitive, clear_after_secs)
-        .map_err(|e| e.to_string())
+    let text = Zeroizing::new(text);
+    super::platform::copy(&app, &text, sensitive, clear_after_secs)
 }
 
 #[tauri::command]
-pub async fn clear_clipboard() -> Result<(), String> {
-    yntra_vault_core::crypto::clear_clipboard()
-        .map_err(|e| e.to_string())
+pub async fn clear_clipboard(app: tauri::AppHandle) -> Result<(), String> {
+    super::platform::clear(&app)
 }
 
 #[tauri::command]
@@ -537,7 +562,12 @@ pub async fn set_window_capture_protection(
         yntra_vault_core::crypto::set_window_capture_protection(hwnd.0 as isize, enable)
             .map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        window.app_handle().state::<super::platform::MobileServices>().0.run_mobile_plugin::<serde_json::Value>("captureProtection", enable).map(|_| ()).map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "android")))]
     {
         let _ = (window, enable);
         Ok(())

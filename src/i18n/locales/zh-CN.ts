@@ -1,4 +1,7 @@
 export const zhCN = {
+  'toast.copy_failed': '复制失败，请重试。',
+  'pairing.received_title': "已接收保险库",
+  'pairing.received_pending_password': "另一台设备已接收保险库。请先在该设备上设置密码并保存，然后再同步。",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': '安全离线密码管理器',

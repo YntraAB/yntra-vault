@@ -1,4 +1,7 @@
 export const sv = {
+  'toast.copy_failed': 'Kopieringen misslyckades. Försök igen.',
+  'pairing.received_title': 'Valvet är mottaget',
+  'pairing.received_pending_password': 'Den andra enheten har tagit emot valvet. Välj ett lösenord och spara det där innan ni synkar.',
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Säker offline lösenordshanterare',

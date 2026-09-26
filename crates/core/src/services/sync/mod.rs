@@ -1,5 +1,8 @@
 //! Vault Synchronization Protocols (WebDAV cloud sync and local network P2P sync).
 
+pub mod lifecycle;
+mod discovery;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket, SocketAddr, ToSocketAddrs, IpAddr, Ipv4Addr};
@@ -25,8 +28,14 @@ pub struct SyncSnapshot {
 }
 
 impl SyncSnapshot {
+    pub fn from_manager(manager: &crate::vault::VaultManager) -> crate::Result<Self> {
+        let directory = tempfile::tempdir()?;
+        fs::write(directory.path().join("vault.vdb"),manager.sync_bytes()?)?;
+        Ok(Self {directory})
+    }
     /// The caller must hold its vault lock while saving and copying the source.
     pub fn create(path: &Path) -> crate::Result<Self> {
+        if crate::vault::storage::is_protected(&fs::read(path)?) { return Err(crate::error::VaultError::SyncError("Protected vaults require an unlocked sync snapshot".into())); }
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let directory = tempfile::tempdir_in(parent)?;
         fs::copy(path, directory.path().join("vault.vdb"))?;
@@ -448,6 +457,9 @@ pub async fn webdav_download(
         crate::error::VaultError::InvalidFormat(format!("Downloaded file is not a valid vault database: {}", e))
     })?;
 
+    if dest_db_filepath.exists() && crate::vault::storage::is_protected(&fs::read(dest_db_filepath)?) {
+        return Err(crate::error::VaultError::SyncError("Use unlocked synchronization to preserve this vault's USB and recovery protection".into()));
+    }
     // Create a local backup (.vdb.bak) before overwriting current file
     if dest_db_filepath.exists() {
         let backup_path = dest_db_filepath.with_extension("vdb.bak");
@@ -675,11 +687,11 @@ fn apply_and_save_remote_vault(
 
         // Deduplicate local trusted devices to guarantee clean device list
         let mut seen_ids = std::collections::HashSet::new();
-        let mut seen_names = std::collections::HashSet::new();
+
         let mut deduped = Vec::new();
         for dev in local_data.settings.trusted_devices.drain(..) {
-            let name_key = (dev.name.to_lowercase(), dev.os.to_lowercase());
-            if seen_ids.insert(dev.id) && seen_names.insert(name_key) {
+
+            if seen_ids.insert(dev.id) {
                 deduped.push(dev);
             }
         }
@@ -912,9 +924,14 @@ pub fn listen_discovery_beacon(
 
     let local_ips = get_local_lan_ips();
     let start = std::time::Instant::now();
+    let mut last_query = start - std::time::Duration::from_secs(1);
     let mut buf = [0u8; 64];
 
     while start.elapsed() < timeout {
+        if last_query.elapsed() >= std::time::Duration::from_millis(500) {
+            discovery::query(&socket, expected_discovery_id, &local_ips);
+            last_query = std::time::Instant::now();
+        }
         match socket.recv_from(&mut buf) {
             Ok((len, peer_addr)) => {
                 if len >= 38 && buf[..4] == DISCOVERY_BEACON_MAGIC {
@@ -961,7 +978,7 @@ pub fn run_p2p_sync_listener_with_timeout(
     db_filepath: &Path,
     accept_timeout: std::time::Duration,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
-    run_p2p_sync_listener_prepared(listen_addr, subkeys, db_filepath, accept_timeout, || Ok(None))
+    run_p2p_sync_listener_prepared(listen_addr, subkeys, db_filepath, accept_timeout, None, || {}, || Ok(None))
 }
 
 /// Capture the application vault after a peer connects, not before waiting for it.
@@ -970,7 +987,17 @@ pub fn run_p2p_sync_listener_with_snapshot(
     subkeys: &crate::crypto::SubKeys,
     prepare: impl FnOnce() -> crate::Result<SyncSnapshot>,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
-    run_p2p_sync_listener_prepared(listen_addr, subkeys, Path::new(""), std::time::Duration::from_secs(45), || prepare().map(Some))
+    run_p2p_sync_listener_prepared(listen_addr, subkeys, Path::new(""), std::time::Duration::from_secs(45), None, || {}, || prepare().map(Some))
+}
+
+pub fn run_p2p_sync_listener_cancellable(
+    listen_addr: &str,
+    subkeys: &crate::crypto::SubKeys,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_listening: impl FnOnce(),
+    prepare: impl FnOnce() -> crate::Result<SyncSnapshot>,
+) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
+    run_p2p_sync_listener_prepared(listen_addr, subkeys, Path::new(""), std::time::Duration::from_secs(45), Some(cancel), on_listening, || prepare().map(Some))
 }
 
 fn run_p2p_sync_listener_prepared(
@@ -978,6 +1005,8 @@ fn run_p2p_sync_listener_prepared(
     subkeys: &crate::crypto::SubKeys,
     db_filepath: &Path,
     accept_timeout: std::time::Duration,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    on_listening: impl FnOnce(),
     prepare: impl FnOnce() -> crate::Result<Option<SyncSnapshot>>,
 ) -> crate::Result<(MergeStats, crate::vault::types::VaultData)> {
     let listener = TcpListener::bind(listen_addr)
@@ -988,11 +1017,17 @@ fn run_p2p_sync_listener_prepared(
 
     let local_port = listener.local_addr().map(|a| a.port()).unwrap_or(DEFAULT_P2P_PORT);
     let discovery_id = compute_p2p_discovery_id(subkeys);
+    let query_socket = discovery::responder();
+    on_listening();
 
     let start_time = std::time::Instant::now();
     let mut last_beacon = std::time::Instant::now() - std::time::Duration::from_secs(10);
 
-    let mut stream = loop {
+    let stream = loop {
+        if cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
+            return Err(crate::VaultError::SyncError("P2P listener cancelled".into()));
+        }
+        if let Some(socket) = &query_socket { discovery::respond(socket, &discovery_id, local_port); }
         if last_beacon.elapsed() >= std::time::Duration::from_millis(1500) {
             let _ = broadcast_discovery_beacon(&discovery_id, local_port);
             last_beacon = std::time::Instant::now();
@@ -1022,6 +1057,7 @@ fn run_p2p_sync_listener_prepared(
     let _ = stream.set_read_timeout(timeout);
     let _ = stream.set_write_timeout(timeout);
 
+    let mut stream = lifecycle::CancellableStream::new(stream, cancel)?;
     let snapshot = prepare()?;
     let snapshot_path = snapshot.as_ref().map(SyncSnapshot::path);
     let db_filepath = snapshot_path.as_deref().unwrap_or(db_filepath);
@@ -1220,15 +1256,7 @@ pub fn run_p2p_sync_client_with_device(
 
     for attempt in 0..10 {
         for addr in &addrs {
-            let candidate_ports = [addr.port(), DEFAULT_P2P_PORT, DEFAULT_PAIRING_PORT, 5325];
-            for p in candidate_ports {
-                let mut alt_addr = *addr;
-                alt_addr.set_port(p);
-                if let Ok(s) = TcpStream::connect_timeout(&alt_addr, connect_timeout) {
-                    stream = Some(s);
-                    break;
-                }
-            }
+            if let Ok(s) = TcpStream::connect_timeout(addr, connect_timeout) { stream = Some(s); }
             if stream.is_some() {
                 break;
             }
@@ -1492,6 +1520,58 @@ mod tests {
         let client_titles: Vec<String> = opened_client.data.entries.iter().map(|e| e.title.clone()).collect();
         assert!(client_titles.contains(&"Server Item".to_string()));
         assert!(client_titles.contains(&"Client Item".to_string()));
+    }
+
+    #[test]
+    fn protected_desktop_mobile_round_trip_preserves_usb_and_recovery() {
+        use crate::vault::{VaultManager, NewEntry, UpdateEntry};
+        use crate::vault::storage::{StorageSession, parse};
+        let directory = tempdir().unwrap();
+        let desktop_path = directory.path().join("desktop.vdb");
+        let mobile_path = directory.path().join("mobile.vdb");
+        let password = "Test master password 2026";
+        let mut desktop = VaultManager::create("Desktop", password, &desktop_path).unwrap();
+        let id = desktop.add_entry(NewEntry {
+            title:"Account".into(), username:"user".into(), password:"initial".into(),
+            url:String::new(),email:String::new(),notes:String::new(),tags:vec![],
+            totp_secret:None,custom_fields:vec![],entry_type:None,generate_passkey:None,attachments:None,
+        }).unwrap();
+        let kit = desktop.generate_emergency_kit(password).unwrap();
+        let keys = desktop.get_subkeys().unwrap().clone();
+        let old = desktop.storage.as_ref().unwrap().clone();
+        let mut bound = StorageSession::new(password,None,Some("TESTUSB123456"),&keys).unwrap();
+        bound.preserve_recovery(&old,&keys).unwrap();
+        desktop.storage = Some(bound);
+        desktop.save().unwrap();
+        let before = serde_json::to_vec(&desktop.storage.as_ref().unwrap().header).unwrap();
+
+        // Model the authenticated pairing handoff, excluding the desktop's unlock slots.
+        let mut mobile = VaultManager::from_sync_data(&mobile_path,desktop.data.clone(),desktop.salt,keys.clone(),"Mobile password 2026").unwrap();
+        assert!(!mobile.protection_info().usb_bound);
+        assert!(!mobile.protection_info().recovery_enabled);
+        assert!(mobile.data.settings.emergency_kit_audit.is_none());
+        mobile.update_entry(id,UpdateEntry {password:Some("mobile update".into()),..Default::default()}).unwrap();
+        let snapshot = SyncSnapshot::from_manager(&desktop).unwrap();
+        let (_, merged, _) = apply_and_save_remote_vault(&mobile.sync_bytes().unwrap(),&keys,&snapshot.path(),None).unwrap();
+        merge_vault_data(&mut desktop.data,merged);
+        desktop.save().unwrap();
+        assert_eq!(desktop.get_entry(id).unwrap().password,"mobile update");
+        assert_eq!(before,serde_json::to_vec(&desktop.storage.as_ref().unwrap().header).unwrap());
+
+        desktop.update_entry(id,UpdateEntry{password:Some("desktop update".into()),..Default::default()}).unwrap();
+        let snapshot = SyncSnapshot::from_manager(&mobile).unwrap();
+        let (_,merged,_) = apply_and_save_remote_vault(&desktop.sync_bytes().unwrap(),&keys,&snapshot.path(),None).unwrap();
+        merge_vault_data(&mut mobile.data,merged);mobile.save().unwrap();
+        let reopened = VaultManager::open(&mobile_path,"Mobile password 2026").unwrap();
+        assert_eq!(reopened.get_entry(id).unwrap().password,"desktop update");
+        assert!(!reopened.protection_info().usb_bound);
+        let bytes=fs::read(&desktop_path).unwrap();let (header,_)=parse(&bytes).unwrap();
+        assert!(StorageSession::open(header.clone(),password,None,None).is_err());
+        let (session,_)=StorageSession::open(header,password,None,Some("TESTUSB123456")).unwrap();
+        assert!(session.decrypt(&bytes).is_ok());
+        let recovered=VaultManager::recover_with_shares(&desktop_path,&kit.shares[0].share_data,&kit.shares[2].share_data,"Recovered password 2026").unwrap();
+        assert_eq!(recovered.get_entry(id).unwrap().password,"desktop update");
+        assert!(!recovered.protection_info().usb_bound);
     }
 
     #[test]

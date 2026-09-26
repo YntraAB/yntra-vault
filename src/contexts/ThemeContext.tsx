@@ -1,3 +1,4 @@
+import { appMetadata } from '@/lib/appMetadata';
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 type Theme = 'dark' | 'light' | 'system';
@@ -12,7 +13,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = localStorage.getItem('yntra-vault-theme');
+    const saved = appMetadata.getItem('yntra-vault-theme');
     return (saved as Theme) || 'system';
   });
 
@@ -49,7 +50,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
-    localStorage.setItem('yntra-vault-theme', newTheme);
+    appMetadata.setItem('yntra-vault-theme', newTheme);
   }, []);
 
   return (

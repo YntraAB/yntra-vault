@@ -1,3 +1,4 @@
+import { useCapabilities } from '@/lib/platform';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Monitor, Palette, Keyboard, Shield, Database, Trash2 } from 'lucide-react';
@@ -34,6 +35,7 @@ export function SettingsPanel() {
   const { settingsOpen, setSettingsOpen, setIsEditing, setFilterCategory, openEditModal } = useUi();
   const { entries, selectEntryById } = useEntries();
   const { addToast } = useToast();
+  const capabilities = useCapabilities();
   const { t } = useTranslation();
   const { backend } = useBackend();
 
@@ -50,6 +52,7 @@ export function SettingsPanel() {
   const [isTogglingBio, setIsTogglingBio] = useState(false);
 
   // Hardware 2FA state & modal
+  const [hwLegacy, setHwLegacy] = useState(false);
   const [hwActive, setHwActive] = useState(false);
   const [showHwModal, setShowHwModal] = useState(false);
   const [hwModalMode, setHwModalMode] = useState<'enroll' | 'test'>('enroll');
@@ -59,6 +62,7 @@ export function SettingsPanel() {
       backend.isBiometricEnabled(currentVault.path).then(setBioActive);
       backend.checkBiometricAvailable().then(setBioInfo);
       backend.isHardware2FaEnabled(currentVault.path).then(setHwActive);
+      backend.getHardware2FaChallenge(currentVault.path).then(info => setHwLegacy(Boolean(info && !info.payload_key_bound))).catch(() => {});
     }
   }, [backend, currentVault]);
 
@@ -181,7 +185,7 @@ export function SettingsPanel() {
               onWheel={handleTabsWheel}
               className="flex h-10 shrink-0 items-center gap-0 border-b border-[var(--border-subtle)] px-4 overflow-x-auto no-scrollbar touch-pan-x"
             >
-              {TABS.map((tab) => (
+              {TABS.filter(tab => capabilities.desktop || tab.id !== 'keybinds').map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -227,6 +231,7 @@ export function SettingsPanel() {
                   onToggleBiometric={handleToggleBiometric}
                   isTogglingBio={isTogglingBio}
                   hwActive={hwActive}
+                  hwLegacy={hwLegacy}
                   onOpenHwModal={(mode) => {
                     setHwModalMode(mode);
                     setShowHwModal(true);
@@ -274,6 +279,7 @@ export function SettingsPanel() {
               mode={hwModalMode}
               onSuccess={() => {
                 setHwActive(true);
+                setHwLegacy(false);
                 setBioActive(false);
                 addToast({ message: 'Hardware 2FA configured!', type: 'success' });
               }}

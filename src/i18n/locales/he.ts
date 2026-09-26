@@ -1,4 +1,7 @@
 export const he = {
+  'toast.copy_failed': 'ההעתקה נכשלה. נסו שוב.',
+  'pairing.received_title': "הכספת התקבלה",
+  'pairing.received_pending_password': "המכשיר האחר קיבל את הכספת. יש לבחור סיסמה ולשמור אותה באותו מכשיר לפני הסנכרון.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'מנהל סיסמאות לא מקוון ומאובטח',

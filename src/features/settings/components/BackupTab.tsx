@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FolderInput, AlertTriangle, FileSpreadsheet, FileCode, Smartphone, Laptop, Plus, Unlink, Loader2, RefreshCw, X } from 'lucide-react';
 import { useAuth } from '@/features/auth';
@@ -9,7 +9,8 @@ import { useTranslation } from '@/contexts/LanguageContext';
 import { useBackend } from '@/lib/useBackend';
 import { saveFileDialog, type TrustedDevice, type LocalDeviceInfo } from '@/lib/backend';
 import { getTransientWebdavPassword, setTransientWebdavPassword } from '@/lib/sessionSecrets';
-import { DevicePairingWizard, formatIpv4Input } from '@/features/sync';
+import { DevicePairingWizard } from '@/features/sync';
+import { syncEndpoint } from '@/features/sync/utils/endpoint';
 import { SettingSection, Toggle } from './SettingSection';
 
 export interface BackupTabProps {
@@ -60,6 +61,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   }, [loadTrustedDevices]);
 
   const [localDevice, setLocalDevice] = useState<LocalDeviceInfo | null>(null);
+  const syncBusy = useRef(false);
   const [syncingDeviceId, setSyncingDeviceId] = useState<string | null>(null);
   const [ipPromptDevice, setIpPromptDevice] = useState<TrustedDevice | null>(null);
   const [promptIpValue, setPromptIpValue] = useState<string>('');
@@ -73,13 +75,10 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
 
   const uniqueDevices = useMemo(() => {
     const seenIds = new Set<string>();
-    const seenNames = new Set<string>();
     const list: TrustedDevice[] = [];
     for (const dev of trustedDevices) {
-      const nameKey = `${(dev.name || '').toLowerCase()}:${(dev.os || '').toLowerCase()}`;
-      if (!seenIds.has(dev.id) && !seenNames.has(nameKey)) {
+      if (!seenIds.has(dev.id)) {
         seenIds.add(dev.id);
-        seenNames.add(nameKey);
         list.push(dev);
       }
     }
@@ -87,44 +86,31 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   }, [trustedDevices]);
 
   const handleSyncDevice = async (device: TrustedDevice, targetIpOverride?: string) => {
-    if (!backend || !currentVault) return;
-
-    let targetAddr = targetIpOverride?.trim() || '';
-
-    if (!targetAddr) {
-      const cached = localStorage.getItem(`yntra_peer_addr_${device.id}`) || localStorage.getItem('yntra_last_peer_addr');
-      if (cached) {
-        targetAddr = cached.trim();
-      }
-    }
-
-    if (!targetAddr) {
-      setSyncingDeviceId(device.id);
-      try {
-        const discovered = await backend.scanP2pDiscovery(1500);
-        if (discovered) {
-          targetAddr = discovered;
-        }
-      } catch {
-        // ignore discovery error
-      }
-    }
-
-    if (!targetAddr) {
-      setSyncingDeviceId(null);
-      setPromptIpValue(localStorage.getItem('yntra_last_peer_addr') || '');
-      setIpPromptDevice(device);
-      return;
-    }
-
+    if (!backend || !currentVault || syncBusy.current) return;
+    syncBusy.current = true;
     setSyncingDeviceId(device.id);
+    let targetAddr = targetIpOverride?.trim() || localStorage.getItem(`yntra_sync_endpoint_${device.id}`) || '';
     try {
-      const hostPart = targetAddr.split(':')[0].trim();
-      const cleanAddr = `${hostPart}:5322`;
-      const stats = await backend.runP2pSyncClient(cleanAddr, currentVault.path, device.id);
-
-      localStorage.setItem(`yntra_peer_addr_${device.id}`, hostPart);
-      localStorage.setItem('yntra_last_peer_addr', hostPart);
+      if (!targetAddr) targetAddr = await backend.scanP2pDiscovery(2500) || '';
+      if (!targetAddr) {
+        setPromptIpValue('');
+        setIpPromptDevice(device);
+        return;
+      }
+      targetAddr = syncEndpoint(targetAddr);
+      let stats;
+      try {
+        stats = await backend.runP2pSyncClient(targetAddr, currentVault.path);
+      } catch (error) {
+        // A stale DHCP address can be rediscovered. Never retry an authenticated
+        // transfer or a rejected identity as though it were a connection failure.
+        if (targetIpOverride || !String(error).includes('Failed to connect to sync server')) throw error;
+        const discovered = await backend.scanP2pDiscovery(2500);
+        if (!discovered || syncEndpoint(discovered) === targetAddr) throw error;
+        targetAddr = syncEndpoint(discovered);
+        stats = await backend.runP2pSyncClient(targetAddr, currentVault.path);
+      }
+      localStorage.setItem(`yntra_sync_endpoint_${device.id}`, targetAddr);
 
       await Promise.all([refreshEntries(), refreshTags(), loadTrustedDevices()]);
 
@@ -139,7 +125,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
     } catch (err: any) {
       const errMsg = typeof err === 'string' ? err : err?.message || String(err);
       if (!targetIpOverride) {
-        setPromptIpValue(targetAddr.split(':')[0].trim() || '');
+        setPromptIpValue(targetAddr);
         setIpPromptDevice(device);
       } else {
         addToast({
@@ -148,6 +134,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         });
       }
     } finally {
+      syncBusy.current = false;
       setSyncingDeviceId(null);
     }
   };
@@ -394,14 +381,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 device.os?.toLowerCase().includes('ios');
               const pairedDate = device.paired_at ? new Date(device.paired_at).toLocaleDateString() : '';
               const lastSync = device.last_sync_at ? new Date(device.last_sync_at).toLocaleString() : null;
-              const isCurrentDevice = Boolean(
-                localDevice && (
-                  device.id === localDevice.id || (
-                    device.name.toLowerCase() === localDevice.name.toLowerCase() &&
-                    device.os.toLowerCase() === localDevice.os.toLowerCase()
-                  )
-                )
-              );
+              const isCurrentDevice = localDevice?.id === device.id;
 
               return (
                 <div
@@ -442,7 +422,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        disabled={syncingDeviceId === device.id}
+                        disabled={syncingDeviceId !== null}
                         onClick={() => handleSyncDevice(device)}
                         className="flex h-7.5 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-2.5 text-[11px] font-medium text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
                         title={t('settings.sync_now_btn')}
@@ -622,7 +602,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                   type="text"
                   autoFocus
                   value={promptIpValue}
-                  onChange={(e) => setPromptIpValue(formatIpv4Input(e.target.value, promptIpValue))}
+                  onChange={(e) => setPromptIpValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && promptIpValue.trim()) {
                       handleSyncDevice(ipPromptDevice, promptIpValue);

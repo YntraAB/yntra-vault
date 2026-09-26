@@ -5,6 +5,55 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-09-26
+
+### Update reliability and data preservation
+- Run opt-in update checks once at application startup instead of only when opening Settings. Keep updater state across navigation, prevent overlapping checks/installations, retain installer errors for retry, and disable native installation when a valid checksum is unavailable.
+- Preserve recent vault IDs/names/paths, preferences, theme and setup state in a versioned native metadata file with migration from existing WebView storage, ordered atomic writes and explicit failure handling. Restore metadata before rendering and flush pending saves before update actions; exclude passwords, recovery shares and keyfile paths.
+- Keep the application ID and existing WebView origin/data location stable. Enforce the permanent Android release certificate, application ID and version mapping in release validation.
+- Reject inconsistent release versions and non-official asset locations. Stage Android APKs atomically under their content hash, recheck the staged digest, package identity, signing certificates and newer versionCode before opening the system installer.
+- Fix Android customization-script parsing and include its required helper scripts in the public export allowlist. Document platform behavior, preservation guarantees and limitations in [Updates and application data](docs/security/UPDATES.md). Desktop detached updater signatures and device installation verification remain outstanding.
+- Align recovery/format documentation with random-secret recovery v2, hardware-bound v5 and the separate local envelope. Clarify migration and verification limits; keep private AI/review notes out of the public changelog projection and include the user-facing USB/update guides in its documentation index.
+
+### Added
+- Add an Android native clipboard bridge, sensitive-content marking, ownership-aware expiry, screen-capture protection and document-provider support for vault import, backup/export, recovery shares, key files and attachment saving.
+- Optional Windows USB hardware-serial binding in vault creation and Security settings. The vault can be renamed or moved while requiring the enrolled device at unlock; no USB sidecar key file is created.
+- Recovery v2: a random independent recovery secret split into two-of-three shares, individual native share exports, generation identity/checksums, and password-reset recovery for a lost password or USB. Add CLI recovery generation, revocation and restore commands.
+- Document setup, recovery, synchronization, migration, hardware limitations and test scope in [USB binding and recovery](docs/security/USB-RECOVERY.md).
+
+### Changed
+- Present recovery setup as a compact three-step dialog with one share at a time, individual export, hidden-by-default codes and a final saved-share review.
+- Keep imported user tags/groups without adding synthetic source tags such as KeePass, Bitwarden or Imported.
+- Persist the application's device identity independently of display-name changes; assign separate random identities to mobile installations and retain devices with matching display names.
+- Separate each replica's local password, USB binding and recovery envelope from synchronized vault content. Phone updates preserve desktop protection; paired phone copies have no inherited USB requirement.
+- Require fresh authentication to replace/revoke recovery. Replacement rotates the local storage key; password changes and USB changes preserve the current kit. Recovery consumes the current kit and requires explicit USB re-enrollment.
+- The first v2 migration requires re-pairing existing devices and clears biometric enrollment. Biometric and legacy hardware-key enrollment are unavailable for protected v2 files. Legacy hardware 2FA must be disabled before migration; older applications cannot open the new envelope.
+
+### Fixed
+- Detect the native operating system independently of window size. Hide desktop automation, installed-app selection, tray/startup controls, desktop keyboard settings, USB enrollment and unavailable native authentication on phones; retain supported vault functions.
+- Stop showing successful copies after clipboard errors and remove the silent unprotected native-to-browser fallback. Use native clipboard access for pairing codes and addresses.
+- Keep phones with identical names as distinct trusted devices throughout pairing and sync.
+- Make password changes transactional on failure and prevent key-file generation from overwriting an existing factor. Fail plaintext exports if an entry cannot be decrypted instead of silently omitting it.
+- Restore bounded, resizable desktop sidebar/item-list widths and persist them on drag release. Preserve full-width mobile layout.
+- Parse KeePass XML structurally: empty/self-closing fields remain empty, entities decode once, historical entries are excluded, and nested groups cannot leak into adjacent entries. Reject malformed, DTD-bearing and still-encrypted XML exports with a clear error.
+- Reserve the QR listening socket before displaying its actual port, try the QR's bounded list of adapter addresses, and stop probing unrelated sync/pairing ports.
+- Isolate P2P attempts, await listener cancellation, reject stale UI results, interrupt blocked network I/O on Windows, and display listening status only after the socket is ready.
+- Add active sync discovery queries with unicast replies, preserve advertised ports/IPv6 addresses, rediscover stale cached addresses after connection failure, and resolve the sync sender's identity locally.
+- Require payload-bound authenticated QR receipts from compatible peers before reporting host completion; distinguish a saved vault from a received vault awaiting a password. Retain pending adoption after a failed save so it can be retried.
+- Re-encrypt entries, history and attachments when PIN pairing merges independently created vaults, retaining readable secrets on both peers.
+- Reject raw sync overwrites of protected files and QR adoption over existing vaults; use encrypted snapshots for regular P2P/WebDAV synchronization. Stage and flush local vault saves atomically.
+- Reject malformed or mixed recovery shares and roll back unlock state if a protection/recovery save fails. Require two distinct saved-share confirmations in setup.
+
+### Security
+- Newly enrolled/re-enrolled hardware protection uses a random payload-encryption key instead of a password-derived payload key. Hardware-bound files use format v5 so older applications reject them safely. Existing legacy hardware vaults require explicit re-enrollment; first activation/upgrade invalidates old device links and additional key slots. Old backups retain their prior protection.
+- Add a native inactivity deadline, clear pending pairing secrets on manual/timed lock, and prevent delayed activity from reviving expired sessions.
+- Remove macOS clipboard secrets from process arguments; pass them through a private pipe. Return errors for unavailable clipboard implementations.
+- Stop falsely reporting native phone autofill and Digital Asset Links verification as available; the unfinished credential-provider bridge fails closed.
+- Restrict Android camera requests to the app origin, suppress production WebView console forwarding, exclude private data from automatic backup/device transfer and remove broad storage/photo-read permissions. Manual backup and P2P remain available.
+- Authenticate local protection framing and derive USB-dependent wrapping keys cryptographically. Bound file/header parsing and remove secret-indexed Shamir multiplication tables; use the full random coefficient field.
+- USB serials are public and spoofable. This feature deters copying but does not protect against a RAT controlling the host, a captured serial plus password, or an already unlocked session. Formatting can erase files; hardware-identifier stability is not guaranteed for all devices or drivers.
+- Old recovery kits can still open old backups. Real USB copy/rename/reopen/password-change/recovery tests passed without modifying existing files; formatting and Windows reinstallation were not tested. See the guide for remaining platform and compatibility limits.
+
 ## [0.2.3] - 2026-09-26
 
 ### Added

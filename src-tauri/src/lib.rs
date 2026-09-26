@@ -19,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .manage(commands::platform::AutoLockState::default())
         .manage(AppState {
             vault: Mutex::new(None),
             minimize_to_tray: std::sync::atomic::AtomicBool::new(true),
@@ -26,13 +27,14 @@ pub fn run() {
             lock_on_system_lock: std::sync::atomic::AtomicBool::new(true),
             smart_login_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             smart_login_running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            pairing_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pairing_operation: Default::default(),
+            sync_listener_operation: Default::default(),
             qr_pairing_session: Mutex::new(None),
             pending_adopted_vault: Mutex::new(None),
         });
 
     #[cfg(target_os = "android")]
-    { builder = builder.plugin(commands::updater::android_installer_plugin()); }
+    { builder = builder.plugin(commands::updater::android_installer_plugin()).plugin(commands::platform::mobile_services_plugin()); }
 
     #[cfg(not(mobile))]
     {
@@ -45,6 +47,8 @@ pub fn run() {
                         if let Ok(mut vault) = state.vault.lock() {
                             if let Some(ref mut manager) = *vault {
                                 state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
+                                state.pairing_operation.cancel();
+                                state.sync_listener_operation.cancel();
                                 manager.lock();
                             }
                             *vault = None;
@@ -64,6 +68,8 @@ pub fn run() {
                         if let Ok(mut vault) = state.vault.lock() {
                             if let Some(ref mut manager) = *vault {
                                 state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
+                                state.pairing_operation.cancel();
+                                state.sync_listener_operation.cancel();
                                 manager.lock();
                             }
                             *vault = None;
@@ -80,6 +86,11 @@ pub fn run() {
     builder
         .invoke_handler(tauri::generate_handler![
             // Vault
+            commands::get_runtime_platform,
+            commands::configure_auto_lock,
+            commands::record_user_activity,
+            commands::import_vault_document,
+            commands::export_attachment,
             commands::create_vault,
             commands::get_mobile_vault_path,
             commands::open_vault,
@@ -162,6 +173,7 @@ pub fn run() {
             commands::webdav_sync,
             commands::webdav_test_connection,
             commands::run_p2p_sync_listener,
+            commands::cancel_p2p_sync_listener,
             commands::run_p2p_sync_client,
             commands::get_local_ip,
             commands::get_local_ips,
@@ -183,6 +195,13 @@ pub fn run() {
             commands::reconstruct_master_password,
             commands::reconstruct_master_password_hash,
             commands::generate_emergency_kit,
+            commands::list_usb_storage_devices,
+            commands::get_local_protection,
+            commands::set_usb_binding,
+            commands::revoke_recovery,
+            commands::recover_vault,
+            commands::create_protected_vault,
+            commands::export_recovery_share,
             commands::get_emergency_kit_audit,
             commands::reset_emergency_kit_audit,
             // Export & Import
@@ -217,6 +236,8 @@ pub fn run() {
             commands::smart_login_start,
             commands::smart_login_cancel,
             // App Updates (Desktop, Mobile, Portable)
+            commands::load_ui_metadata,
+            commands::save_ui_metadata,
             commands::check_app_update,
             commands::download_and_install_apk,
             commands::install_portable_update,
@@ -224,6 +245,7 @@ pub fn run() {
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
+            yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&app.path().app_data_dir()?.join("device-id"))?;
 
             #[cfg(target_os = "windows")]
             {
@@ -302,6 +324,21 @@ pub fn run() {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     let state = app_handle.state::<AppState>();
+                    if app_handle.state::<commands::platform::AutoLockState>().expired() {
+                        if let Ok(mut vault) = state.vault.lock() {
+                            if let Some(mut manager) = vault.take() {
+                                state.pairing_operation.cancel();
+                                state.sync_listener_operation.cancel();
+                                state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
+                                manager.lock();
+                                if let Ok(mut session) = state.qr_pairing_session.lock() { *session = None; }
+                                if let Ok(mut pending) = state.pending_adopted_vault.lock() { *pending = None; }
+                                let _ = commands::platform::clear(&app_handle);
+                                let _ = app_handle.emit("vault-locked", ());
+                            }
+                        }
+                    }
+
 
                     // Aggressive Auto-Lock: Check OS Workstation Lock / Screen Lock / Sleep
                     if state.lock_on_system_lock.load(std::sync::atomic::Ordering::Relaxed)
@@ -310,6 +347,8 @@ pub fn run() {
                                 && vault.is_some() {
                                     if let Some(ref mut manager) = *vault {
                                         state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
+                                state.pairing_operation.cancel();
+                                state.sync_listener_operation.cancel();
                                         manager.lock();
                                     }
                                     *vault = None;
@@ -334,9 +373,15 @@ pub fn run() {
                                 std::thread::sleep(std::time::Duration::from_millis(200));
                                 if !path.exists() && !tmp_path.exists() {
                                     if let Ok(mut vault) = state.vault.lock() {
-                                        *vault = None;
+                                        if vault.as_ref().is_some_and(|manager| manager.path == path) {
+                                            state.pairing_operation.cancel();
+                                            state.sync_listener_operation.cancel();
+                                            state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
+                                            *vault = None;
+                                            let _ = commands::platform::clear(&app_handle);
+                                            let _ = app_handle.emit("vault-connection-lost", ());
+                                        }
                                     }
-                                    let _ = app_handle.emit("vault-connection-lost", ());
                                 }
                             }
                         }

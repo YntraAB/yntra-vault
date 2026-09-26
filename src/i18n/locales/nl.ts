@@ -1,4 +1,7 @@
 export const nl = {
+  'toast.copy_failed': 'Kopiëren mislukt. Probeer het opnieuw.',
+  'pairing.received_title': "Kluis ontvangen",
+  'pairing.received_pending_password': "Het andere apparaat heeft de kluis ontvangen. Kies daar een wachtwoord en sla de kluis op voordat je synchroniseert.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Veilige Offline Wachtwoordmanager',

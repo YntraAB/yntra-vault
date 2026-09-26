@@ -274,6 +274,10 @@ pub struct VaultSettings {
     pub emergency_kit_audit: Option<EmergencyKitAudit>,
     #[serde(default)]
     pub trusted_devices: Vec<TrustedDevice>,
+    /// Local-only password key, encrypted under the random hardware-gated vault key.
+    /// Allows deliberate removal of the hardware factor from an unlocked vault.
+    #[serde(default)]
+    pub hardware_password_key: Option<EncryptedBlob>,
 }
 
 /// Audit trail and status of cryptographic emergency recovery kit generation.

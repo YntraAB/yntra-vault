@@ -48,6 +48,7 @@ export interface Hardware2FaInfo {
 
 export interface Hardware2FaChallengeInfo {
   enabled: boolean;
+  payload_key_bound?: boolean;
   protocol: Hardware2FaProtocol;
   key_name: string;
   challenge_salt: number[];
@@ -371,6 +372,8 @@ export interface SaveDialogOptions {
 // ─── Backend Interface ──────────────────────────────────────────────────
 
 export interface YntraVaultBackend {
+  importVaultDocument(path: string): Promise<string>;
+  exportAttachment(entryId: string, attachmentId: string, path: string): Promise<void>;
   // Vault
   createVault(name: string, password: string, path: string, keyFilePath?: string): Promise<VaultInfo>;
   openVault(path: string, password: string, keyFilePath?: string): Promise<VaultInfo>;
@@ -454,6 +457,8 @@ export interface YntraVaultBackend {
   webdavUpload(url: string, username: string, password: string | null, dbPath: string, ifMatchEtag?: string | null): Promise<string | null>;
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
   webdavSync(url: string, username: string, password: string | null): Promise<MergeStats>;
+  onP2pListenerReady(callback: () => void): Promise<() => void>;
+  cancelP2pSyncListener(): Promise<void>;
   runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats>;
   runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string): Promise<MergeStats>;
   getLocalIp(): Promise<string | null>;
@@ -475,7 +480,14 @@ export interface YntraVaultBackend {
   splitMasterPassword(password: string): Promise<string[]>;
   reconstructMasterPassword(shareA: string, shareB: string): Promise<string>;
   reconstructMasterPasswordHash(shareA: string, shareB: string): Promise<string>;
-  generateEmergencyKit(masterPassword: string): Promise<EmergencyKit>;
+  generateEmergencyKit(masterPassword: string, keyFilePath?: string): Promise<EmergencyKit>;
+  listUsbStorageDevices(): Promise<{id:string;name:string}[]>;
+  getLocalProtection(): Promise<{protected:boolean;usb_bound:boolean;recovery_enabled:boolean}>;
+  setUsbBinding(password:string,keyFilePath?:string,usbId?:string):Promise<void>;
+  revokeRecovery(password:string,keyFilePath?:string):Promise<void>;
+  recoverVault(path:string,shareA:string,shareB:string,newPassword:string):Promise<VaultInfo>;
+  createProtectedVault(name:string,password:string,path:string,usbId:string,keyFilePath?:string):Promise<{info:VaultInfo;kit:EmergencyKit}>;
+  exportRecoveryShare(path:string,share:string):Promise<void>;
   getEmergencyKitAudit(): Promise<EmergencyKitAudit | null>;
   resetEmergencyKitAudit(): Promise<void>;
 
@@ -611,6 +623,7 @@ export async function getBackend(): Promise<YntraVaultBackend> {
 
   if (isTauri()) {
     const { TauriBackend } = await import('./tauri-backend');
+    await (await import('./platform')).initializePlatform();
     _backend = new TauriBackend();
   } else {
     // Web/WASM mode — for now, throw until WASM backend is implemented

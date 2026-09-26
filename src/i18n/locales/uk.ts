@@ -1,4 +1,7 @@
 export const uk = {
+  'toast.copy_failed': 'Не вдалося скопіювати. Спробуйте ще раз.',
+  'pairing.received_title': "Сховище отримано",
+  'pairing.received_pending_password': "Інший пристрій отримав сховище. Виберіть пароль і збережіть його на тому пристрої перед синхронізацією.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Безпечний офлайн-менеджер паролів',

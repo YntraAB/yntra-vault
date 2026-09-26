@@ -172,14 +172,12 @@ export function AttachmentPreviewModal({
     try {
       if (isTauri()) {
         const backend = await getBackend();
-        await backend.copyToClipboard(textContent, false);
+        await backend.copyToClipboard(textContent, true, 30);
       } else {
         await navigator.clipboard.writeText(textContent);
       }
     } catch {
-      if (!isTauri()) {
-        await navigator.clipboard.writeText(textContent).catch(() => {});
-      }
+      return;
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

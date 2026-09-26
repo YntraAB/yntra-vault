@@ -1,4 +1,7 @@
 export const es = {
+  'toast.copy_failed': 'No se pudo copiar. Inténtalo de nuevo.',
+  'pairing.received_title': "Bóveda recibida",
+  'pairing.received_pending_password': "El otro dispositivo ha recibido la bóveda. Elige una contraseña y guárdala allí antes de sincronizar.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Gestor de contraseñas seguro fuera de línea',

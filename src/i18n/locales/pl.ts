@@ -1,4 +1,7 @@
 export const pl = {
+  'toast.copy_failed': 'Kopiowanie nie powiodło się. Spróbuj ponownie.',
+  'pairing.received_title': "Odebrano sejf",
+  'pairing.received_pending_password': "Drugie urządzenie odebrało sejf. Wybierz na nim hasło i zapisz sejf przed synchronizacją.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Bezpieczny menedżer haseł offline',

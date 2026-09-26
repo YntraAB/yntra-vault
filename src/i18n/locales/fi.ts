@@ -1,4 +1,7 @@
 export const fi = {
+  'toast.copy_failed': 'Kopiointi epäonnistui. Yritä uudelleen.',
+  'pairing.received_title': "Holvi vastaanotettu",
+  'pairing.received_pending_password': "Toinen laite on vastaanottanut holvin. Valitse salasana ja tallenna holvi siellä ennen synkronointia.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Turvallinen offline-salasanaholvi',

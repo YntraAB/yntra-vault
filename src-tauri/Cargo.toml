@@ -1,6 +1,6 @@
 [package]
 name = "yntra-vault-app"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "Yntra Vault — Desktop App"
 
@@ -12,6 +12,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tempfile = "3"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"

@@ -222,6 +222,10 @@ impl Importer {
 
         // Try parsing with requested format first
         let primary_parse = Self::execute_parse(trimmed, target_format);
+        let primary_parse = match primary_parse {
+            Err(error) if target_format == ImportFormat::KeepassXml && auto_detected == ImportFormat::KeepassXml => return Err(error),
+            other => other,
+        };
 
         let (final_format, entries, is_mismatch, suggested_brand) = match primary_parse {
             Ok(res) if !res.is_empty() => {
@@ -474,7 +478,7 @@ impl Importer {
                     totp_secret: totp,
                     custom_fields,
                     entry_type,
-                    tags: vec!["Bitwarden".to_string()],
+                    tags: Vec::new(),
                     is_duplicate: false,
                     duplicate_reason: None,
                 });
@@ -507,7 +511,7 @@ impl Importer {
             let email = if username.contains('@') { username.clone() } else { String::new() };
             let totp_secret = clean_totp_secret(&totp_raw);
 
-            let mut tags = vec!["Bitwarden".to_string()];
+            let mut tags = Vec::new();
             if !folder.is_empty() {
                 tags.push(folder);
             }
@@ -563,7 +567,7 @@ impl Importer {
                 totp_secret,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: vec!["1Password".to_string()],
+                tags: Vec::new(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -595,9 +599,12 @@ impl Importer {
             let email = if username.contains('@') { username.clone() } else { String::new() };
             let totp_secret = clean_totp_secret(&totp_raw);
 
-            let mut tags = vec!["KeePass".to_string()];
+            let mut tags = Vec::new();
             if !group.is_empty() {
                 tags.push(group);
+            }
+            for tag in idx.get(row, &["tags"]).split(';').map(str::trim).filter(|tag| !tag.is_empty()) {
+                if !tags.iter().any(|existing| existing == tag) { tags.push(tag.to_owned()); }
             }
 
             result.push(ParsedImportEntry {
@@ -619,69 +626,56 @@ impl Importer {
         Ok(result)
     }
 
-    /// KeePass XML parser (extracts title, username, password, url, notes, TOTP, and Group tags)
+    /// Parse structural XML boundaries; history and empty values never leak into live fields.
     fn parse_keepass_xml(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let mut result = Vec::new();
-
-        let mut current_group = String::new();
-
-        for chunk in content.split("<Group>") {
-            if result.len() >= MAX_IMPORT_ENTRIES {
-                break;
-            }
-            if chunk.contains("<Name>") && chunk.contains("</Name>")
-                && let Some(n_start) = chunk.find("<Name>") {
-                    let rest = &chunk[n_start + 6..];
-                    if let Some(n_end) = rest.find("</Name>") {
-                        let gname = rest[..n_end].trim();
-                        if !gname.is_empty() && gname != "Root" {
-                            current_group = gname.to_string();
-                        }
-                    }
-                }
-
-            for entry_chunk in chunk.split("<Entry>") {
-                if result.len() >= MAX_IMPORT_ENTRIES {
-                    break;
-                }
-                if !entry_chunk.contains("</Entry>") {
-                    continue;
-                }
-                let block = entry_chunk.split("</Entry>").next().unwrap_or("");
-
-                let title = extract_xml_key_value(block, "Title");
-                let username = extract_xml_key_value(block, "UserName");
-                let password = extract_xml_key_value(block, "Password");
-                let url = extract_xml_key_value(block, "URL");
-                let notes = extract_xml_key_value(block, "Notes");
-                let totp_raw = extract_xml_key_value(block, "TimeOtp-Secret-Base32");
-                let totp_secret = clean_totp_secret(&totp_raw);
-
-                if !title.is_empty() || !username.is_empty() || !password.is_empty() {
-                    let email = if username.contains('@') { username.clone() } else { String::new() };
-                    let mut tags = vec!["KeePass".to_string()];
-                    if !current_group.is_empty() {
-                        tags.push(current_group.clone());
-                    }
-
-                    result.push(ParsedImportEntry {
-                        title,
-                        username,
-                        password,
-                        url,
-                        email,
-                        notes,
-                        totp_secret,
-                        custom_fields: Vec::new(),
-                        entry_type: EntryType::Login,
-                        tags,
-                        is_duplicate: false,
-                        duplicate_reason: None,
-                    });
-                }
-            }
+        let options = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: 2_000_000, ..Default::default() };
+        let document = roxmltree::Document::parse_with_options(content, options).map_err(|error| {
+            let position = error.pos();
+            crate::VaultError::InvalidFormat(format!("Invalid KeePass XML at line {}, column {}", position.row, position.col))
+        })?;
+        if !document.root_element().has_tag_name("KeePassFile") {
+            return Err(crate::VaultError::InvalidFormat("Expected a KeePass XML export".into()));
         }
-
+        let mut result = Vec::new();
+        for entry in document.descendants().filter(|n| n.has_tag_name("Entry")) {
+            if entry.ancestors().skip(1).any(|n| n.has_tag_name("History") || n.has_tag_name("Entry")) { continue; }
+            if result.len() >= MAX_IMPORT_ENTRIES { break; }
+            let mut fields = std::collections::HashMap::new();
+            for field in entry.children().filter(|n| n.has_tag_name("String")) {
+                let key = field.children().find(|n| n.has_tag_name("Key")).map(xml_text).transpose()?.unwrap_or_default();
+                let value = field.children().find(|n| n.has_tag_name("Value"));
+                if value.is_some_and(|n| n.attribute("Protected").is_some_and(|v| v.eq_ignore_ascii_case("true"))) {
+                    return Err(crate::VaultError::InvalidFormat("KeePass XML still contains encrypted values. Export a decrypted XML file from KeePassXC first".into()));
+                }
+                let text = value.map(xml_text).transpose()?.unwrap_or_default();
+                if fields.insert(key, text).is_some() {
+                    return Err(crate::VaultError::InvalidFormat("Duplicate field in KeePass XML entry".into()));
+                }
+            }
+            let title = fields.remove("Title").unwrap_or_default();
+            let username = fields.remove("UserName").unwrap_or_default();
+            let password = fields.remove("Password").unwrap_or_default();
+            let url = fields.remove("URL").unwrap_or_default();
+            let notes = fields.remove("Notes").unwrap_or_default();
+            let totp_raw = fields.remove("TimeOtp-Secret-Base32").or_else(||fields.remove("otp")).unwrap_or_default();
+            let totp_secret = clean_totp_secret(&totp_raw);
+            if title.is_empty() && username.is_empty() && password.is_empty() && notes.is_empty() { continue; }
+            let mut tags = Vec::new();
+            if let Some(group) = entry.ancestors().find(|n| n.has_tag_name("Group")) {
+                if let Some(name) = group.children().find(|n| n.has_tag_name("Name")) {
+                    let name=xml_text(name)?.trim().to_owned();
+                    if !name.is_empty() && name != "Root" && !tags.contains(&name) { tags.push(name); }
+                }
+            }
+            if let Some(node) = entry.children().find(|n| n.has_tag_name("Tags")) {
+                for tag in xml_text(node)?.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+                    if !tags.iter().any(|existing| existing == tag) { tags.push(tag.to_owned()); }
+                }
+            }
+            let email = if username.contains('@') { username.clone() } else { String::new() };
+            result.push(ParsedImportEntry { title, username, password, url, email, notes, totp_secret,
+                custom_fields: Vec::new(), entry_type: EntryType::Login, tags, is_duplicate: false, duplicate_reason: None });
+        }
         Ok(result)
     }
 
@@ -723,7 +717,7 @@ impl Importer {
                 totp_secret: None,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: vec!["Browser".to_string()],
+                tags: Vec::new(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -754,7 +748,7 @@ impl Importer {
             let title = if !name.is_empty() { name } else { url.clone() };
             let email = if username.contains('@') { username.clone() } else { String::new() };
 
-            let mut tags = vec!["LastPass".to_string()];
+            let mut tags = Vec::new();
             if !grouping.is_empty() {
                 tags.push(grouping);
             }
@@ -808,7 +802,7 @@ impl Importer {
                 totp_secret: None,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: vec!["Dashlane".to_string()],
+                tags: Vec::new(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -860,7 +854,7 @@ impl Importer {
                             totp_secret: totp,
                             custom_fields: Vec::new(),
                             entry_type: EntryType::Login,
-                            tags: vec!["ProtonPass".to_string()],
+                            tags: Vec::new(),
                             is_duplicate: false,
                             duplicate_reason: None,
                         });
@@ -935,7 +929,7 @@ impl Importer {
                 totp_secret,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: vec!["Imported".to_string()],
+                tags: Vec::new(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -994,48 +988,12 @@ impl HeaderIndex {
     }
 }
 
-/// Unescape standard XML entities (&amp;, &lt;, &gt;, &quot;, &apos;).
-fn unescape_xml(input: &str) -> String {
-    input
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-}
-
-/// Helper function to extract `<Key Name="key">val</Key>` or `<key>val</key>` from KeePass XML string.
-fn extract_xml_key_value(block: &str, key: &str) -> String {
-    let key_pattern = format!("<Key>{}</Key>", key);
-    if let Some(pos) = block.find(&key_pattern) {
-        let rest = &block[pos + key_pattern.len()..];
-        // Match <Value> or <Value attribute="value">
-        if let Some(v_tag_start) = rest.find("<Value") {
-            let after_v = &rest[v_tag_start + 6..];
-            if let Some(close_bracket) = after_v.find('>') {
-                let val_rest = &after_v[close_bracket + 1..];
-                if let Some(v_end) = val_rest.find("</Value>") {
-                    return unescape_xml(val_rest[..v_end].trim());
-                }
-            }
-        }
+/// The parser resolves XML entities once; preserve whitespace inside credentials and notes.
+fn xml_text(node: roxmltree::Node<'_, '_>) -> crate::Result<String> {
+    if node.children().any(|child| child.is_element()) {
+        return Err(crate::VaultError::InvalidFormat("Unexpected nested element in KeePass field".into()));
     }
-
-    // Direct tag fallback: <Key>Value</Key> or <Key attr="...">Value</Key>
-    let direct_tag = format!("<{}", key);
-    let direct_end = format!("</{}>", key);
-    if let Some(s) = block.find(&direct_tag) {
-        let after_tag = &block[s + direct_tag.len()..];
-        if (after_tag.starts_with('>') || after_tag.starts_with(' '))
-            && let Some(close_bracket) = after_tag.find('>') {
-                let val_rest = &after_tag[close_bracket + 1..];
-                if let Some(e) = val_rest.find(&direct_end) {
-                    return unescape_xml(val_rest[..e].trim());
-                }
-            }
-    }
-
-    String::new()
+    Ok(node.children().filter(|n| n.is_text()).filter_map(|n| n.text()).collect())
 }
 
 #[cfg(test)]
@@ -1094,6 +1052,66 @@ mod tests {
     fn test_totp_uri_cleaner() {
         assert_eq!(clean_totp_secret("otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP&issuer=Test"), Some("JBSWY3DPEHPK3PXP".to_string()));
         assert_eq!(clean_totp_secret("jbsw y3dp-ehpk 3pxp"), Some("JBSWY3DPEHPK3PXP".to_string()));
+    }
+
+    #[test]
+    fn keepass_empty_fields_cannot_capture_the_next_field() {
+        for empty in ["<Value />", "<Value/>", "<Value ProtectInMemory=\"True\" />", "<Value></Value>", ""] {
+            let xml = format!(r#"<KeePassFile><Root><Group><Name>Apps</Name><Entry>
+                <String><Key>Title</Key><Value>Example</Value></String>
+                <String><Key>Notes</Key>{empty}</String>
+                <String><Key>Password</Key><Value ProtectInMemory="True">  test&amp;lt;&lt;value&gt;  </Value></String>
+                <String><Key>URL</Key>{empty}</String>
+                <String><Key>UserName</Key><Value>Example user</Value></String>
+            </Entry></Group></Root></KeePassFile>"#);
+            let preview=Importer::parse_str(&xml,ImportFormat::KeepassXml).unwrap();
+            assert_eq!(preview.entries.len(),1);
+            let entry=&preview.entries[0];
+            assert_eq!(entry.notes,"");assert_eq!(entry.url,"");
+            assert_eq!(entry.username,"Example user");
+            assert_eq!(entry.password,"  test&lt;<value>  ");
+        }
+    }
+
+    #[test]
+    fn import_tags_come_only_from_the_users_export() {
+        let keepass = Importer::parse_str("Group,Title,Username,Password,Tags\nPersonal,Test,me,secret,Work & Life;KeePass", ImportFormat::KeepassCsv).unwrap();
+        assert_eq!(keepass.entries[0].tags, vec!["Personal", "Work & Life", "KeePass"]);
+        let untagged = Importer::parse_str("Title,Username,Password\nTest,me,secret", ImportFormat::KeepassCsv).unwrap();
+        assert!(untagged.entries[0].tags.is_empty());
+        let generic = Importer::parse_str("title,username,password\nTest,me,secret", ImportFormat::GenericCsv).unwrap();
+        assert!(generic.entries[0].tags.is_empty());
+        let bitwarden = Importer::parse_str(r#"{"items":[{"name":"Test","type":1,"login":{"username":"me","password":"secret"}}]}"#, ImportFormat::BitwardenJson).unwrap();
+        assert!(bitwarden.entries[0].tags.is_empty());
+    }
+
+    #[test]
+    fn keepass_groups_entities_cdata_and_history_stay_in_their_scope() {
+        let xml=r#"<KeePassFile><Root><Group><Name>Parent &amp; One</Name>
+          <Group><Name>Child &amp; Two</Name><Entry><String><Key>Title</Key><Value>Child</Value></String>
+          <Tags>Work &amp; Life;Numeric &#38; Tag;Literal &amp;amp;</Tags>
+          <String><Key>Notes</Key><Value><![CDATA[ <note> & literal ]]></Value></String>
+          <History><Entry><String><Key>Title</Key><Value>Old child</Value></String><String><Key>URL</Key><Value>https://old.invalid</Value></String></Entry></History>
+          </Entry></Group>
+          <Entry><String><Key>Title</Key><Value>Parent</Value></String><String><Key>Password</Key><Value>&#x20;test&#32;</Value></String></Entry>
+          </Group></Root></KeePassFile>"#;
+        let preview=Importer::parse_str(xml,ImportFormat::KeepassXml).unwrap();
+        assert_eq!(preview.entries.len(),2);
+        assert_eq!(preview.entries[0].tags,vec!["Child & Two","Work & Life","Numeric & Tag","Literal &amp"]);
+        assert_eq!(preview.entries[0].notes," <note> & literal ");
+        assert_eq!(preview.entries[0].url,"");
+        assert_eq!(preview.entries[1].tags,vec!["Parent & One"]);
+        assert_eq!(preview.entries[1].password," test ");
+    }
+
+    #[test]
+    fn keepass_invalid_or_still_encrypted_xml_reports_an_error() {
+        for xml in [
+            "<KeePassFile><Root></KeePassFile>",
+            "<!DOCTYPE KeePassFile [<!ENTITY unsafe SYSTEM 'file:///test'>]><KeePassFile>&unsafe;</KeePassFile>",
+            "<KeePassFile><Entry><String><Key>Password</Key><Value Protected='True'>ciphertext</Value></String></Entry></KeePassFile>",
+            "<KeePassFile><Entry><String><Key>Notes</Key><Value><String>nested</String></Value></String></Entry></KeePassFile>",
+        ] { assert!(Importer::parse_str(xml,ImportFormat::KeepassXml).is_err()); }
     }
 
     #[test]

@@ -1,4 +1,7 @@
 export const zhTW = {
+  'toast.copy_failed': '複製失敗，請再試一次。',
+  'pairing.received_title': "已接收保管庫",
+  'pairing.received_pending_password': "另一部裝置已接收保管庫。請先在該裝置上設定密碼並儲存，再進行同步。",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': '安全離線密碼管理員',

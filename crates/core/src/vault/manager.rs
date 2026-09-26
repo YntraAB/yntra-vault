@@ -40,6 +40,7 @@ pub struct VaultManager {
     pub(crate) biometric: Option<crate::vault::format::EmbeddedBiometricHeader>,
     /// Embedded hardware 2FA container block
     pub(crate) hardware2fa: Option<Vec<crate::crypto::hardware2fa::EmbeddedHardware2FaHeader>>,
+    pub(crate) storage: Option<super::storage::StorageSession>,
     /// In-memory Zero-Disclosure search index
     pub(crate) search_index: std::collections::HashMap<[u8; 8], Vec<Uuid>>,
 }
@@ -86,21 +87,23 @@ impl VaultManager {
         key_file_path: Option<&Path>,
         path: &Path,
     ) -> crate::Result<Self> {
+        let bytes = key_file_path.map(read_key_file_safely).transpose()?;
+        Self::create_with_keyfile_bytes(name, password, bytes.as_ref().map(|b| b.as_slice()), path)
+    }
+
+    pub fn create_with_keyfile_bytes(name: &str, password: &str, key_file_bytes: Option<&[u8]>, path: &Path) -> crate::Result<Self> {
+        validate_keyfile_bytes(key_file_bytes)?;
         crate::vault::validation::validate_display_name(name)?;
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent)?;
         }
         let salt = generate_salt();
 
-        let key_file_bytes = match key_file_path {
-            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
-            None => None,
-        };
 
         // Derive keys from master password + optional key file
         let master_key = derive_master_key_with_keyfile(
             password.as_bytes(),
-            key_file_bytes.as_ref().map(|b| b.as_slice()),
+            key_file_bytes,
             &salt,
         )?;
         let subkeys = derive_subkeys(&master_key)?;
@@ -130,6 +133,7 @@ impl VaultManager {
             salt,
             biometric: None,
             hardware2fa: None,
+            storage: None,
             search_index: std::collections::HashMap::new(),
         };
 
@@ -149,8 +153,24 @@ impl VaultManager {
         password: &str,
         key_file_path: Option<&Path>,
     ) -> crate::Result<Self> {
-        let file_bytes = fs::read(path)
+        let bytes = key_file_path.map(read_key_file_safely).transpose()?;
+        Self::open_with_keyfile_bytes(path, password, bytes.as_ref().map(|b| b.as_slice()))
+    }
+
+    pub fn open_with_keyfile_bytes(path: &Path, password: &str, key_file_bytes: Option<&[u8]>) -> crate::Result<Self> {
+        validate_keyfile_bytes(key_file_bytes)?;
+        let file_bytes = super::storage::read_bounded(path)
             .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", path.display(), e)))?;
+
+        if super::storage::is_protected(&file_bytes) {
+            let (header, _) = super::storage::parse(&file_bytes)?;
+            let serial = super::storage::connected_serial(&header)?;
+            let (session, keys) = super::storage::StorageSession::open(header, password, key_file_bytes, serial.as_deref())?;
+            let inner = session.decrypt(&file_bytes)?;
+            let mut manager = Self::from_decrypted_vault_file(path, VaultFile::from_bytes(&inner)?, keys)?;
+            manager.storage = Some(session);
+            return Ok(manager);
+        }
 
         let vault_file = VaultFile::from_bytes(&file_bytes)?;
 
@@ -158,15 +178,11 @@ impl VaultManager {
             return Err(VaultError::Hardware2FaRequired);
         }
 
-        let key_file_bytes = match key_file_path {
-            Some(kf_path) => Some(read_key_file_safely(kf_path)?),
-            None => None,
-        };
 
         // Derive keys from password + optional key file + stored salt
         let master_key = derive_master_key_with_keyfile(
             password.as_bytes(),
-            key_file_bytes.as_ref().map(|b| b.as_slice()),
+            key_file_bytes,
             &vault_file.header.salt,
         )?;
         let subkeys = derive_subkeys(&master_key)?;
@@ -256,6 +272,7 @@ impl VaultManager {
             salt: vault_file.header.salt,
             biometric: vault_file.biometric,
             hardware2fa: vault_file.hardware2fa,
+            storage: None,
             search_index: std::collections::HashMap::new(),
         };
         manager.rebuild_search_index();
@@ -268,8 +285,14 @@ impl VaultManager {
     /// in-memory data, header metadata, and rebuilds the search index.
     pub fn reload(&mut self) -> crate::Result<()> {
         let subkeys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
-        let file_bytes = fs::read(&self.path)
+        let file_bytes = super::storage::read_bounded(&self.path)
             .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", self.path.display(), e)))?;
+
+        let file_bytes = if let Some(session) = &self.storage {
+            session.decrypt(&file_bytes)?
+        } else {
+            Zeroizing::new(file_bytes)
+        };
 
         let vault_file = VaultFile::from_bytes(&file_bytes)?;
 
@@ -323,7 +346,7 @@ impl VaultManager {
         }
 
         let header = FileHeader {
-            version: FORMAT_VERSION,
+            version: if self.hardware2fa.is_some() && self.data.settings.hardware_password_key.is_some() { super::format::HARDWARE_BOUND_VERSION } else { FORMAT_VERSION },
             flags,
             salt: self.salt,
             kdf_params: KdfParams::default(),
@@ -348,10 +371,11 @@ impl VaultManager {
         };
 
         // Write to disk atomically (write to temp file, then rename)
-        let file_bytes = vault_file.to_bytes()?;
-        let temp_path = self.path.with_extension("vdb.tmp");
-        fs::write(&temp_path, &file_bytes)?;
-        fs::rename(&temp_path, &self.path)?;
+        let inner = Zeroizing::new(vault_file.to_bytes()?);
+        let file_bytes = if let Some(session) = &self.storage { session.seal(&inner)? } else { inner.to_vec() };
+        if let Some(session) = &self.storage { session.check_disk_header(&self.path)?; }
+        super::storage::atomic_write(&self.path, &file_bytes)?;
+        if let Some(session) = &mut self.storage { session.mark_persisted()?; }
 
         // Clean up any legacy sidecar files if present
         let old_bio = self.path.with_extension("vdb.bio");
@@ -379,6 +403,7 @@ impl VaultManager {
     /// Lock the vault — zeroes all keys from memory.
     pub fn lock(&mut self) {
         self.keys = None; // SubKeys implement ZeroizeOnDrop
+        self.storage = None;
         self.data.entries.clear();
         self.data.tags.clear();
         self.data.trash.clear();
@@ -414,6 +439,7 @@ impl VaultManager {
         candidate: &str,
         key_file_bytes: Option<&[u8]>,
     ) -> crate::Result<bool> {
+        if let Some(session) = &self.storage { return session.verify(candidate, key_file_bytes); }
         let active_keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
         let candidate_mk = derive_master_key_with_keyfile(
             candidate.as_bytes(),
@@ -421,7 +447,10 @@ impl VaultManager {
             &self.salt,
         )?;
         let candidate_keys = derive_subkeys(&candidate_mk)?;
-        let is_valid = bool::from(active_keys.vault_key.ct_eq(&candidate_keys.vault_key));
+        let is_valid = if self.hardware2fa.is_some() && self.data.settings.hardware_password_key.is_some() {
+            // Entry keys retain the password+keyfile KDF; the payload key is random.
+            bool::from(active_keys.entry_key.ct_eq(&candidate_keys.entry_key))
+        } else { bool::from(active_keys.vault_key.ct_eq(&candidate_keys.vault_key)) };
         Ok(is_valid)
     }
 
@@ -559,4 +588,11 @@ impl LegacyVaultData {
             settings: VaultSettings::default(),
         }
     }
+}
+
+fn validate_keyfile_bytes(bytes: Option<&[u8]>) -> crate::Result<()> {
+    if bytes.is_some_and(|b| b.is_empty() || b.len() as u64 > MAX_KEY_FILE_SIZE) {
+        return Err(VaultError::InvalidFormat("Key file must contain 1 byte to 32 MB".into()));
+    }
+    Ok(())
 }

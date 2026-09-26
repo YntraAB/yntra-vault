@@ -1,4 +1,7 @@
 export const ko = {
+  'toast.copy_failed': '복사하지 못했습니다. 다시 시도하세요.',
+  'pairing.received_title': "보관함 수신 완료",
+  'pairing.received_pending_password': "다른 기기에서 보관함을 받았습니다. 해당 기기에서 비밀번호를 설정하고 저장한 후 동기화하세요.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': '안전한 오프라인 비밀번호 관리자',

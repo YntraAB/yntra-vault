@@ -1,4 +1,7 @@
 export const no = {
+  'toast.copy_failed': 'Kopiering mislyktes. Prøv igjen.',
+  'pairing.received_title': "Hvelvet er mottatt",
+  'pairing.received_pending_password': "Den andre enheten har mottatt hvelvet. Velg et passord og lagre det der før synkronisering.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Sikker offline passordbehandler',

@@ -1,4 +1,7 @@
 export const cs = {
+  'toast.copy_failed': 'Kopírování se nezdařilo. Zkuste to znovu.',
+  'pairing.received_title': "Trezor přijat",
+  'pairing.received_pending_password': "Druhé zařízení přijalo trezor. Před synchronizací na něm zvolte heslo a trezor uložte.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Bezpečný offline správce hesel',

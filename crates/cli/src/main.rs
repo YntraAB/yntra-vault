@@ -138,6 +138,8 @@ enum Commands {
     Export(ExportArgs),
     /// Shamir 2-of-3 secret sharing recovery tool
     Shamir(ShamirArgs),
+    /// Generate or use recovery v2 for this vault copy
+    Recovery(RecoveryArgs),
     /// Synchronize vault database with WebDAV remote or P2P peer
     Sync(SyncArgs),
     /// Trigger OS-level smart autotype into focused active application
@@ -148,6 +150,18 @@ enum Commands {
     Biometric(BiometricArgs),
     /// Check for updates and upgrade yntra CLI in-place
     Update(UpdateArgs),
+}
+
+#[derive(Args)]
+struct RecoveryArgs { #[command(subcommand)] action: RecoveryAction }
+#[derive(Subcommand)]
+enum RecoveryAction {
+    /// Save three separate recovery share files; keep them in separate safe places
+    Generate { #[arg(long)] output_dir: PathBuf },
+    /// Recover access from two saved share files and choose a new password
+    Restore { #[arg(long)] share_a_file: PathBuf, #[arg(long)] share_b_file: PathBuf },
+    /// Revoke the current kit (USB-bound vaults require a replacement kit instead)
+    Revoke,
 }
 
 #[derive(Args)]
@@ -591,6 +605,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Import(args) => handle_import(&vault_path, &args, cli.password, cli.keyfile.as_deref()),
         Commands::Export(args) => handle_export(&vault_path, &args, cli.password, cli.keyfile.as_deref()),
         Commands::Shamir(args) => handle_shamir(&args),
+        Commands::Recovery(args) => handle_recovery(&vault_path, &args, cli.password.clone(), cli.keyfile.as_deref()),
         Commands::Sync(args) => handle_sync(&vault_path, &args, cli.password, cli.keyfile.as_deref()).await,
         Commands::Autotype(args) => handle_autotype(&vault_path, &args, cli.password, cli.keyfile.as_deref()).await,
         Commands::ChangePassword(args) => handle_change_password(&vault_path, &args, cli.password, cli.keyfile.as_deref()),
@@ -738,6 +753,13 @@ fn handle_info(vault_path: &Path, json: bool) -> Result<()> {
     }
     let file_bytes = std::fs::read(vault_path)
         .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", vault_path.display(), e)))?;
+    if yntra_vault_core::vault::storage::is_protected(&file_bytes) {
+        let (header, payload) = yntra_vault_core::vault::storage::parse(&file_bytes)?;
+        let info=serde_json::json!({"path":vault_path.to_string_lossy(),"format":"YNS2","version":header.version,"usb_bound":header.usb_marker.is_some(),"recovery_enabled":header.recovery.is_some(),"payload_bytes":payload.ciphertext.len()});
+        if json { println!("{}",serde_json::to_string_pretty(&info).map_err(|e|VaultError::SerializationError(e.to_string()))?); }
+        else { println!("Local protection v2\nUSB binding: {}\nRecovery: {}\nHeader information is unverified until unlock.",header.usb_marker.is_some(),header.recovery.is_some()); }
+        return Ok(());
+    }
     let vault_file = yntra_vault_core::vault::format::VaultFile::from_bytes(&file_bytes)?;
 
     let bio_status = vault_file.biometric.is_some();
@@ -1293,6 +1315,47 @@ fn handle_export(
     Ok(())
 }
 
+fn handle_recovery(path:&Path,args:&RecoveryArgs,password:Option<String>,keyfile:Option<&Path>) -> Result<()> {
+    match &args.action {
+        RecoveryAction::Generate{output_dir} => {
+            std::fs::create_dir_all(output_dir)?;
+            let password=acquire_password(password)?;
+            let mut manager=VaultManager::open_with_keyfile(path,&password,keyfile)?;
+            let kf=keyfile.map(yntra_vault_core::vault::manager::read_key_file_safely).transpose()?;
+            let kit=manager.generate_emergency_kit_with_keyfile(&password,kf.as_ref().map(|b|b.as_slice()))?;
+            for share in &kit.shares {
+                let output=output_dir.join(format!("recovery-{}-share-{}.txt",kit.verification_hash,share.share_index));
+                let mut options=std::fs::OpenOptions::new();options.write(true).create_new(true);
+                #[cfg(unix)] {use std::os::unix::fs::OpenOptionsExt;options.mode(0o600);}
+                let mut file=options.open(output)?;
+                writeln!(file,"Yntra recovery v2 — {} — share {}\n\n{}\n\n{}",kit.vault_name,share.share_index,share.share_data,kit.document_markdown)?;
+                file.sync_all()?;
+            }
+            println!("Saved three separate recovery files. Move them to separate safe locations. Old kits still work with old backups.");
+        }
+        RecoveryAction::Revoke => {
+            let password=acquire_password(password)?;let mut manager=VaultManager::open_with_keyfile(path,&password,keyfile)?;
+            let kf=keyfile.map(yntra_vault_core::vault::manager::read_key_file_safely).transpose()?;
+            manager.revoke_emergency_kit(&password,kf.as_ref().map(|b|b.as_slice()))?;
+            println!("Recovery revoked for the current file.");
+        }
+        RecoveryAction::Restore{share_a_file,share_b_file} => {
+            fn read_share(path:&Path)->Result<Zeroizing<String>>{
+                if std::fs::metadata(path)?.len()>8192{return Err(VaultError::InvalidFormat("Recovery file too large".into()));}
+                let content=Zeroizing::new(std::fs::read_to_string(path)?);
+                content.lines().map(str::trim).find(|line|line.starts_with("YNTRA2:")||line.starts_with("YNTRA-SHARE")||line.starts_with("SL-SHARE")).map(|line|Zeroizing::new(line.to_owned())).ok_or_else(||VaultError::InvalidFormat("No recovery share found".into()))
+            }
+            let a=read_share(share_a_file)?;let b=read_share(share_b_file)?;
+            let password=Zeroizing::new(prompt_password("New master password (12+ characters): ")?);
+            let confirmation=Zeroizing::new(prompt_password("Confirm new password: ")?);
+            if *password!=*confirmation{return Err(VaultError::InvalidPassword);}
+            VaultManager::recover_with_shares(path,&a,&b,&password)?;
+            println!("Access restored. USB binding removed and recovery kit consumed for this file. Create a new kit before binding USB again.");
+        }
+    }
+    Ok(())
+}
+
 fn handle_shamir(args: &ShamirArgs) -> Result<()> {
     match &args.action {
         ShamirAction::Split { password } => {
@@ -1300,7 +1363,7 @@ fn handle_shamir(args: &ShamirArgs) -> Result<()> {
             let pass_hash = Sha256::digest(pass.as_bytes());
             let shares = split_secret(&pass_hash)?;
             println!("{}", "═════════════════════════════════════════════".blue());
-            println!("  {}", "SHAMIR 2-OF-3 RECOVERY SHARES".bold().yellow());
+              println!("  {}", "LEGACY HASH SHARES — NOT A VAULT RECOVERY KIT".bold().yellow());
             println!("{}", "═════════════════════════════════════════════".blue());
             for (i, share) in shares.iter().enumerate() {
                 println!("  Share {}: {}", i + 1, share.bold().green());
@@ -1334,16 +1397,20 @@ async fn handle_sync(
             println!("{} WebDAV Download Complete! Saved to {}", "✓".green().bold(), vault_path.display());
         }
         SyncAction::P2pListen { listen } => {
-            let manager = open_vault(vault_path, password, keyfile)?;
+            let mut manager = open_vault(vault_path, password, keyfile)?;
+            let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(&manager)?;
             let subkeys = manager.get_subkeys()?;
             println!("{} Starting P2P Sync Server on {}...", "→".blue().bold(), listen);
-            let (stats, _) = run_p2p_sync_listener(listen, subkeys, vault_path)?;
+            let (stats, data) = run_p2p_sync_listener(listen, subkeys, &snapshot.path())?;
+            yntra_vault_core::services::sync::merge_vault_data(&mut manager.data,data);manager.save()?;
             println!("{} P2P Sync Completed! Added: {}, Updated: {}, Retained: {}", "✓".green().bold(), stats.entries_added, stats.entries_updated, stats.entries_kept_local);
         }
         SyncAction::P2pConnect { server } => {
-            let manager = open_vault(vault_path, password, keyfile)?;
+            let mut manager = open_vault(vault_path, password, keyfile)?;
+            let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(&manager)?;
             let subkeys = manager.get_subkeys()?;
-            let (stats, _) = run_p2p_sync_client(server, subkeys, vault_path)?;
+            let (stats, data) = run_p2p_sync_client(server, subkeys, &snapshot.path())?;
+            yntra_vault_core::services::sync::merge_vault_data(&mut manager.data,data);manager.save()?;
             println!("{} P2P Sync Completed! Added: {}, Updated: {}, Retained: {}", "✓".green().bold(), stats.entries_added, stats.entries_updated, stats.entries_kept_local);
         }
         SyncAction::PairHost { listen, code } => {

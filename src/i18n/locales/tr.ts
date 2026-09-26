@@ -1,4 +1,7 @@
 export const tr = {
+  'toast.copy_failed': 'Kopyalama başarısız. Lütfen tekrar deneyin.',
+  'pairing.received_title': "Kasa alındı",
+  'pairing.received_pending_password': "Diğer cihaz kasayı aldı. Eşitlemeden önce o cihazda bir parola seçip kasayı kaydedin.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Güvenli Çevrimdışı Parola Yöneticisi',

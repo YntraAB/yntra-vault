@@ -15,7 +15,7 @@ export interface Hardware2FaModalProps {
 }
 
 export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: Hardware2FaModalProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { currentVault } = useAuth();
   const [step, setStep] = useState<'select' | 'prompt' | 'success'>('select');
   const [protocol, setProtocol] = useState<Hardware2FaProtocol>('YubiKeyChallengeResponse');
@@ -162,6 +162,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
               {step === 'select' && (
                 <div className="flex flex-col gap-3.5">
                   <div>
+                    {mode === 'enroll' && <p className="mb-3 text-[12px] text-[var(--text-secondary)]">{language === 'sv' ? 'Första aktiveringen eller uppgraderingen kräver att enheter och extra säkerhetsnycklar registreras igen. Äldre appar kan inte öppna det nya formatet. Gamla säkerhetskopior behåller sitt tidigare skydd.' : 'First activation or upgrade requires linking devices and enrolling extra security keys again. Older apps cannot open the new format. Old backups retain their previous protection.'}</p>}
                     <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('hw.protocol_label')}</label>
                     <div className="mt-1.5 grid grid-cols-2 gap-2">
                       <button

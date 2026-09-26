@@ -9,6 +9,7 @@ interface UpdateModalProps {
   currentVersion: string;
   isDownloading: boolean;
   onInstall: () => void;
+  error?: string | null;
 }
 
 export function UpdateModal({
@@ -18,13 +19,15 @@ export function UpdateModal({
   currentVersion,
   isDownloading,
   onInstall,
+  error,
 }: UpdateModalProps) {
   const { t } = useTranslation();
 
   if (!isOpen || !updateInfo) return null;
 
   const nativeInstall = ['android', 'windows-portable'].includes(updateInfo.target_platform);
-  const available = Boolean(updateInfo.download_url);
+  const available = updateInfo.has_update && Boolean(updateInfo.download_url)
+    && (!nativeInstall || /^[a-fA-F0-9]{64}$/.test(updateInfo.sha256 || ''));
 
   const pubDate = updateInfo.pub_date
     ? new Date(updateInfo.pub_date).toLocaleDateString(undefined, {
@@ -36,7 +39,7 @@ export function UpdateModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl shadow-black/40 animate-in zoom-in-95 duration-200">
+      <div role="dialog" aria-modal="true" aria-label={t('updater.modal_title')} className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl shadow-black/40 animate-in zoom-in-95 duration-200">
         {/* Glow accent */}
         <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500" />
 
@@ -128,6 +131,7 @@ export function UpdateModal({
           </div>
 
           {/* Action Buttons */}
+          {error && <p role="alert" className="mb-4 text-[12px] text-[var(--text-primary)] break-words">{error}</p>}
           <div className="flex items-center justify-end gap-2.5">
             <button
               type="button"

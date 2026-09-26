@@ -1,3 +1,8 @@
+import { appMetadata } from '@/lib/appMetadata';
+import { useCapabilities } from '@/lib/platform';
+import { UsbPicker } from './LocalProtection';
+import { RecoveryKitDialog } from './RecoveryKitWizard';
+import type { EmergencyKit } from '@/lib/backend';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
  * CreateVaultModal — Secure vault creation flow
@@ -23,7 +28,13 @@ export interface CreateVaultModalProps {
 }
 
 export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const c=(sv:string,en:string)=>language==='sv'?sv:en;
+  const [bindUsb,setBindUsb]=useState(false);
+  const capabilities = useCapabilities();
+  const [usbId,setUsbId]=useState('');
+  const [pendingKit,setPendingKit]=useState<EmergencyKit|null>(null);
+  const [pendingVault,setPendingVault]=useState<Vault|null>(null);
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
   const [pathModified, setPathModified] = useState(false);
@@ -62,17 +73,18 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
       setUseKeyFile(false);
       setKeyFilePath('');
       setGenerateNewKeyFile(false);
+      setBindUsb(false);setUsbId('');setPendingKit(null);setPendingVault(null);
     }
   }, [open]);
 
   // Esc to close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) onClose();
+      if (e.key === 'Escape' && open && !pendingKit && !loading) onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+  }, [open, onClose, pendingKit, loading]);
 
   // Auto-generate path from name
   useEffect(() => {
@@ -199,6 +211,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     setLoading(true);
     try {
       let info;
+      let createdKit:EmergencyKit|null=null;
       if (isTauri()) {
         const backend = await getBackend();
 
@@ -207,12 +220,13 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
           await backend.generateKeyFile(keyFilePath.trim());
         }
 
-        info = await backend.createVaultBytes(
-          name.trim(),
-          passBytes,
-          targetPath,
-          useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined,
-        );
+        if(bindUsb){
+          if(!usbId)throw new Error(c('Välj USB-sticka','Select a USB drive'));
+          const result=await backend.createProtectedVault(name.trim(),new TextDecoder().decode(passBytes),targetPath,usbId,useKeyFile?keyFilePath:undefined);
+          info=result.info;createdKit=result.kit;
+        }else{
+          info = await backend.createVaultBytes(name.trim(),passBytes,targetPath,useKeyFile&&keyFilePath.trim()?keyFilePath.trim():undefined);
+        }
       } else {
         info = { id: crypto.randomUUID(), name: name.trim(), path: targetPath };
       }
@@ -220,14 +234,15 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
       // Do not persist keyfile paths in localStorage to preserve 2FA factor isolation
       localStorage.removeItem('yntra-vault-keyfiles');
 
-      const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+      const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
       const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
       const newVault = { id: info.id, name: info.name, path: info.path };
-      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+      appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
       // Trigger the new-vault tutorial on first open
       localStorage.setItem('yntra-vault-show-tutorial', 'true');
 
+      if(createdKit){setPendingVault(newVault);setPendingKit(createdKit);setPassword('');setConfirmPassword('');return;}
       onCreated(newVault);
       
       // Security: clear password from state
@@ -248,6 +263,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     }
   };
 
+  if (pendingKit && pendingVault && open) return <RecoveryKitDialog kit={pendingKit} onDone={() => { onCreated(pendingVault); setPendingKit(null); setPendingVault(null); onClose(); }} />;
   return (
     <AnimatePresence>
       {open && (
@@ -304,6 +320,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                 />
               </div>
 
+              {capabilities.mobile ? <p className="text-[12px] text-[var(--text-secondary)]">{c('Valvet sparas i appens privata lagring. Du kan spara en backup eller länka en annan enhet efteråt.', 'The vault is saved in private app storage. You can export a backup or link another device afterwards.')}</p> : <>
               {/* File Path */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.location')}</label>
@@ -332,6 +349,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                 </div>
               </div>
 
+              </>}
               {/* Master Password */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.master_password')}</label>
@@ -376,6 +394,10 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                 )}
               </div>
 
+              {isTauri()&&capabilities.usbBinding&&<div className="flex flex-col gap-2 text-[12px]">
+                <label className="flex gap-2"><input type="checkbox" checked={bindUsb} onChange={e=>setBindUsb(e.target.checked)}/>{c('Kräv den här USB-stickan vid upplåsning','Require this USB drive to unlock')}</label>
+                {bindUsb&&<><UsbPicker value={usbId} onChange={setUsbId} disabled={loading}/><p>{c('Du får ett recovery-kit efter skapandet. Spara minst två delar på separata platser. Bindningen hindrar enkel kopiering men kan kringgås om serienumret stjäls.','You receive a recovery kit after creation. Store at least two shares separately. Binding deters simple copying but can be bypassed if the serial is stolen.')}</p></>}
+              </div>}
               {/* Key File Option */}
               <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
                 <label className="flex items-center gap-2 cursor-pointer select-none text-[12px] font-medium text-[var(--text-primary)]">

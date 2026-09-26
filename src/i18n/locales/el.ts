@@ -1,4 +1,7 @@
 export const el = {
+  'toast.copy_failed': 'Η αντιγραφή απέτυχε. Δοκιμάστε ξανά.',
+  'pairing.received_title': "Το θησαυροφυλάκιο παραλήφθηκε",
+  'pairing.received_pending_password': "Η άλλη συσκευή παρέλαβε το θησαυροφυλάκιο. Επιλέξτε κωδικό και αποθηκεύστε το εκεί πριν από τον συγχρονισμό.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Ασφαλής Διαχειριστής Κωδικών Offline',

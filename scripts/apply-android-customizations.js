@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { hardenManifest, backupRules, extractionRules } from './android-security.mjs';
 
 import fs from 'fs';
 import path from 'path';
@@ -28,6 +29,9 @@ console.log(`[apply-android-customizations] Target Android directory found: ${ma
 const manifestPath = path.join(mainDir, 'AndroidManifest.xml');
 if (fs.existsSync(manifestPath)) {
   let manifestContent = fs.readFileSync(manifestPath, 'utf8');
+  manifestContent = hardenManifest(manifestContent);
+  fs.writeFileSync(manifestPath, manifestContent, 'utf8');
+
 
   if (!manifestContent.includes('${applicationId}.updates')) {
     if (!manifestContent.includes('</application>')) throw new Error('Android application element missing');
@@ -41,13 +45,13 @@ if (fs.existsSync(manifestPath)) {
   }
   const xmlDir = path.join(mainDir, 'res', 'xml');
   fs.mkdirSync(xmlDir, { recursive: true });
+  fs.writeFileSync(path.join(xmlDir, 'backup_rules.xml'), backupRules);
+  fs.writeFileSync(path.join(xmlDir, 'data_extraction_rules.xml'), extractionRules);
   fs.writeFileSync(path.join(xmlDir, 'update_paths.xml'), '<paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="verified_updates" path="updates/" /></paths>');
 
   const requiredEntries = [
     { name: 'android.permission.INTERNET', tag: '    <uses-permission android:name="android.permission.INTERNET" />' },
     { name: 'android.permission.CAMERA', tag: '    <uses-permission android:name="android.permission.CAMERA" />' },
-    { name: 'android.permission.READ_EXTERNAL_STORAGE', tag: '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' },
-    { name: 'android.permission.READ_MEDIA_IMAGES', tag: '    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' },
     { name: 'android.hardware.camera', tag: '    <uses-feature android:name="android.hardware.camera" android:required="false" />' },
     { name: 'android.hardware.camera.autofocus', tag: '    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />' },
     { name: 'android.permission.REQUEST_INSTALL_PACKAGES', tag: '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />' },
@@ -89,6 +93,7 @@ if (fs.existsSync(overrideMainActivityPath)) {
 
   fs.writeFileSync(targetMainActivityPath, overrideContent, 'utf8');
   fs.copyFileSync(path.join(rootDir, 'src-tauri', 'android-overrides', 'UpdateInstallerPlugin.kt'), path.join(targetKotlinDir, 'UpdateInstallerPlugin.kt'));
+  fs.copyFileSync(path.join(rootDir, 'src-tauri', 'android-overrides', 'MobileServicesPlugin.kt'), path.join(targetKotlinDir, 'MobileServicesPlugin.kt'));
   console.log(`✓ Applied customized MainActivity.kt to ${targetMainActivityPath}`);
 } else {
   console.warn(`⚠️ Override MainActivity.kt not found at ${overrideMainActivityPath}`);

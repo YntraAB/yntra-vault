@@ -88,12 +88,9 @@ pub fn extract_host_domain(url: &str) -> Option<String> {
 }
 
 /// Digital Asset Links verification stub (`/.well-known/assetlinks.json`).
-pub fn verify_digital_asset_links(domain: &str, package_name: &str, _apk_sha256: Option<&str>) -> bool {
-    let known_mappings = get_known_package_mappings();
-    if let Some(&expected_domain) = known_mappings.get(package_name) {
-        let domain_clean = domain.to_lowercase();
-        return domain_clean == expected_domain || domain_clean.ends_with(&format!(".{}", expected_domain));
-    }
+pub fn verify_digital_asset_links(_domain: &str, _package_name: &str, _apk_sha256: Option<&str>) -> bool {
+    // A package-name lookup cannot authenticate an installed application's signing
+    // certificate or prove that the website authorizes that certificate. Fail closed.
     false
 }
 

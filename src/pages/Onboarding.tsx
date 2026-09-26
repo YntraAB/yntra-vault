@@ -1,3 +1,4 @@
+import { appMetadata } from '@/lib/appMetadata';
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -69,7 +70,7 @@ export default function Onboarding() {
         b.setExternalFaviconsEnabled(externalFaviconsEnabled).catch(() => {});
       }).catch(() => {});
     }
-    localStorage.setItem('yntra-vault-setup-completed', 'true');
+    appMetadata.setItem('yntra-vault-setup-completed', 'true');
     navigate('/');
   };
 

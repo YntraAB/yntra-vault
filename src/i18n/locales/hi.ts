@@ -1,4 +1,7 @@
 export const hi = {
+  'toast.copy_failed': 'कॉपी नहीं हो सका। फिर कोशिश करें।',
+  'pairing.received_title': "वॉल्ट प्राप्त हुआ",
+  'pairing.received_pending_password': "दूसरे डिवाइस को वॉल्ट मिल गया है। सिंक करने से पहले उस डिवाइस पर पासवर्ड चुनें और वॉल्ट सहेजें।",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'सुरक्षित ऑफ़लाइन पासवर्ड प्रबंधक',

@@ -215,7 +215,7 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
 
   return (
     <aside
-      className="relative flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
+      className="relative flex shrink-0 min-w-0 h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] select-none"
       style={{ width: 'var(--sidebar-width)' }}
     >
       {/* Nav items */}
@@ -356,7 +356,7 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
 
       {/* Resize handle */}
       <div
-        className="absolute right-0 top-0 z-10 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
+        className="absolute right-0 top-0 z-10 h-full w-[6px] cursor-col-resize transition-colors hover:bg-[var(--border-focus)]"
         onMouseDown={onResizeStart}
         role="slider"
         aria-label={t('common.resize_sidebar')}

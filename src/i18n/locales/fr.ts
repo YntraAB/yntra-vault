@@ -1,4 +1,7 @@
 export const fr = {
+  'toast.copy_failed': 'Échec de la copie. Réessayez.',
+  'pairing.received_title': "Coffre reçu",
+  'pairing.received_pending_password': "L’autre appareil a reçu le coffre. Choisissez un mot de passe et enregistrez-le sur cet appareil avant de synchroniser.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Gestionnaire de mots de passe hors ligne sécurisé',

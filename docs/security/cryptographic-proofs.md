@@ -1,6 +1,8 @@
 # Cryptographic Proofs & Security Model
 
-This document establishes the formal cryptographic foundations, threat model, and defense-in-depth security invariants implemented in **Yntra Vault**.
+This document describes cryptographic design arguments and intended security invariants in **Yntra Vault**. It is not an independent audit or a formal verification of the entire implementation.
+
+**0.2.4 scope:** The later `YNS2` local envelope, random-secret recovery v2 and hardware-bound `YNTR` v5 are described in [the format specification](../architecture/VDB_SPEC.md) and [recovery specification](EMERGENCY_RECOVERY.md). Older password-derived diagrams and legacy recovery arguments below do not prove those implementations. Known-host-compromise, backup-revocation and updater-signature limits remain in [USB/recovery](USB-RECOVERY.md) and [updates](UPDATES.md).
 
 ---
 
@@ -8,9 +10,9 @@ This document establishes the formal cryptographic foundations, threat model, an
 
 Yntra Vault is an **offline-first, zero-knowledge password manager** built in Rust and React/TypeScript. The security architecture enforces the following fundamental theorems:
 
-1. **Zero Knowledge**: Data at rest and data in transit remain unreadable without the user's master password. The software maintains zero external telemetry, zero tracking, and zero remote key escrow.
+1. **Key-based confidentiality**: Reading encrypted data requires the relevant key material. Recovery shares, an authorized linked device and an unlocked session are other access routes; possession of the original master password is not universally required. No remote key escrow or telemetry is introduced.
 2. **Authenticated Envelope Binding**: Vault storage is tamper-evident. The cryptographic header (salt, KDF parameters, version) is cryptographically bound into the encryption envelope as Additional Authenticated Data (AAD), mathematically precluding header tampering and downgrade attacks.
-3. **Defense-in-Depth Memory Isolation**: Ephemeral keys and decrypted secrets never reside as plaintext strings in unpinned, heap-allocated memory. Sensitive operations run within hardware-guarded, page-locked memory buffers (`LockedBuffer`).
+3. **Memory protection**: Native key operations use guarded/page-locked buffers and zeroization where implemented. Display/copy operations and frontend/OS buffers can contain plaintext; this does not provide protection from a compromised host or guarantee every allocation is pinned.
 
 ---
 

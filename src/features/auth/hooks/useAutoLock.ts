@@ -1,3 +1,4 @@
+import { configureAutoLock, recordUserActivity } from '@/lib/platform';
 import { useEffect, useRef, useCallback } from 'react';
 
 export interface UseAutoLockOptions {
@@ -36,6 +37,7 @@ export function useAutoLock({ autoLockMinutes, isLocked = false, onLock }: UseAu
   }, []);
 
   useEffect(() => {
+    if (!isLocked) void configureAutoLock(Math.max(0, autoLockMinutes * 60)).catch(() => triggerLock());
     // If auto-lock is disabled (<= 0), already locked, or in a non-browser environment, do not schedule.
     if (autoLockMinutes <= 0 || isLocked || typeof window === 'undefined') {
       if (timerRef.current) {
@@ -62,6 +64,8 @@ export function useAutoLock({ autoLockMinutes, isLocked = false, onLock }: UseAu
       const now = Date.now();
       // Throttle timer rescheduling to at most once per second for performance
       if (now - lastResetTime >= 1000) {
+        if (now - lastActivityRef.current >= timeoutMs) { triggerLock(); return; }
+        recordUserActivity();
         lastResetTime = now;
         lastActivityRef.current = now;
         scheduleTimeout();

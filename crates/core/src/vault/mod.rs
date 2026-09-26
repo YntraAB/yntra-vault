@@ -12,6 +12,9 @@ pub mod audit;
 pub mod rekey;
 pub mod auth;
 pub mod emergency;
+pub mod storage;
+pub mod usb;
+pub mod protection;
 pub mod importer;
 pub mod import_export;
 

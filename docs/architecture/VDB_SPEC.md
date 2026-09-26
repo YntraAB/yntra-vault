@@ -1,11 +1,24 @@
-# Yntra Vault Database Format Specification (`.vdb` Format Version 4)
+# Yntra Vault Database Format Specification (`YNTR` v4/v5 and `YNS2` v2)
 
-**Document Version**: 1.0  
-**Target Format Version**: 4  
+**Document Version**: 1.1 (0.2.4 working tree)
+
+**Target Formats**: ordinary `YNTR` v4, hardware-bound `YNTR` v5, local-protection `YNS2` v2
 **Classification**: Public Specification  
 **Reference Codebase**: [crates/core/src/vault/format.rs](../../crates/core/src/vault/format.rs)
 
 ---
+
+## 0. Current format boundaries
+
+| Framing | Role in 0.2.4 | Key distinction |
+| --- | --- | --- |
+| `YNTR`, version 4 | Ordinary vault representation and encrypted sync snapshots | Existing format remains supported; transport snapshots omit local factor/recovery records. |
+| `YNTR`, version 5 | Newly enrolled/re-enrolled hardware security-key vaults | Random payload key wrapped with the password/hardware factor; local encrypted `hardware_password_key` supports deliberate factor removal. Older readers must reject v5. |
+| `YNS2`, header version 2 | Local USB/recovery protection and protected replicas | Separate authenticated storage envelope with independent storage key and password/keyfile/optional USB and recovery slots. Implemented in [storage.rs](../../crates/core/src/vault/storage.rs). |
+
+The layout and password-derived key diagram below describe ordinary `YNTR` storage. They must not be used to implement password-only opening of hardware v5 or to treat `YNS2` as a renamed v4 header. USB binding is based on a public/spoofable device serial; it is not a non-exportable hardware key. Recovery v2 and hardware-key enrollment are currently separate incompatible protection modes. See [USB/recovery](../security/USB-RECOVERY.md) and [recovery specification](../security/EMERGENCY_RECOVERY.md).
+
+`YNS2` framing is magic, a little-endian u32 JSON-header length, the bounded versioned header, and nonce/ciphertext/tag. Its header and wrapping context are authenticated; verify before deserializing inner vault content. Current limits and exact domain strings live in `storage.rs`; preserve them for already-written version-2 files. Local wrapper policy is never copied from a synchronization peer. Atomic local saves use staged/flushed files and stale-header checks.
 
 ## 1. Overview & Architectural Principles
 
@@ -56,7 +69,7 @@ A `.vdb` file consists of an unencrypted header, optional embedded authenticatio
 | Field | Type | Size | Description |
 |---|---|---|---|
 | `magic` | `[u8; 4]` | 4 bytes | Literal ASCII string `b"YNTR"`. |
-| `version` | `u16` | 2 bytes | Format version (current: `4`). |
+| `version` | `u16` | 2 bytes | `4` for ordinary files; `5` for the new hardware-bound payload-key model. |
 | `flags` | `u16` | 2 bytes | Bitmask flags (`0x0001` Biometrics enrolled, `0x0002` Hardware 2FA enabled). |
 | `salt` | `[u8; 32]` | 32 bytes | Cryptographically random salt generated via OS CPRNG (`rand::rng`). |
 | `kdf_len` | `u32` | 4 bytes | Byte length of the serialized `KdfParams` structure. |
@@ -87,8 +100,8 @@ HKDF-SHA512 Stretcher
 ### 1. Master Key Derivation (Argon2id)
 The raw master password and optional keyfile bytes are processed through Argon2id:
 - **Salt**: 32 bytes (stored unencrypted in header)
-- **Memory Cost**: Default `262,144` KiB (256 MB), Minimum enforcing `8,192` KiB
-- **Time Cost**: Default `4` iterations, Minimum enforcing `1`
+- **Memory Cost**: Default `262,144` KiB (256 MB), minimum `65,536` KiB, maximum `1,048,576` KiB
+- **Time Cost**: Default `4` iterations, minimum `2`, maximum `64`
 - **Parallelism**: Default `4` threads, Minimum enforcing `1`
 - **Output Length**: `64` bytes
 

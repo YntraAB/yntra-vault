@@ -1,3 +1,4 @@
+import { appMetadata } from '@/lib/appMetadata';
 import { DEFAULT_LANGUAGE } from './languages';
 
 export type TranslationDict = Record<string, string>;
@@ -92,7 +93,7 @@ export async function loadTranslation(lang: string): Promise<TranslationDict> {
  */
 function getInitialLanguage(): string {
   try {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('yntra-vault-settings') : null;
+    const saved = typeof localStorage !== 'undefined' ? appMetadata.getItem('yntra-vault-settings') : null;
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed?.language && localeLoaders[parsed.language]) {

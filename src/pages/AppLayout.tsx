@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
@@ -13,13 +13,14 @@ import { Sidebar, MobileHeader, MobileBottomNav, MobileDrawer, MobileBottomSheet
 import { ToastContainer } from '@/components/ui';
 import { VaultTutorial } from '@/components/ui/VaultTutorial';
 import { PasswordGenerator } from '@/features/generator';
+import { usePanelResize } from '@/hooks/usePanelResize';
 import { matchesShortcut, getKeybinds } from '@/lib/keybinds';
 
 export default function AppLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentVault, isLocked, lockVault } = useAuth();
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const {
     settingsOpen,
     setSettingsOpen,
@@ -133,73 +134,9 @@ export default function AppLayout() {
     document.documentElement.setAttribute('data-density', settings.density || 'normal');
   }, [settings.fontSize, settings.density]);
 
-  // Resizable panel state (Desktop)
-  const sidebarWidthRef = useRef(settings.sidebarWidth);
-  const listWidthRef = useRef(settings.passwordListWidth);
-  const isDraggingRef = useRef<'sidebar' | 'list' | null>(null);
-  const startXRef = useRef(0);
-  const startWidthRef = useRef(0);
-
-  const updateCSSVars = useCallback(() => {
-    const root = document.documentElement;
-    root.style.setProperty('--sidebar-width', `${sidebarWidthRef.current}px`);
-    root.style.setProperty('--passwordlist-width', `${listWidthRef.current}px`);
-  }, []);
-
-  const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
-    isDraggingRef.current = 'sidebar';
-    startXRef.current = e.clientX;
-    startWidthRef.current = sidebarWidthRef.current;
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  }, []);
-
-  const handleListResizeStart = useCallback((e: React.MouseEvent) => {
-    isDraggingRef.current = 'list';
-    startXRef.current = e.clientX;
-    startWidthRef.current = listWidthRef.current;
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingRef.current) return;
-
-      const delta = e.clientX - startXRef.current;
-
-      if (isDraggingRef.current === 'sidebar') {
-        const newWidth = Math.min(Math.max(startWidthRef.current + delta, 180), 350);
-        sidebarWidthRef.current = newWidth;
-      } else if (isDraggingRef.current === 'list') {
-        const newWidth = Math.min(Math.max(startWidthRef.current + delta, 220), 450);
-        listWidthRef.current = newWidth;
-      }
-
-      updateCSSVars();
-    };
-
-    const handleMouseUp = () => {
-      if (isDraggingRef.current) {
-        document.body.style.userSelect = '';
-        isDraggingRef.current = null;
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [updateCSSVars]);
-
-  // Initialize CSS vars
-  useEffect(() => {
-    updateCSSVars();
-  }, [updateCSSVars]);
+  const { handleSidebarResizeStart, handleListResizeStart } = usePanelResize(
+    settings.sidebarWidth, settings.passwordListWidth, updateSettings,
+  );
 
   if (isLocked) {
     return null;
@@ -229,7 +166,7 @@ export default function AppLayout() {
                 isSearchVisible={mobileSearchVisible}
               />
               <div className="flex flex-1 min-h-0 flex-col overflow-hidden w-full [&>div]:!w-full [&>div]:!h-full [&>div]:!flex-1 [&>div]:!border-r-0">
-                <PasswordList onResizeStart={() => {}} />
+                <PasswordList mobile />
               </div>
             </motion.div>
           ) : (

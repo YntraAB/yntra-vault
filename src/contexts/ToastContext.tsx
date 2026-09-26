@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import type { ToastMessage } from '@/types';
 
 export interface ToastContextType {
@@ -23,6 +23,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  useEffect(() => {
+    const failed = () => addToast({ type: 'error', message: 'App settings could not be saved. Check available storage before closing the app.' });
+    window.addEventListener('yntra-metadata-save-failed', failed);
+    return () => window.removeEventListener('yntra-metadata-save-failed', failed);
+  }, [addToast]);
 
   const value = useMemo(() => ({ toasts, addToast, removeToast }), [toasts, addToast, removeToast]);
 

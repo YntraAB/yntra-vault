@@ -45,6 +45,9 @@ import type {
 } from './backend';
 
 export class TauriBackend implements YntraVaultBackend {
+  async importVaultDocument(path: string): Promise<string> { return invoke('import_vault_document', { path }); }
+  async exportAttachment(entryId: string, attachmentId: string, path: string): Promise<void> { return invoke('export_attachment', { entryId, attachmentId, path }); }
+
 
   // ─── Vault ──────────────────────────────────────────────────────
 
@@ -361,6 +364,15 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('webdav_sync', { url, username, password });
   }
 
+  async onP2pListenerReady(callback: () => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen('p2p-listener-ready', callback);
+  }
+
+  async cancelP2pSyncListener(): Promise<void> {
+    return invoke('cancel_p2p_sync_listener', {});
+  }
+
   async runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats> {
     return invoke('run_p2p_sync_listener', { listenAddr, dbPath });
   }
@@ -445,10 +457,17 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('reconstruct_master_password_hash', { shareA, shareB });
   }
 
-  async generateEmergencyKit(masterPassword: string): Promise<EmergencyKit> {
-    return invoke('generate_emergency_kit', { masterPassword });
+  async generateEmergencyKit(masterPassword: string, keyFilePath?:string): Promise<EmergencyKit> {
+    return invoke('generate_emergency_kit', { masterPassword, keyFilePath });
   }
 
+  async listUsbStorageDevices() {return invoke('list_usb_storage_devices');}
+  async getLocalProtection() {return invoke('get_local_protection');}
+  async setUsbBinding(password:string,keyFilePath?:string,usbId?:string) {return invoke('set_usb_binding',{password,keyFilePath,usbId});}
+  async revokeRecovery(password:string,keyFilePath?:string) {return invoke('revoke_recovery',{password,keyFilePath});}
+  async recoverVault(path:string,shareA:string,shareB:string,newPassword:string) {return invoke('recover_vault',{path,shareA,shareB,newPassword});}
+  async createProtectedVault(name:string,password:string,path:string,usbId:string,keyFilePath?:string) {return invoke('create_protected_vault',{name,password,path,usbId,keyFilePath});}
+    async exportRecoveryShare(path:string,share:string) {return invoke('export_recovery_share',{path,share});}
   async getEmergencyKitAudit(): Promise<EmergencyKitAudit | null> {
     return invoke('get_emergency_kit_audit');
   }
@@ -575,24 +594,11 @@ export class TauriBackend implements YntraVaultBackend {
   // ─── Clipboard Defense ───────────────────────────────────────────────
 
   async copyToClipboard(text: string, isSensitive: boolean = true, clearAfterSecs?: number): Promise<void> {
-    try {
-      await invoke('copy_to_clipboard', {
-        text,
-        isSensitive,
-        clearAfterSecs,
-      });
-    } catch {
-      // Fallback to standard web clipboard if IPC call fails
-      await navigator.clipboard.writeText(text);
-    }
+    await invoke('copy_to_clipboard', { text, isSensitive, clearAfterSecs });
   }
 
   async clearClipboard(): Promise<void> {
-    try {
-      await invoke('clear_clipboard');
-    } catch {
-      await navigator.clipboard.writeText('');
-    }
+    await invoke('clear_clipboard');
   }
 
   async copyEntryPassword(entryId: string, clearAfterSecs?: number): Promise<void> {

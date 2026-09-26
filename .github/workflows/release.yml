@@ -19,7 +19,7 @@ on:
       tag:
         description: 'Existing release tag to build (must match source version)'
         required: true
-        default: 'v0.2.3'
+        default: 'v0.2.4'
 
 permissions:
   contents: write
@@ -184,7 +184,9 @@ jobs:
           OUT_APK="release-assets/Yntra.Vault_${VER}_universal.apk"
           "$BUILD_TOOLS/zipalign" -f -p 4 "$APK_FILE" "$RUNNER_TEMP/aligned.apk"
           "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-type PKCS12 --ks-key-alias yntra --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD --out "$OUT_APK" "$RUNNER_TEMP/aligned.apk"
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$OUT_APK"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$OUT_APK" > "$RUNNER_TEMP/apk-signing.txt"
+          "$BUILD_TOOLS/aapt" dump badging "$OUT_APK" > "$RUNNER_TEMP/apk-badging.txt"
+          node scripts/verify-android-update.mjs "$RUNNER_TEMP/apk-badging.txt" "$RUNNER_TEMP/apk-signing.txt" "$VER"
 
       - name: Upload Android APK to GitHub Release
         env:

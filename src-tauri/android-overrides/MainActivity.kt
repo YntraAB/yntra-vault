@@ -1,5 +1,7 @@
 package com.yntravault.app
 
+import android.os.Bundle
+import android.view.WindowManager
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,6 +15,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
 class MainActivity : TauriActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    private fun trustedOrigin(origin: Uri): Boolean =
+        origin.scheme in listOf("http", "https") && origin.host == "tauri.localhost" ||
+        BuildConfig.DEBUG && origin.scheme == "http" && origin.host == "localhost"
+
     private var pendingPermissionRequest: PermissionRequest? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
@@ -65,6 +76,7 @@ class MainActivity : TauriActivity() {
              * Enforces least privilege (video capture only) and requests Android OS camera permission.
              */
             override fun onPermissionRequest(request: PermissionRequest) {
+                if (!trustedOrigin(request.origin)) { request.deny(); return }
                 // Deny any hanging prior request
                 pendingPermissionRequest?.deny()
                 pendingPermissionRequest = null
@@ -115,14 +127,18 @@ class MainActivity : TauriActivity() {
                 }
             }
 
+            override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                if (pendingPermissionRequest == request) pendingPermissionRequest = null
+            }
+
             override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
-                if (consoleMessage != null) {
+                if (BuildConfig.DEBUG && consoleMessage != null) {
                     android.util.Log.d(
                         "YntraVaultWebView",
                         "${consoleMessage.message()} -- From line ${consoleMessage.lineNumber()} of ${consoleMessage.sourceId()}"
                     )
                 }
-                return super.onConsoleMessage(consoleMessage)
+                return true
             }
         }
     }

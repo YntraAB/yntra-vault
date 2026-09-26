@@ -1,4 +1,7 @@
 export const ru = {
+  'toast.copy_failed': 'Не удалось скопировать. Повторите попытку.',
+  'pairing.received_title': "Хранилище получено",
+  'pairing.received_pending_password': "Другое устройство получило хранилище. Выберите пароль и сохраните его на том устройстве перед синхронизацией.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Безопасный офлайн-менеджер паролей',

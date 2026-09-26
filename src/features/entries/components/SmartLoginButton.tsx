@@ -1,3 +1,4 @@
+import { useCapabilities } from '@/lib/platform';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Zap } from 'lucide-react';
 import { getBackend, isTauri } from '@/lib/backend';
@@ -22,6 +23,7 @@ interface SmartLoginButtonProps {
 
 export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartLoginButtonProps) {
   const { t } = useTranslation();
+  const capabilities = useCapabilities();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [events, setEvents] = useState<SmartLoginEvent[]>([]);
   const [result, setResult] = useState<unknown | null>(null);
@@ -164,6 +166,7 @@ export default function SmartLoginButton({ entryId, entryTitle, hasUrl }: SmartL
       void getBackend().then(backend => backend.smartLoginCancel()).catch(() => {});
     }
   }, [clearSubscriptions]);
+  if (!capabilities.automation) return null;
   if (!isTauri()) return null;
 
   if (!hasUrl) {

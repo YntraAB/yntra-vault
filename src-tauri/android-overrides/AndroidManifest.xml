@@ -8,8 +8,6 @@
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Storage / Media access for image-based QR import and file attachments -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <!-- Camera hardware features (marked not required so app installs on devices without camera) -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />

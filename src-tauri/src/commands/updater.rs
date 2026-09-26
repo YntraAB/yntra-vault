@@ -1,9 +1,22 @@
 //! Updater commands for Yntra Vault Desktop and Mobile.
 
 use tauri::{AppHandle, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
 use yntra_vault_core::services::updater::{
     check_for_updates, download_file, verify_sha256, CheckUpdateResult,
 };
+
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+struct InstallGuard;
+impl InstallGuard {
+    fn acquire() -> Result<Self, String> {
+        INSTALLING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| Self).map_err(|_| "An update is already being prepared".into())
+    }
+}
+impl Drop for InstallGuard {
+    fn drop(&mut self) { INSTALLING.store(false, Ordering::Release); }
+}
 
 #[cfg(target_os = "android")]
 pub(crate) struct AndroidUpdateInstaller(pub tauri::plugin::PluginHandle<tauri::Wry>);
@@ -91,7 +104,8 @@ pub async fn download_and_install_apk(
     if !cfg!(target_os = "android") {
         return Err("APK installation is only available on Android".into());
     }
-    verify_official_asset("android", &apk_url, expected_sha).await?;
+    let _guard = InstallGuard::acquire()?;
+    let _version = verify_official_asset("android", &apk_url, expected_sha).await?;
 
     // 2. Download APK bytes
     let bytes = download_file(&apk_url).await.map_err(|e| e.to_string())?;
@@ -108,16 +122,19 @@ pub async fn download_and_install_apk(
         .map_err(|e| e.to_string())?.join("updates");
     std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
-    let apk_path = cache_dir.join("yntra_vault_update.apk");
-    std::fs::write(&apk_path, &bytes).map_err(|e| e.to_string())?;
+    // A content-addressed file cannot be overwritten by a later update while
+    // Android's external installer still holds its URI. Publish atomically.
+    let apk_path = stage_apk(&cache_dir, expected_sha, &bytes)?;
 
     let apk_path_str = apk_path.to_string_lossy().to_string();
 
-    // 5. Grant read access to the fixed verified APK via a private FileProvider.
+    // 5. Android rechecks identity, version and digest before granting read access.
     #[cfg(target_os = "android")]
     {
         app.state::<AndroidUpdateInstaller>().0
-            .run_mobile_plugin::<()>("install", apk_path_str.clone())
+            .run_mobile_plugin::<()>("install", serde_json::json!({
+                "path": apk_path_str, "sha256": expected_sha.to_ascii_lowercase(), "version": _version
+            }))
             .map_err(|e| e.to_string())?;
     }
 
@@ -143,6 +160,11 @@ pub async fn install_portable_update(
     if !cfg!(target_os = "windows") {
         return Err("Portable Windows updates are only available on Windows".into());
     }
+    let _guard = InstallGuard::acquire()?;
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if !current_exe.file_name().is_some_and(|name| name.to_string_lossy().to_ascii_lowercase().contains("portable")) {
+        return Err("Use the installer to update an installed desktop application".into());
+    }
     verify_official_asset("windows-portable", &url, expected_sha).await?;
 
     // 2. Download binary payload
@@ -155,12 +177,27 @@ pub async fn install_portable_update(
         );
     }
 
-    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-
     yntra_vault_core::services::updater::replace_executable(&current_exe, &bytes).map_err(|e| e.to_string())
 }
 
-async fn verify_official_asset(platform: &str, url: &str, sha256: &str) -> Result<(), String> {
+fn stage_apk(directory: &std::path::Path, hash: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    use std::io::Write;
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) || !verify_sha256(bytes, hash) {
+        return Err("Invalid update package checksum".into());
+    }
+    let path = directory.join(format!("{}.apk", hash.to_ascii_lowercase()));
+    if path.exists() {
+        let existing = std::fs::read(&path).map_err(|e| e.to_string())?;
+        if !verify_sha256(&existing, hash) { return Err("Cached update package is damaged".into()); }
+        return Ok(path);
+    }
+    let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
+    file.write_all(bytes).and_then(|_| file.as_file().sync_all()).map_err(|e| e.to_string())?;
+    file.persist_noclobber(&path).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+async fn verify_official_asset(platform: &str, url: &str, sha256: &str) -> Result<String, String> {
     if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("Invalid SHA-256 checksum".into());
     }
@@ -170,12 +207,33 @@ async fn verify_official_asset(platform: &str, url: &str, sha256: &str) -> Resul
         || !update.sha256.as_deref().is_some_and(|hash| hash.eq_ignore_ascii_case(sha256)) {
         return Err("Package does not match the official update manifest".into());
     }
-    Ok(())
+    Ok(update.latest_version.trim_start_matches(['v', 'V']).to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_update_is_atomic_content_addressed_and_not_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let path = stage_apk(directory.path(), hash, b"abc").unwrap();
+        assert_eq!(stage_apk(directory.path(), hash, b"abc").unwrap(), path);
+        assert!(stage_apk(directory.path(), hash, b"different").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"abc");
+        std::fs::write(&path, b"damaged").unwrap();
+        assert!(stage_apk(directory.path(), hash, b"abc").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"damaged");
+    }
+
+    #[test]
+    fn update_preparation_is_exclusive_and_recovers_after_error() {
+        let first = InstallGuard::acquire().unwrap();
+        assert!(InstallGuard::acquire().is_err());
+        drop(first);
+        assert!(InstallGuard::acquire().is_ok());
+    }
 
     #[tokio::test]
     async fn test_install_portable_missing_sha_fails() {

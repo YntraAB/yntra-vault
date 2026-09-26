@@ -1,3 +1,4 @@
+import { useCapabilities } from '@/lib/platform';
 import { useState, useCallback } from 'react';
 import { Keyboard } from 'lucide-react';
 import { useBackend } from '@/lib/useBackend';
@@ -16,6 +17,7 @@ export interface AutotypeButtonProps {
 
 export function AutotypeButton({ value = '', entryId, className = '', size = 14 }: AutotypeButtonProps) {
   const { t } = useTranslation();
+  const capabilities = useCapabilities();
   const { backend } = useBackend();
   const { addToast } = useToast();
   const { settings } = useSettings();
@@ -47,6 +49,7 @@ export function AutotypeButton({ value = '', entryId, className = '', size = 14 
     [backend, autotyping, value, entryId, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs, t]
   );
 
+  if (!capabilities.automation) return null;
   return (
     <ActionTooltip content={autotyping ? t('autotype.autotyping') : t('autotype.tooltip')}>
       <button

@@ -1,4 +1,7 @@
 export const de = {
+  'toast.copy_failed': 'Kopieren fehlgeschlagen. Bitte erneut versuchen.',
+  'pairing.received_title': "Tresor empfangen",
+  'pairing.received_pending_password': "Das andere Gerät hat den Tresor empfangen. Wähle dort ein Passwort und speichere den Tresor vor der Synchronisierung.",
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Sicherer Offline-Passwort-Manager',

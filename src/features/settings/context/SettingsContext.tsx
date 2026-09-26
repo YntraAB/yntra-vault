@@ -1,3 +1,4 @@
+import { appMetadata } from '@/lib/appMetadata';
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AppSettings } from '@/types';
 import { DEFAULT_KEYBINDS } from '@/lib/keybinds';
@@ -56,7 +57,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const faviconSync = useRef(Promise.resolve());
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
-      const saved = localStorage.getItem('yntra-vault-settings');
+      const saved = appMetadata.getItem('yntra-vault-settings');
       if (saved) {
         const parsed = JSON.parse(saved);
         return {
@@ -81,7 +82,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     setSettings((prev) => {
       const next = { ...prev, ...partial };
       try {
-        localStorage.setItem('yntra-vault-settings', JSON.stringify(next));
+        appMetadata.setItem('yntra-vault-settings', JSON.stringify(next));
       } catch (e) {
         console.warn('Failed to save settings to localStorage:', e);
       }

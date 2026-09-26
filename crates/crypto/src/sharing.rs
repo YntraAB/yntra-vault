@@ -1,34 +1,7 @@
 //! Shamir's Secret Sharing Scheme (2-of-3 recovery split) in GF(256).
 
-use std::sync::OnceLock;
 use rand::Rng;
-
-static TABLES: OnceLock<([u8; 256], [u8; 256])> = OnceLock::new();
-
-/// Retrieve or lazily initialize the GF(256) logarithm and exponentiation tables.
-/// Uses the generator g = 3 and the AES primitive polynomial x^8 + x^4 + x^3 + x + 1 (0x11b).
-fn get_tables() -> &'static ([u8; 256], [u8; 256]) {
-    TABLES.get_or_init(|| {
-        let mut exp = [0u8; 256];
-        let mut log = [0u8; 256];
-        let mut val = 1u8;
-        for (i, exp_entry) in exp.iter_mut().take(255).enumerate() {
-            *exp_entry = val;
-            log[val as usize] = i as u8;
-
-            // xtime: multiply by 2 in GF(256), reducing by 0x11b if overflow
-            let doubled = if (val & 0x80) != 0 {
-                (val << 1) ^ 0x1b
-            } else {
-                val << 1
-            };
-            // Multiply by 3: val*3 = val*2 + val (addition is XOR in GF(256))
-            val ^= doubled;
-        }
-        exp[255] = exp[0];
-        (exp, log)
-    })
-}
+use zeroize::Zeroizing;
 
 /// Addition in GF(256) is equivalent to bitwise XOR.
 pub fn gf_add(a: u8, b: u8) -> u8 {
@@ -40,28 +13,22 @@ pub fn gf_sub(a: u8, b: u8) -> u8 {
     a ^ b
 }
 
-/// Multiplication in GF(256) using log/exp tables.
-pub fn gf_mul(a: u8, b: u8) -> u8 {
-    if a == 0 || b == 0 {
-        return 0;
+/// Fixed-round multiplication without secret-indexed lookup tables.
+pub fn gf_mul(mut a: u8, mut b: u8) -> u8 {
+    let mut result = 0u8;
+    for _ in 0..8 {
+        result ^= a & 0u8.wrapping_sub(b & 1);
+        a = (a << 1) ^ (0x1b & 0u8.wrapping_sub(a >> 7));
+        b >>= 1;
     }
-    let (exp, log) = get_tables();
-    let log_sum = (log[a as usize] as u16) + (log[b as usize] as u16);
-    exp[(log_sum % 255) as usize]
+    result
 }
 
-/// Division in GF(256) using log/exp tables.
 pub fn gf_div(a: u8, b: u8) -> crate::Result<u8> {
-    if b == 0 {
-        return Err(crate::error::VaultError::EncryptionError("Division by zero in GF(256)".into()));
-    }
-    if a == 0 {
-        return Ok(0);
-    }
-    let (exp, log) = get_tables();
-    let log_diff = (log[a as usize] as i16) - (log[b as usize] as i16);
-    let index = if log_diff < 0 { log_diff + 255 } else { log_diff };
-    Ok(exp[index as usize])
+    if b == 0 { return Err(crate::error::VaultError::InvalidFormat("Division by zero".into())); }
+    let mut inverse = 1u8;
+    for _ in 0..254 { inverse = gf_mul(inverse,b); }
+    Ok(gf_mul(a,inverse))
 }
 
 /// Split a secret key into 3 shares using a 2-of-3 threshold.
@@ -73,16 +40,13 @@ pub fn split_secret(secret: &[u8]) -> crate::Result<Vec<String>> {
         ));
     }
 
-    let mut share1 = Vec::with_capacity(secret.len());
-    let mut share2 = Vec::with_capacity(secret.len());
-    let mut share3 = Vec::with_capacity(secret.len());
+    let mut share1 = Zeroizing::new(Vec::with_capacity(secret.len()));
+    let mut share2 = Zeroizing::new(Vec::with_capacity(secret.len()));
+    let mut share3 = Zeroizing::new(Vec::with_capacity(secret.len()));
 
     for &s in secret {
-        // Generate random coefficient `a` (cannot be 0 to avoid identical shares)
-        let mut a = 0u8;
-        while a == 0 {
-            a = rand::rng().random();
-        }
+        // Uniform over the entire field, including zero, for perfect single-share secrecy.
+        let a: u8 = rand::rng().random();
 
         // f(x) = (a * x) ^ s
         // For x = 1: f(1) = a ^ s
@@ -107,8 +71,9 @@ pub fn split_secret(secret: &[u8]) -> crate::Result<Vec<String>> {
 
 /// Parse a share string formatted as `YNTRA-SHARE[X]-[hex]` (or legacy `SL-SHARE[X]-[hex]`) and return its coordinate and raw bytes.
 pub fn parse_share(share_str: &str) -> crate::Result<(u8, Vec<u8>)> {
+    if share_str.len() > 2080 { return Err(crate::error::VaultError::InvalidFormat("Recovery share too long".into())); }
     let trimmed = share_str.trim();
-    let upper = trimmed.to_ascii_uppercase();
+    let upper = Zeroizing::new(trimmed.to_ascii_uppercase());
     if !upper.starts_with("YNTRA-SHARE") && !upper.starts_with("SL-SHARE") {
         return Err(crate::error::VaultError::InvalidFormat(
             "Share must start with YNTRA-SHARE or SL-SHARE".into(),
@@ -140,7 +105,7 @@ pub fn parse_share(share_str: &str) -> crate::Result<(u8, Vec<u8>)> {
     }
 
     // Parse hex (case-tolerant)
-    let hex_data = parts[2].to_ascii_lowercase();
+    let hex_data = Zeroizing::new(parts[2].to_ascii_lowercase());
     let raw_bytes = data_encoding::HEXLOWER
         .decode(hex_data.as_bytes())
         .map_err(|e| crate::error::VaultError::InvalidFormat(format!("Invalid share hex: {}", e)))?;
@@ -157,7 +122,9 @@ pub fn parse_share(share_str: &str) -> crate::Result<(u8, Vec<u8>)> {
 /// Reconstruct the secret using any two parsed shares.
 pub fn reconstruct_secret(share_a: &str, share_b: &str) -> crate::Result<Vec<u8>> {
     let (x1, y1_vec) = parse_share(share_a)?;
+    let y1_vec = Zeroizing::new(y1_vec);
     let (x2, y2_vec) = parse_share(share_b)?;
+    let y2_vec = Zeroizing::new(y2_vec);
 
     if x1 == x2 {
         return Err(crate::error::VaultError::InvalidFormat(

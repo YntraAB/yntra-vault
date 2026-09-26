@@ -52,7 +52,11 @@ pub fn copy_to_clipboard_defended(text: &str, is_sensitive: bool, clear_after_se
         #[cfg(target_os = "windows")]
         copy_windows_plain(text)?;
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
+        copy_macos_defended(text)?;
+        #[cfg(target_os = "linux")]
+        copy_linux_defended(text)?;
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
         copy_generic_fallback(text)?;
     }
 
@@ -89,7 +93,7 @@ pub fn clear_clipboard() -> crate::Result<()> {
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         // Fallback clear
-        let _ = copy_generic_fallback("");
+        copy_generic_fallback("")?;
     }
 
     // Reset active tracked state
@@ -132,7 +136,17 @@ fn is_clipboard_matching_hash(expected_hash: u64) -> bool {
             return current_hash == expected_hash;
         }
     }
-    true
+    #[cfg(target_os = "macos")]
+    if let Ok(output) = std::process::Command::new("pbpaste").output() {
+        return output.status.success() && std::str::from_utf8(&output.stdout).is_ok_and(|s| compute_text_hash(s) == expected_hash);
+    }
+    #[cfg(target_os = "linux")]
+    for (command, args) in [("wl-paste", vec!["--no-newline"]), ("xclip", vec!["-selection", "clipboard", "-o"])] {
+        if let Ok(output) = std::process::Command::new(command).args(args).output() {
+            if output.status.success() { return std::str::from_utf8(&output.stdout).is_ok_and(|s| compute_text_hash(s) == expected_hash); }
+        }
+    }
+    false
 }
 
 // ============================================================================
@@ -347,14 +361,15 @@ fn get_windows_clipboard_hash() -> Result<u64, ()> {
 fn copy_macos_defended(text: &str) -> crate::Result<()> {
     use std::process::{Command, Stdio};
 
-    // Pass secret via command-line argument to osascript to avoid AppleScript string interpolation
-    // and eliminate subshell stdin (/dev/null) truncation issues.
+    use std::io::Write;
+    // Keep secrets off process command lines; pass raw UTF-8 through a private pipe.
     let script = r#"
         use framework "Foundation"
         use framework "AppKit"
 
         on run argv
-            set secretText to item 1 of argv
+            set inputData to (current application's NSFileHandle's fileHandleWithStandardInput())'s readDataToEndOfFile()
+            set secretText to current application's NSString's alloc()'s initWithData:inputData encoding:(current application's NSUTF8StringEncoding)
             set pb to current application's NSPasteboard's generalPasteboard()
             pb's clearContents()
 
@@ -372,19 +387,13 @@ fn copy_macos_defended(text: &str) -> crate::Result<()> {
         end run
     "#;
 
-    if let Ok(status) = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .arg("--")
-        .arg(text)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-    {
-        if status.success() {
-            return Ok(());
-        }
-    }
+    let mut child = Command::new("osascript").arg("-e").arg(script)
+        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
+        .map_err(|_| VaultError::ClipboardError("Could not start native clipboard helper".into()))?;
+    let write_result = child.stdin.take().ok_or_else(|| VaultError::ClipboardError("Clipboard pipe unavailable".into()))?
+        .write_all(text.as_bytes());
+    let status = child.wait().map_err(|_| VaultError::ClipboardError("Clipboard helper failed".into()))?;
+    if write_result.is_ok() && status.success() { return Ok(()); }
 
     copy_generic_fallback(text)
 }
@@ -411,16 +420,12 @@ fn copy_linux_defended(text: &str) -> crate::Result<()> {
 
     if let Ok(mut child) = Command::new("wl-copy")
         .arg("--type")
-        .arg("x-kde-passwordManagerHint")
-        .arg("secret")
+        .arg("text/plain;charset=utf-8")
         .stdin(Stdio::piped())
         .spawn()
     {
-        if let Some(ref mut stdin) = child.stdin {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
-        return Ok(());
+        let written = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(text.as_bytes()).is_ok());
+        if child.wait().is_ok_and(|status| status.success()) && written { return Ok(()); }
     }
 
     if let Ok(mut child) = Command::new("xclip")
@@ -429,11 +434,8 @@ fn copy_linux_defended(text: &str) -> crate::Result<()> {
         .stdin(Stdio::piped())
         .spawn()
     {
-        if let Some(ref mut stdin) = child.stdin {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
-        return Ok(());
+        let written = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(text.as_bytes()).is_ok());
+        if child.wait().is_ok_and(|status| status.success()) && written { return Ok(()); }
     }
 
     copy_generic_fallback(text)
@@ -453,7 +455,7 @@ fn clear_linux() -> crate::Result<()> {
 #[allow(dead_code)]
 fn copy_generic_fallback(text: &str) -> crate::Result<()> {
     let _ = text;
-    Ok(())
+    Err(VaultError::ClipboardError("Native clipboard is unavailable on this platform".into()))
 }
 
 #[cfg(test)]

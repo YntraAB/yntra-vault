@@ -111,17 +111,27 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const isCancelledRef = useRef(false);
+  const attemptRef = useRef(0);
+  const qrQueue = useRef<Promise<void>>(Promise.resolve());
+  const [qrRevision, setQrRevision] = useState(0);
+  const listenerToggleRef = useRef(toggleP2pListener);
+  listenerToggleRef.current = toggleP2pListener;
+  const qrView = useRef({ addToast, t });
+  qrView.current = { addToast, t };
   const adoptedVaultPathRef = useRef<string | null>(null);
 
-  const handleCopyIp = (ipToCopy: string) => {
-    navigator.clipboard.writeText(`${ipToCopy}:5324`);
+  const handleCopyIp = async (ipToCopy: string) => {
+    if (!backend) return;
+    try { await backend.copyToClipboard(`${ipToCopy.includes(':') ? `[${ipToCopy}]` : ipToCopy}:5324`, false); }
+    catch { addToast({ message: t('toast.copy_failed'), type: 'error' }); return; }
     setCopiedIp(true);
     setTimeout(() => setCopiedIp(false), 1500);
   };
 
-  const handleCopyCode = () => {
-    if (!pairingCode) return;
-    navigator.clipboard.writeText(pairingCode);
+  const handleCopyCode = async () => {
+    if (!pairingCode || !backend) return;
+    try { await backend.copyToClipboard(pairingCode, true, 30); }
+    catch { addToast({ message: t('toast.copy_failed'), type: 'error' }); return; }
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 1500);
   };
@@ -138,7 +148,8 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   // Reset state when opening & pause background listener to avoid port contention
   useEffect(() => {
     if (isOpen) {
-      toggleP2pListener(false);
+      listenerToggleRef.current(false);
+      attemptRef.current += 1;
       isCancelledRef.current = false;
       adoptedVaultPathRef.current = null;
       setErrorMsg(null);
@@ -167,7 +178,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         setStep('role');
       }
     }
-  }, [isOpen, defaultRole, toggleP2pListener]);
+  }, [isOpen, defaultRole]);
 
   // Autofocus password input on step transition to password
   useEffect(() => {
@@ -226,44 +237,39 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     }
   }, [step, selectedRole, backend, pairingCode, t]);
 
-  // QR Host Runner
-  const startQrHost = useCallback(async () => {
-    if (!backend) return;
-    try {
-      setErrorMsg(null);
-      backend.cancelQrPairingHost().catch(() => {});
-      const session = await backend.generateQrPairingSession();
-      setQrSession(session);
+  const startQrHost = useCallback(() => setQrRevision((revision) => revision + 1), []);
 
-      backend.startQrPairingHost(password, includePasswordChecked)
-        .then((stats) => {
-          if (isCancelledRef.current) return;
-          setPairingStats(stats);
-          if (stats.peer_addr) {
-            const cleanPeerIp = stats.peer_addr.split(':')[0].trim();
-            localStorage.setItem('yntra_last_peer_addr', cleanPeerIp);
-          }
-          setStep('success');
-          addToast({
-            message: t('pairing.success_toast', { count: stats.total_entries }),
-            type: 'success',
-          });
-        })
-        .catch((err: any) => {
-          if (isCancelledRef.current) return;
-          setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_failed') || 'QR-parning misslyckades'));
-        });
-    } catch (err: any) {
-      setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_failed') || 'Kunde inte generera QR-session'));
-    }
-  }, [backend, password, includePasswordChecked, addToast, t]);
-
-  // Start QR host when entering code step as host
+  // Each effect owns one attempt. Serial preparation prevents a delayed cancel
+  // from destroying the next session; disposed attempts cannot update the UI.
   useEffect(() => {
-    if (step === 'code' && selectedRole === 'host' && pairingMode === 'qr' && isOpen && !qrSession) {
-      startQrHost();
-    }
-  }, [step, selectedRole, pairingMode, isOpen, qrSession, startQrHost]);
+    if (!backend || !isOpen || step !== 'code' || selectedRole !== 'host' || pairingMode !== 'qr') return;
+    let disposed = false;
+    setQrSession(null);
+    setErrorMsg(null);
+    qrQueue.current = qrQueue.current.catch(() => {}).then(async () => {
+      await backend.cancelQrPairingHost();
+      if (disposed) return;
+      const session = await backend.generateQrPairingSession();
+      if (disposed) return;
+      setQrSession(session);
+      void backend.startQrPairingHost(password, includePasswordChecked).then((stats) => {
+        if (disposed) return;
+        setPairingStats(stats);
+        if (stats.peer_addr) localStorage.setItem('yntra_last_peer_addr', stats.peer_addr);
+        setStep('success');
+        const { addToast, t } = qrView.current;
+        addToast({ message: stats.peer_saved === false ? t('pairing.received_pending_password') : t('pairing.success_toast', { count: stats.total_entries }), type: 'success' });
+      }).catch((error) => {
+        if (!disposed) setErrorMsg(String(error?.message || error));
+      });
+    }).catch((error) => {
+      if (!disposed) setErrorMsg(String(error?.message || error));
+    });
+    return () => {
+      disposed = true;
+      qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend.cancelQrPairingHost()).catch(() => {});
+    };
+  }, [backend, isOpen, step, selectedRole, pairingMode, password, includePasswordChecked, qrRevision]);
 
   // Client QR Scanned Handler
   const handleQrScanned = useCallback(async (scannedPayload: string) => {
@@ -273,9 +279,16 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     setStep('connecting');
     setStatusMsg(t('pairing.connecting_qr') || 'Ansluter till datorn via QR-kod...');
 
+    const attempt = ++attemptRef.current;
+    isCancelledRef.current = false;
     try {
+
+      await qrQueue.current.catch(() => {});
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
+      await backend.cancelPairingHost();
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       const res = await backend.startQrPairingClient(scannedPayload);
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
 
       if (res.sas_code) {
         setClientSas(res.sas_code);
@@ -298,7 +311,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         });
       }
     } catch (err: any) {
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_connect_failed') || 'Kunde inte ansluta via QR-kod'));
       setStep('code');
     }
@@ -314,9 +327,11 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     setStep('connecting');
     setStatusMsg(t('pairing.saving_adopted_vault') || 'Krypterar och sparar valvet lokalt...');
 
+    const attempt = ++attemptRef.current;
+    isCancelledRef.current = false;
     try {
       const stats = await backend.completeAdoptedVault(password);
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       setPairingStats(stats);
       setCanEnrollBiometric(true);
       setIsManualPasswordAdoption(false);
@@ -327,7 +342,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         type: 'success',
       });
     } catch (err: any) {
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_failed') || 'Kunde inte spara valvet'));
       setStep('password');
     }
@@ -363,10 +378,17 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     setStep('connecting');
     setStatusMsg(t('pairing.waiting_for_peer') || 'Waiting for the other device to connect over Wi-Fi...');
 
+    const attempt = ++attemptRef.current;
+    isCancelledRef.current = false;
     try {
+
+      await qrQueue.current.catch(() => {});
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
+      await backend.cancelPairingHost();
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       const listenAddr = '0.0.0.0:5324';
       const stats = await backend.startPairingHost(listenAddr, password, pairingCode);
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       setPairingStats(stats);
       if (stats.peer_addr) {
         const cleanPeerIp = stats.peer_addr.split(':')[0].trim();
@@ -378,7 +400,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         type: 'success',
       });
     } catch (err: any) {
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_failed') || 'Pairing failed'));
       setStep('code');
     }
@@ -400,7 +422,14 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     setErrorMsg(null);
     setStep('connecting');
 
+    const attempt = ++attemptRef.current;
+    isCancelledRef.current = false;
     try {
+
+      await qrQueue.current.catch(() => {});
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
+      await backend.cancelPairingHost();
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       let targetAddr: string;
 
       if (manualIp.trim()) {
@@ -415,6 +444,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           setShowManualIp(true);
           throw new Error(t('pairing.err_no_peer') || 'No device found on Wi-Fi with this code.');
         }
+        if (isCancelledRef.current || attempt !== attemptRef.current) return;
         targetAddr = discovered;
       }
 
@@ -426,7 +456,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           ? ''
           : (currentVault?.path || '');
       const stats = await backend.startPairingClient(targetAddr, password, fullCode, targetDbPath);
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
 
       if (stats?.vault_path) {
         adoptedVaultPathRef.current = stats.vault_path;
@@ -444,7 +474,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         type: 'success',
       });
     } catch (err: any) {
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || attempt !== attemptRef.current) return;
       setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_connect_failed') || 'Could not connect to device'));
       setStep('code');
     }
@@ -515,20 +545,23 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   // Memory cleanup and listener cancellation on unmount
   useEffect(() => {
     return () => {
+      attemptRef.current += 1;
+      isCancelledRef.current = true;
       setPassword('');
       setInputDigits(['', '', '', '', '', '']);
       setCanEnrollBiometric(false);
       setClientSas(null);
       setIsManualPasswordAdoption(false);
-      backend?.cancelPairingHost().catch(() => {});
-      backend?.cancelQrPairingHost().catch(() => {});
+      qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelPairingHost()).catch(() => {});
+      qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
     };
   }, [backend]);
 
   const handleClose = () => {
     isCancelledRef.current = true;
-    backend?.cancelPairingHost().catch(() => {});
-    backend?.cancelQrPairingHost().catch(() => {});
+    attemptRef.current += 1;
+    qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelPairingHost()).catch(() => {});
+    qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
     setPassword('');
     setInputDigits(['', '', '', '', '', '']);
     setCanEnrollBiometric(false);
@@ -541,8 +574,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   };
 
   const handleFinishSuccess = () => {
+    const listenAfterPairing = autoListenChecked || (selectedRole === 'client' && autoSyncChecked);
     updateSettings({
-      p2pAutoListen: autoListenChecked,
+      p2pAutoListen: listenAfterPairing,
       p2pAutoSyncWifi: autoSyncChecked,
     });
     setPassword('');
@@ -550,7 +584,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     setCanEnrollBiometric(false);
     setClientSas(null);
     setIsManualPasswordAdoption(false);
-    if (autoListenChecked) {
+    if (listenAfterPairing) {
       toggleP2pListener(true);
     }
     if (onSuccess) onSuccess(pairingStats || undefined);
@@ -885,7 +919,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                         onClick={() => {
                           setPairingMode('pin');
                           setErrorMsg(null);
-                          backend?.cancelQrPairingHost().catch(() => {});
+                          qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
                         }}
                         className={`flex items-center justify-center gap-1.5 flex-1 py-1 px-2 text-[11px] font-medium rounded-[2px] transition-colors cursor-pointer ${
                           pairingMode === 'pin'
@@ -924,7 +958,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                                   {t('pairing.include_password_label') || 'Inkludera inloggning'}
                                 </span>
                                 <span className="text-[10px] text-[var(--text-secondary)]">
-                                  {t('pairing.include_password_desc') || 'Slipper skriva in lösenordet på mobilen (100% säkert)'}
+                                  {t('pairing.include_password_desc') || 'Överför lösenordet i den krypterade anslutningen'}
                                 </span>
                               </div>
                               <Toggle
@@ -944,7 +978,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  backend?.cancelQrPairingHost().catch(() => {});
+                                  qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
                                   setStep('password');
                                 }}
                                 className="flex items-center gap-1 h-8 rounded-[3px] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
@@ -1240,8 +1274,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                       type="button"
                       onClick={() => {
                         isCancelledRef.current = true;
-                        backend?.cancelPairingHost().catch(() => {});
-                        backend?.cancelQrPairingHost().catch(() => {});
+                        attemptRef.current += 1;
+                        qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelPairingHost()).catch(() => {});
+                        qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
                         setStep('code');
                       }}
                       className="mt-1 h-7.5 rounded-[3px] px-3 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer border border-[var(--border)]"
@@ -1259,10 +1294,10 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                         <Check size={20} className="stroke-[2.5]" />
                       </div>
                       <h3 className="text-[14px] font-medium text-[var(--text-primary)]">
-                        {t('pairing.success_title') || 'Enheterna är parkopplade & synkade'}
+                          {pairingStats?.peer_saved === false ? t('pairing.received_title') : t('pairing.success_title')}
                       </h3>
                       <p className="text-[11px] text-[var(--text-secondary)]">
-                        {t('pairing.success_desc', { count: pairingStats?.total_entries ?? 0 }) || `${pairingStats?.total_entries ?? 0} lösenord är nu synkroniserade mellan båda enheterna.`}
+                          {pairingStats?.peer_saved === false ? t('pairing.received_pending_password') : t('pairing.success_desc', { count: pairingStats?.total_entries ?? 0 })}
                       </p>
 
                       {clientSas && (
@@ -1328,7 +1363,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                         checked={selectedRole === 'host' ? autoListenChecked : autoSyncChecked}
                         onChange={(v) => {
                           if (selectedRole === 'host') setAutoListenChecked(v);
-                          else setAutoSyncChecked(v);
+                          else { setAutoSyncChecked(v); setAutoListenChecked(v); }
                         }}
                       />
                     </div>

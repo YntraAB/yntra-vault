@@ -1,6 +1,8 @@
+import { appMetadata } from '@/lib/appMetadata';
+import { RecoveryForm } from '@/features/auth/components/LocalProtection';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen, ShieldCheck, Copy, Fingerprint } from 'lucide-react';
+import { Eye, EyeOff, Loader2, AlertTriangle, KeyRound, FolderOpen, ShieldCheck, Fingerprint } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/features/auth';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -29,12 +31,6 @@ export default function Login() {
   const [biometricPrompting, setBiometricPrompting] = useState(false);
   const [hardware2FaRequired, setHardware2FaRequired] = useState(false);
   const [activeView, setActiveView] = useState<'master_password' | 'biometric' | 'hardware_2fa' | 'emergency_recovery'>('master_password');
-  const [recoveryShareA, setRecoveryShareA] = useState('');
-  const [recoveryShareB, setRecoveryShareB] = useState('');
-  const [recoveredPassword, setRecoveredPassword] = useState('');
-  const [recoveryError, setRecoveryError] = useState('');
-  const [recovering, setRecovering] = useState(false);
-  const [copiedRecovered, setCopiedRecovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const secretInputRef = useRef<SecureSecretInputRef>(null);
   const autoBioTriggered = useRef(false);
@@ -57,7 +53,7 @@ export default function Login() {
     if (!currentVault) {
       getBackend().then(async (backend) => {
         try {
-          const saved = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+          const saved = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
           for (const v of saved) {
             try {
               if (await backend.checkVaultFileExists(v.path)) {
@@ -139,10 +135,10 @@ export default function Login() {
       const info = await backend.unlockVaultBiometric(currentVault.path);
 
       // Save to recent vaults list & update search paths using internal ID
-      const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+      const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
       const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
       const newVault = { id: info.id, name: info.name, path: info.path };
-      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+      appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
       // Update currentVault state in global context with real ID & path
       setCurrentVault(newVault);
@@ -242,10 +238,10 @@ export default function Login() {
         const info = await backend.openVaultWithHardware2Fa(currentVault.path, password, kf, hwResp);
 
         // Save to recent vaults list & update search paths using internal ID
-        const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+        const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
         const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
         const newVault = { id: info.id, name: info.name, path: info.path };
-        localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+        appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
         setCurrentVault(newVault);
         setIsLocked(false);
@@ -319,10 +315,10 @@ export default function Login() {
         }
 
         // Save to recent vaults list & update search paths using internal ID
-        const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+        const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
         const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
         const newVault = { id: info.id, name: info.name, path: info.path };
-        localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+        appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
         // Update currentVault state in global context with real ID & path
         setCurrentVault(newVault);
@@ -370,67 +366,6 @@ export default function Login() {
     },
     [password, useKeyFile, keyFilePath, hardware2FaRequired, handleHardwareUnlock, setIsLocked, setCurrentVault, navigate, currentVault, attempts, isLockedOut, lockoutRemaining, t, triggerShake]
   );
-
-  const handleEmergencyRecovery = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRecoveryError('');
-
-    const sA = recoveryShareA.trim();
-    const sB = recoveryShareB.trim();
-
-    if (!sA || !sB) {
-      setRecoveryError('Please provide both recovery shares');
-      return;
-    }
-
-    if (sA === sB) {
-      setRecoveryError('Cannot reconstruct using two identical shares');
-      return;
-    }
-
-    setRecovering(true);
-    try {
-      const backend = await getBackend();
-      const reconstructed = await backend.reconstructMasterPassword(sA, sB);
-      setRecoveredPassword(reconstructed);
-    } catch (err: unknown) {
-      setRecoveryError((err as Error)?.message || String(err) || 'Failed to reconstruct password from shares');
-    } finally {
-      setRecovering(false);
-    }
-  }, [recoveryShareA, recoveryShareB]);
-
-  const handleUnlockWithRecovered = useCallback(async () => {
-    if (!recoveredPassword || !currentVault) return;
-    setLoading(true);
-    setRecoveryError('');
-    const passBytes = new TextEncoder().encode(recoveredPassword);
-    try {
-      let info;
-      if (isTauri() && currentVault) {
-        const backend = await getBackend();
-        const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
-        info = await backend.openVaultBytes(currentVault.path, passBytes, kf);
-      } else {
-        info = { id: currentVault?.id || crypto.randomUUID(), name: currentVault?.name || 'Vault', path: currentVault?.path || '' };
-      }
-
-      const recent = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
-      const updated = recent.filter((v: { id?: string; path?: string }) => v.id !== info.id && v.path !== info.path);
-      const newVault = { id: info.id, name: info.name, path: info.path };
-      localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
-
-      setCurrentVault(newVault);
-      setIsLocked(false);
-      setRecoveredPassword('');
-      navigate('/app');
-    } catch (err: unknown) {
-      setRecoveryError((err as Error)?.message || String(err) || 'Failed to unlock vault with recovered password');
-    } finally {
-      passBytes.fill(0);
-      setLoading(false);
-    }
-  }, [recoveredPassword, currentVault, useKeyFile, keyFilePath, setCurrentVault, setIsLocked, navigate]);
 
   return (
     <motion.div
@@ -654,117 +589,7 @@ export default function Login() {
             </button>
           </div>
         ) : activeView === 'emergency_recovery' ? (
-          <div className="mt-6 flex flex-col gap-3">
-            <div className="flex flex-col items-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-4 text-center shadow-sm">
-              <div className="mb-2.5 flex h-9 w-9 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]">
-                <KeyRound size={16} />
-              </div>
-              <h2 className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)]">
-                {t('login.emergency_recovery')}
-              </h2>
-              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                {t('login.emergency_recovery_desc')}
-              </p>
-
-              {recoveryError && (
-                <div className="mt-3 flex w-full items-center gap-1.5 rounded-[3px] bg-[var(--destructive)]/10 px-3 py-1.5 text-left text-[11px] text-[var(--destructive)]">
-                  <AlertTriangle size={13} className="shrink-0" />
-                  <span className="select-text">{recoveryError}</span>
-                </div>
-              )}
-
-              {!recoveredPassword ? (
-                <form onSubmit={handleEmergencyRecovery} className="mt-3 flex w-full flex-col gap-2">
-                  <input
-                    type="text"
-                    value={recoveryShareA}
-                    onChange={(e) => {
-                      setRecoveryShareA(e.target.value);
-                      setRecoveryError('');
-                    }}
-                    placeholder={t('settings.share1_placeholder')}
-                    className="h-8.5 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] placeholder:font-sans placeholder:text-[var(--text-tertiary)]"
-                  />
-                  <input
-                    type="text"
-                    value={recoveryShareB}
-                    onChange={(e) => {
-                      setRecoveryShareB(e.target.value);
-                      setRecoveryError('');
-                    }}
-                    placeholder={t('settings.share2_placeholder')}
-                    className="h-8.5 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] placeholder:font-sans placeholder:text-[var(--text-tertiary)]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={recovering || !recoveryShareA.trim() || !recoveryShareB.trim()}
-                    className="flex h-9 w-full items-center justify-center gap-2 rounded-[3px] bg-[var(--text-primary)] text-[12px] font-semibold text-[var(--bg-base)] transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 mt-1 cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    {recovering ? (
-                      <>
-                        <Loader2 size={13} className="animate-spin" />
-                        <span>Reconstructing...</span>
-                      </>
-                    ) : (
-                      <span>{t('login.reconstruct_and_unlock')}</span>
-                    )}
-                  </button>
-                </form>
-              ) : (
-                <div className="mt-3 flex w-full flex-col gap-2.5">
-                  <div className="flex flex-col gap-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] p-2.5 text-left">
-                    <span className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                      {t('login.recovered_password_title')}
-                    </span>
-                    <span className="font-mono text-[12px] font-semibold text-[var(--text-primary)] break-all select-all">
-                      {recoveredPassword}
-                    </span>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isTauri()) {
-                          getBackend().then(b => b.copyToClipboard(recoveredPassword, true, 30)).catch(() => {});
-                        } else {
-                          navigator.clipboard.writeText(recoveredPassword).catch(() => {});
-                        }
-                        setCopiedRecovered(true);
-                        setTimeout(() => setCopiedRecovered(false), 2000);
-                      }}
-                      className="flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
-                    >
-                      <Copy size={12} />
-                      <span>{copiedRecovered ? (t('common.copied') || 'Copied') : (t('common.copy') || 'Copy')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleUnlockWithRecovered}
-                      disabled={loading}
-                      className="flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] text-[11px] font-semibold text-[var(--bg-base)] hover:opacity-90 active:scale-[0.99] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      {loading ? <Loader2 size={12} className="animate-spin" /> : null}
-                      <span>{t('login.unlock_btn')}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Back to master password */}
-            <button
-              type="button"
-              onClick={() => {
-                setRecoveryError('');
-                setRecoveredPassword('');
-                setActiveView('master_password');
-              }}
-              className="flex h-8.5 w-full items-center justify-center gap-1.5 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
-            >
-              <span>{t('login.back_to_password')}</span>
-            </button>
-          </div>
+          <RecoveryForm path={currentVault?.path||''} onBack={()=>setActiveView('master_password')} onRecovered={info=>{setCurrentVault({id:info.id,name:info.name,path:info.path});setIsLocked(false);navigate('/app');}} />
         ) : (
           /* Master Password Form */
           <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-3">

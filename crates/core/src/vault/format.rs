@@ -19,6 +19,9 @@ use crate::error::VaultError;
 
 pub const MAGIC_BYTES: &[u8; 4] = b"YNTR";
 pub const FORMAT_VERSION: u16 = 4;
+/// Random payload keys bound to hardware. Older applications must reject these
+/// files instead of removing a factor using the legacy password-only key model.
+pub const HARDWARE_BOUND_VERSION: u16 = 5;
 pub const FLAG_HAS_BIOMETRIC: u16 = 0x0001;
 pub const FLAG_HAS_HARDWARE_2FA: u16 = 0x0002;
 
@@ -178,10 +181,10 @@ impl VaultFile {
             .map_err(|_| VaultError::InvalidFormat("Failed to read version".into()))?;
         let version = u16::from_le_bytes(version_bytes);
 
-        if version > FORMAT_VERSION {
+        if version > HARDWARE_BOUND_VERSION {
             return Err(VaultError::InvalidFormat(format!(
                 "Unsupported vault version {} (max supported: {})",
-                version, FORMAT_VERSION
+                version, HARDWARE_BOUND_VERSION
             )));
         }
 

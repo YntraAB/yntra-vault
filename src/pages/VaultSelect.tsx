@@ -1,3 +1,4 @@
+import { appMetadata } from '@/lib/appMetadata';
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Database, Plus, Download, Clock, AlertTriangle, Trash2, Wifi } from 'lucide-react';
@@ -26,7 +27,7 @@ export default function VaultSelect() {
     const initVaults = async () => {
       let saved: Vault[] = [];
       try {
-        saved = JSON.parse(localStorage.getItem('yntra-vault-recent-vaults') || '[]');
+        saved = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
       } catch {
         saved = [];
       }
@@ -95,7 +96,8 @@ export default function VaultSelect() {
         multiple: false,
       });
       if (selected) {
-        const path = typeof selected === 'string' ? selected : selected[0];
+        const selectedPath = typeof selected === 'string' ? selected : selected[0];
+        const path = await (await getBackend()).importVaultDocument(selectedPath);
         const fileName = String(path).split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'Vault';
         // Use a temporary ID for import. Upon successful login, Login.tsx will update
         // this with the real vault ID and save it to Recent list.
@@ -110,7 +112,7 @@ export default function VaultSelect() {
   const removeRecent = (id: string) => {
     const updated = recentVaults.filter(v => v.id !== id);
     setRecentVaults(updated);
-    localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify(updated));
+    appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify(updated));
   };
 
   return (
@@ -296,7 +298,7 @@ export default function VaultSelect() {
             };
             const updated = [newVault, ...recentVaults.filter(v => v.path !== stats.vault_path)];
             setRecentVaults(updated);
-            localStorage.setItem('yntra-vault-recent-vaults', JSON.stringify(updated));
+            appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify(updated));
             setCurrentVault(newVault);
             setIsLocked(false);
             navigate('/app');

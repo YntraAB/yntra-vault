@@ -1,4 +1,7 @@
 export const en = {
+  'toast.copy_failed': 'Copy failed. Please try again.',
+  'pairing.received_title': 'Vault received',
+  'pairing.received_pending_password': 'The other device has received the vault. Choose a password and save it there before syncing.',
   // General & Common
   'app.name': 'Yntra Vault',
   'app.subtitle': 'Secure Offline Password Manager',

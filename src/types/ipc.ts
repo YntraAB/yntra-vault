@@ -296,6 +296,7 @@ export interface Hardware2FaInfo {
 
 export interface Hardware2FaChallengeInfo {
   enabled: boolean;
+  payload_key_bound?: boolean;
   protocol: Hardware2FaProtocol;
   key_name: string;
   challenge_salt: number[];
@@ -350,6 +351,7 @@ export interface MergeStats {
 }
 
 export interface PairingStats {
+  peer_saved?: boolean | null;
   entries_sent: number;
   entries_received: number;
   entries_merged: number;
@@ -427,6 +429,20 @@ export interface ImportPreviewResult {
 // ─── Tauri 2 IPC Command Contract ─────────────────────────────────────────────
 
 export interface IpcCommands {
+  configure_auto_lock: {args:{seconds:number};return:void};
+  record_user_activity: {args:undefined;return:void};
+  import_vault_document: {args:{path:string};return:string};
+  export_attachment: {args:{entryId:string;attachmentId:string;path:string};return:void};
+  get_runtime_platform: {args:undefined;return:string};
+  load_ui_metadata: { args: undefined; return: Record<string, string> };
+  save_ui_metadata: { args: { values: Record<string, string>; initialize?: boolean }; return: void };
+  list_usb_storage_devices: {args:undefined;return:{id:string;name:string}[]};
+  get_local_protection: {args:undefined;return:{protected:boolean;usb_bound:boolean;recovery_enabled:boolean}};
+  set_usb_binding: {args:{password:string;keyFilePath?:string;usbId?:string};return:void};
+  revoke_recovery: {args:{password:string;keyFilePath?:string};return:void};
+  recover_vault: {args:{path:string;shareA:string;shareB:string;newPassword:string};return:VaultInfo};
+  create_protected_vault: {args:{name:string;password:string;path:string;usbId:string;keyFilePath?:string};return:{info:VaultInfo;kit:EmergencyKit}};
+  export_recovery_share: {args:{path:string;share:string};return:void};
   // Vault Management
   create_vault: {
     args: { name: string; password: string; path: string; keyFilePath?: string | null };
@@ -667,7 +683,7 @@ export interface IpcCommands {
     return: void;
   };
   generate_emergency_kit: {
-    args: { masterPassword: string };
+    args: { masterPassword: string; keyFilePath?: string };
     return: EmergencyKit;
   };
 
@@ -764,6 +780,7 @@ export interface IpcCommands {
     args: { url: string; username: string; password?: string | null };
     return: void;
   };
+  cancel_p2p_sync_listener: { args: Record<string, never>; return: void };
   run_p2p_sync_listener: {
     args: { listenAddr: string; dbPath: string };
     return: MergeStats;

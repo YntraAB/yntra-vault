@@ -18,7 +18,8 @@ async fn test_app_state_and_atomic_settings() {
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
-        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_operation: Default::default(),
+        sync_listener_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -92,7 +93,8 @@ async fn test_app_state_vault_lifecycle() {
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
-        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_operation: Default::default(),
+        sync_listener_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -155,7 +157,8 @@ async fn test_app_state_vault_reload() {
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
-        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_operation: Default::default(),
+        sync_listener_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -232,7 +235,8 @@ async fn test_autotype_lock_release_invariant() {
         lock_on_system_lock: AtomicBool::new(true),
         smart_login_cancel: std::sync::Arc::new(AtomicBool::new(false)),
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
-        pairing_cancel: std::sync::Arc::new(AtomicBool::new(false)),
+        pairing_operation: Default::default(),
+        sync_listener_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };

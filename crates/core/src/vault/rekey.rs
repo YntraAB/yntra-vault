@@ -5,7 +5,6 @@
 
 use std::path::Path;
 use subtle::ConstantTimeEq;
-use zeroize::Zeroize;
 
 use crate::crypto::{derive_master_key_with_keyfile, derive_subkeys, EntryKey};
 use crate::crypto::kdf::generate_salt;
@@ -17,38 +16,8 @@ use crate::vault::types::{Entry, FieldScope};
 impl VaultManager {
     /// Generate a 32-byte cryptographically secure random key file at path.
     pub fn generate_key_file(path: &Path) -> crate::Result<()> {
-        use rand::Rng;
-        let mut key_bytes = [0u8; 32];
-        rand::rng().fill(&mut key_bytes);
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            use std::io::Write;
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(path)?;
-            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-            file.write_all(&key_bytes)?;
-            file.sync_all()?;
-        }
-        #[cfg(not(unix))]
-        {
-            use std::io::Write;
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(path)?;
-            file.write_all(&key_bytes)?;
-            file.sync_all()?;
-        }
-
-        key_bytes.zeroize();
-        Ok(())
+        let key_bytes = zeroize::Zeroizing::new(generate_salt());
+        super::storage::atomic_create(path, key_bytes.as_slice())
     }
 
     /// Re-encrypt all sensitive fields of an entry with a new entry key.
@@ -105,6 +74,32 @@ impl VaultManager {
         new_password: &str,
         new_key_file: Option<&Path>,
     ) -> crate::Result<()> {
+        let previous = (self.data.clone(), self.keys.clone(), self.salt, self.hardware2fa.clone(), self.biometric.clone(), self.storage.clone());
+        let result = self.change_master_password_inner(current, current_key_file, new_password, new_key_file);
+        if result.is_err() {
+            (self.data, self.keys, self.salt, self.hardware2fa, self.biometric, self.storage) = previous;
+        }
+        result
+    }
+
+    fn change_master_password_inner(
+        &mut self,
+        current: &str,
+        current_key_file: Option<&Path>,
+        new_password: &str,
+        new_key_file: Option<&Path>,
+    ) -> crate::Result<()> {
+        if self.storage.is_some() {
+            let old_kf = current_key_file.map(read_key_file_safely).transpose()?;
+            if !self.verify_master_password_with_keyfile(current, old_kf.as_ref().map(|b| b.as_slice()))? { return Err(VaultError::InvalidPassword); }
+            let new_kf = new_key_file.map(read_key_file_safely).transpose()?;
+            let previous = self.storage.clone();
+            if let Some(session) = &mut self.storage {
+                session.change_password(new_password, new_kf.as_ref().map(|b| b.as_slice()), self.keys.as_ref().ok_or(VaultError::VaultLocked)?)?;
+            }
+            if let Err(error) = self.save() { self.storage = previous; return Err(error); }
+            return Ok(());
+        }
         let cur_kf_bytes = match current_key_file {
             Some(kf_path) => Some(read_key_file_safely(kf_path)?),
             None => None,
@@ -120,7 +115,10 @@ impl VaultManager {
 
         // Verify current password against active session keys using constant-time comparison
         let active_keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
-        if !bool::from(active_keys.vault_key.ct_eq(&current_keys.vault_key)) {
+        let valid = if self.hardware2fa.is_some() && self.data.settings.hardware_password_key.is_some() {
+            bool::from(active_keys.entry_key.ct_eq(&current_keys.entry_key))
+        } else { bool::from(active_keys.vault_key.ct_eq(&current_keys.vault_key)) };
+        if !valid {
             return Err(VaultError::InvalidPassword);
         }
 
@@ -155,6 +153,7 @@ impl VaultManager {
         // Hardware 2FA envelopes wrapped old keys and require the physical token to re-encrypt.
         // Invalidate stale envelopes so user can re-enroll with their physical key under the new master password.
         self.hardware2fa = None;
+        self.data.settings.hardware_password_key = None;
 
         // Invalidate active emergency kit shares derived from the old master password
         if let Some(ref mut audit) = self.data.settings.emergency_kit_audit
