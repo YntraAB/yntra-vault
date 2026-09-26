@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.4] - 2026-09-26
 
 ### Update reliability and data preservation
+- Validate Android Build Tools 37 certificate output without weakening the pinned signing identity; reject unknown or extra signer certificates.
 - Run opt-in update checks once at application startup instead of only when opening Settings. Keep updater state across navigation, prevent overlapping checks/installations, retain installer errors for retry, and disable native installation when a valid checksum is unavailable.
 - Preserve recent vault IDs/names/paths, preferences, theme and setup state in a versioned native metadata file with migration from existing WebView storage, ordered atomic writes and explicit failure handling. Restore metadata before rendering and flush pending saves before update actions; exclude passwords, recovery shares and keyfile paths.
 - Keep the application ID and existing WebView origin/data location stable. Enforce the permanent Android release certificate, application ID and version mapping in release validation.

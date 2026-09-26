@@ -14,8 +14,16 @@ export function verifyAndroidUpdate(badging, signing, version) {
     || !packageLine.includes(`versionName='${version}'`) || !packageLine.includes(`versionCode='${code}'`)) {
     throw new Error('Android package identity/version changed; refusing an incompatible update');
   }
-  const signers = [...signing.matchAll(/^Signer #\d+ certificate SHA-256 digest: ([a-f0-9]+)\s*$/gmi)].map(match => match[1].toLowerCase());
-  if (signers.length !== 1 || signers[0] !== ANDROID_SIGNER) {
+  // Build Tools 37 uses scheme labels (e.g. V3.0 Signer:) instead of Signer #1.
+  // Every certificate line must be recognized and pinned; never ignore an
+  // unfamiliar signer while accepting another certificate from the output.
+  const lines = signing.split(/\r?\n/);
+  const certificateLines = lines.filter(line => line.includes('certificate SHA-256 digest:'));
+  const signers = certificateLines.map(line => /^(?:Signer #\d+|V[234](?:\.\d+)? Signer:) certificate SHA-256 digest: ([a-f0-9]{64})[ \t]*$/i.exec(line)?.[1].toLowerCase());
+  const declaredCounts = lines.filter(line => line.startsWith('Number of signers:')).map(line => /^Number of signers: (\d+)[ \t]*$/.exec(line)?.[1]);
+  if (!signers.length || signers.some(signer => signer !== ANDROID_SIGNER)
+    || declaredCounts.length > 1 || declaredCounts.some(count => count !== '1')
+    || (signers.length > 1 && declaredCounts.length !== 1)) {
     throw new Error('Android release must use the permanent signing certificate');
   }
 }

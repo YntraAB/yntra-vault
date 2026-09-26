@@ -21,6 +21,19 @@ describe('release upgrade compatibility', () => {
     expect(config.app.windows[0].useHttpsScheme).toBe(false);
     expect(config.app.windows[0].dataDirectory).toBeUndefined();
   });
+  it('accepts Build Tools 37 scheme labels while rejecting extra or unrecognized signers', () => {
+    const modern = `Verifies\nVerified using v3 scheme (APK Signature Scheme v3): true\nNumber of signers: 1\nV3.0 Signer: certificate SHA-256 digest: ${ANDROID_SIGNER}\n`;
+    expect(() => verifyAndroidUpdate(badging, modern, '0.2.4')).not.toThrow();
+    expect(() => verifyAndroidUpdate(badging, modern.replaceAll('\n', '\r\n'), '0.2.4')).not.toThrow();
+    expect(() => verifyAndroidUpdate(badging, modern + `V3.1 Signer: certificate SHA-256 digest: ${ANDROID_SIGNER}\n`, '0.2.4')).not.toThrow();
+    for (const invalid of [
+      modern.replace('signers: 1', 'signers: 2'),
+      modern.replace(ANDROID_SIGNER, '0'.repeat(64)),
+      modern + `V3.1 Signer: certificate SHA-256 digest: ${'0'.repeat(64)}\n`,
+      modern + `Unknown signer certificate SHA-256 digest: ${ANDROID_SIGNER}\n`,
+      signer + signer,
+    ]) expect(() => verifyAndroidUpdate(badging, invalid, '0.2.4')).toThrow();
+  });
   it('can execute the Android customization script before project generation', () => {
     const process = Bun.spawnSync(['bun', '--check', 'scripts/apply-android-customizations.js']);
     expect(process.exitCode).toBe(0);

@@ -28,7 +28,8 @@ jobs:
           trap 'rm -f "$KEYSTORE"' EXIT
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
           keytool -list -v -keystore "$KEYSTORE" -storetype PKCS12 -storepass:env ANDROID_KEYSTORE_PASSWORD | grep 'SHA256:'
-          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/37.0.0"
+          test -x "$BUILD_TOOLS/apksigner"
           echo "Build tools: $(basename "$BUILD_TOOLS")"
           curl --fail --location --proto '=https' --proto-redir '=https' 'https://github.com/YntraAB/yntra-vault/releases/download/v0.2.3/Yntra.Vault_0.2.3_universal.apk' --output "$RUNNER_TEMP/published.apk"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/published.apk" > "$RUNNER_TEMP/public-certificates.txt"
