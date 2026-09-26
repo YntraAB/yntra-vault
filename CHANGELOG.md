@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Differentiated network timeouts: 15-second timeout for lightweight manifest queries and 300-second (5 min) extended timeout for large binary package downloads to prevent premature disconnects on standard connections.
 
 ### Fixed
+- **Android launcher icon:** Use a bright white mark on a charcoal background, reduce the adaptive foreground by approximately 22%, and provide matching round/legacy launcher resources so the mark has more room inside phone icon masks.
 - Preserve existing vault files and remembered vault paths during portable executable replacement; add a regression against the production replacement function. Restore desktop installer links in the GitHub update-check fallback. Android now opens verified packages through a cache-only FileProvider and rejects mismatched application/signing identities without uninstalling or deleting data.
 - Publish update metadata only after all seven required packages are present, with verified SHA-256 checksums. Build the exact requested tag, keep incomplete releases as drafts and prevent overwriting published releases.
 - Use a permanent Android signing identity for future updates. Older APKs signed with temporary build keys may reject in-place installation: export and verify a vault backup before any manual migration, and do not uninstall an existing app merely to retry an update.

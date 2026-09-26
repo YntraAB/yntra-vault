@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The original 108dp bitmap has a ~56dp mark. An additional 12dp inset
+     reduces it to ~44dp, leaving room inside Android's 66dp safe circle. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="12dp">
+    <bitmap android:src="@mipmap/ic_launcher_foreground"
+        android:gravity="fill" android:tint="@color/ic_launcher_foreground_tint" />
+</inset>

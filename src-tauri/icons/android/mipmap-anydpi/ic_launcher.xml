@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy launchers do not apply the adaptive icon's zoom/crop. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ic_launcher_background" />
+            <corners android:radius="12dp" />
+            <size android:width="48dp" android:height="48dp" />
+        </shape>
+    </item>
+    <item>
+        <bitmap android:src="@mipmap/ic_launcher_foreground"
+            android:gravity="fill" android:tint="@color/ic_launcher_foreground_tint" />
+    </item>
+</layer-list>
