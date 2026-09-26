@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.4] - 2026-09-26
 
+### Android startup correction (rebuilt at user request)
+
+### Fixed
+- Fix Android startup stopping at “Saved app settings could not be loaded,” including after a clean installation. Rust 1.95's standard file-lock API is unsupported on Android; use the native POSIX lock on Unix/Android while retaining Windows locking, atomic metadata writes and protection against silently resetting damaged metadata.
+- Preserve existing vault files and application metadata during the fix. Users can install the signed update over 0.2.4 without uninstalling or clearing app data.
+
+### Verification
+- Add regression coverage for clean metadata initialization, persisted preferences after restart, exclusive file locking and release of locks on close.
+- Gate Android package publication on an emulator test using the signed APK: reproduce the 0.2.4 startup failure, upgrade in place, open the vault-creation screen, restart, and verify a clean app-data start. This supplements compilation and certificate checks; it does not certify every phone or complete vault migration.
+
 ### Update reliability and data preservation
 - Validate Android Build Tools 37 certificate output without weakening the pinned signing identity; reject unknown or extra signer certificates.
 - Run opt-in update checks once at application startup instead of only when opening Settings. Keep updater state across navigation, prevent overlapping checks/installations, retain installer errors for retry, and disable native installation when a valid checksum is unavailable.

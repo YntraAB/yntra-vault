@@ -7212,6 +7212,7 @@ name = "yntra-vault-app"
 version = "0.2.4"
 dependencies = [
  "chrono",
+ "libc",
  "serde",
  "serde_json",
  "tauri",

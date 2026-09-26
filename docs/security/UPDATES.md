@@ -49,3 +49,9 @@ Release 0.2.4 validation: 145 frontend/tooling tests passed (684 assertions); th
 The real Rust updater check against the published 0.2.4 release passed for Android, Windows installer/portable/CLI and Linux: older versions receive 0.2.4 and the current version receives no unchanged-version update. Release URLs, version and checksums were verified. These checks did not install packages or open user vaults.
 
 Remaining device validation: run an Android upgrade on a device with the existing permanent-signed app: record its vault path, language/layout and linked-device identity; install the newer APK in place; verify those values and encrypted content, unlock and synchronize again. Also exercise installer cancellation, permission denial/grant/retry, low storage and process termination during preparation. Android compilation and signing passed in CI; actual phone installation and in-place data preservation remain unverified on a physical device. Unchanged-version rebuilds are intentionally not offered as upgrades.
+
+## Android 0.2.4 startup correction
+
+Version 0.2.4 can stop before opening the UI on Android because its metadata lock calls a Rust API unsupported on that platform. The rebuilt 0.2.4 package uses native Android/Unix file locking with the same storage boundaries. Install the replacement signed 0.2.4 APK manually over the existing app (the same version is not offered by automatic update checks); uninstalling or clearing application data is not required by this fix. Metadata read failures still do not silently reset saved settings or vault paths.
+
+Android release verification now includes an emulator startup/upgrade regression using a pinned 0.2.4 APK and the newly signed APK. The test covers the startup failure, update installation, UI interaction, restart and clean app-data initialization; it does not establish preservation of every real user vault or every phone/provider combination.

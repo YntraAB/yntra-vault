@@ -11,6 +11,20 @@ const recent = 'yntra-vault-recent-vaults';
 const settings = 'yntra-vault-settings';
 
 describe('application metadata across updates', () => {
+  it('boots a clean install and restores the first saved preferences after restart', async () => {
+    let disk: Record<string, string> = {};
+    const native = { load: async () => ({ ...disk }), save: async (values: Record<string, string>) => { disk = { ...disk, ...values }; } };
+    const first = new AppMetadata(() => browserStore());
+    await first.initialize(native);
+    expect(first.getItem(recent)).toBeNull();
+    first.setItem('yntra-vault-setup-completed', 'true');
+    first.setItem('yntra-vault-theme', 'dark');
+    await first.flush();
+    const restarted = new AppMetadata(() => browserStore());
+    await restarted.initialize(native);
+    expect(restarted.getItem('yntra-vault-setup-completed')).toBe('true');
+    expect(restarted.getItem('yntra-vault-theme')).toBe('dark');
+  });
   it('migrates old paths/preferences and restores them with an empty WebView', async () => {
     let disk: Record<string, string> = {};
     const native = { load: async () => ({ ...disk }), save: async (value: Record<string, string>) => { disk = { ...disk, ...value }; } };

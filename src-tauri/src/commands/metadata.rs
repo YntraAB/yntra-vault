@@ -89,11 +89,34 @@ fn write_store(path: &Path, values: MetadataValues, initialize: bool) -> Result<
     Ok(())
 }
 
+fn acquire_file_lock(file: &std::fs::File) -> std::io::Result<()> {
+    // Rust 1.95 File::lock returns Unsupported on Android without attempting a
+    // syscall (rust-lang/rust#148325). Use the NDK/POSIX API on Unix, including
+    // Android, and retain a real cross-process lock until the handle is closed.
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        loop {
+            // SAFETY: the borrowed File keeps this descriptor valid throughout
+            // the call. flock neither takes ownership nor dereferences pointers.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+                return Ok(());
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    file.lock()
+}
+
 fn lock_store(path: &Path) -> Result<std::fs::File, String> {
     std::fs::create_dir_all(path.parent().ok_or("Invalid metadata directory")?).map_err(|_| "Cannot create metadata directory")?;
     let lock = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
         .open(path.with_extension("lock")).map_err(|_| "Cannot open metadata lock")?;
-    lock.lock().map_err(|_| "Cannot lock application metadata")?;
+    acquire_file_lock(&lock).map_err(|_| "Cannot lock application metadata")?;
     Ok(lock) // OS lock is released when this handle is dropped, including on failure.
 }
 
@@ -116,6 +139,45 @@ pub fn save_ui_metadata(app: AppHandle, values: MetadataValues, initialize: Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clean_install_initializes_metadata_and_reopens_without_touching_vaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = directory.path().join("existing.vdb");
+        std::fs::write(&vault, b"encrypted vault fixture").unwrap();
+        let path = directory.path().join("app-data/ui-metadata-v1.json");
+        {
+            let _guard = lock_store(&path).unwrap();
+            assert!(read_store(&path).unwrap().is_empty());
+            write_store(&path, BTreeMap::new(), true).unwrap();
+            write_store(&path, BTreeMap::from([
+                ("yntra-vault-setup-completed".into(), "true".into()),
+                ("yntra-vault-theme".into(), "dark".into()),
+            ]), false).unwrap();
+        }
+        let _reopened = lock_store(&path).unwrap();
+        assert_eq!(read_store(&path).unwrap()["yntra-vault-theme"], "dark");
+        assert_eq!(std::fs::read(&vault).unwrap(), b"encrypted vault fixture");
+    }
+
+    #[test]
+    fn metadata_lock_excludes_another_handle_and_releases_on_close() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("metadata.json");
+        let guard = lock_store(&path).unwrap();
+        let other = std::fs::OpenOptions::new().read(true).write(true)
+            .open(path.with_extension("lock")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            // SAFETY: other owns the live descriptor; nonblocking probe only.
+            assert_eq!(unsafe { libc::flock(other.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, -1);
+            assert_eq!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::WouldBlock);
+        }
+        #[cfg(not(unix))]
+        assert!(matches!(other.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+        drop(guard);
+        acquire_file_lock(&other).unwrap();
+    }
     #[test]
     fn metadata_survives_reload_without_retaining_unlock_factors() {
         let directory = tempfile::tempdir().unwrap();
