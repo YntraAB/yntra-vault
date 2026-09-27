@@ -155,6 +155,7 @@ impl VaultManager {
             search_index: Default::default(),
         };
         manager.data.settings.emergency_kit_audit = None;
+        manager.data.settings.hardware_password_key = None;
         manager.rebuild_search_index();
         manager.save()?;
         Ok(manager)

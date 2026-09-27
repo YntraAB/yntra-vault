@@ -87,11 +87,13 @@ impl VaultManager {
         key_file_path: Option<&Path>,
         path: &Path,
     ) -> crate::Result<Self> {
+        super::validation::validate_new_master_password(password)?;
         let bytes = key_file_path.map(read_key_file_safely).transpose()?;
         Self::create_with_keyfile_bytes(name, password, bytes.as_ref().map(|b| b.as_slice()), path)
     }
 
     pub fn create_with_keyfile_bytes(name: &str, password: &str, key_file_bytes: Option<&[u8]>, path: &Path) -> crate::Result<Self> {
+        super::validation::validate_new_master_password(password)?;
         validate_keyfile_bytes(key_file_bytes)?;
         crate::vault::validation::validate_display_name(name)?;
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -138,7 +140,7 @@ impl VaultManager {
         };
 
         // Write initial empty vault to disk
-        manager.save()?;
+        manager.save_inner(true)?;
         Ok(manager)
     }
 
@@ -158,6 +160,7 @@ impl VaultManager {
     }
 
     pub fn open_with_keyfile_bytes(path: &Path, password: &str, key_file_bytes: Option<&[u8]>) -> crate::Result<Self> {
+        if password.is_empty() { return Err(VaultError::InvalidPassword); }
         validate_keyfile_bytes(key_file_bytes)?;
         let file_bytes = super::storage::read_bounded(path)
             .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", path.display(), e)))?;
@@ -323,6 +326,10 @@ impl VaultManager {
 
     /// Save the vault to disk with full encryption (Single-File .vdb Architecture).
     pub fn save(&mut self) -> crate::Result<()> {
+        self.save_inner(false)
+    }
+
+    fn save_inner(&mut self, create_new: bool) -> crate::Result<()> {
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
 
         // Update metadata
@@ -374,7 +381,11 @@ impl VaultManager {
         let inner = Zeroizing::new(vault_file.to_bytes()?);
         let file_bytes = if let Some(session) = &self.storage { session.seal(&inner)? } else { inner.to_vec() };
         if let Some(session) = &self.storage { session.check_disk_header(&self.path)?; }
-        super::storage::atomic_write(&self.path, &file_bytes)?;
+        if create_new {
+            super::storage::atomic_create(&self.path, &file_bytes)?;
+        } else {
+            super::storage::atomic_write(&self.path, &file_bytes)?;
+        }
         if let Some(session) = &mut self.storage { session.mark_persisted()?; }
 
         // Clean up any legacy sidecar files if present

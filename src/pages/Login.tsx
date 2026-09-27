@@ -284,10 +284,7 @@ export default function Login() {
         return;
       }
 
-      const secretBytes = secretInputRef.current?.getSecretBytes();
-      const passBytes = secretBytes && secretBytes.length > 0 ? secretBytes : new TextEncoder().encode(password);
-
-      if (passBytes.length === 0) {
+      if (!password) {
         setError(t('login.err_enter_password') || 'Enter your master password');
         triggerShake();
         return;
@@ -303,6 +300,9 @@ export default function Login() {
         return handleHardwareUnlock(e);
       }
 
+      if (isTauri() && !currentVault) { navigate('/'); return; }
+
+      const passBytes = new TextEncoder().encode(password);
       setLoading(true);
       try {
         let info;

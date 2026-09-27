@@ -217,11 +217,7 @@ impl VaultManager {
         b: &str,
         new_password: &str,
     ) -> crate::Result<Self> {
-        if new_password.chars().count() < 12 {
-            return Err(VaultError::InvalidState(
-                "Choose a new password of at least 12 characters".into(),
-            ));
-        }
+        super::validation::validate_new_master_password(new_password)?;
         let bytes = super::storage::read_bounded(path)?;
         if !super::storage::is_protected(&bytes) {
             if a.trim().starts_with("YNTRA2:") {

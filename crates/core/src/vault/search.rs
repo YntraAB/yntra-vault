@@ -307,7 +307,7 @@ mod tests {
         }
 
         let test_vault = TestVault::new();
-        let mut manager = VaultManager::create("search-test-vault", "password", &test_vault.path).unwrap();
+        let mut manager = VaultManager::create("search-test-vault", "fixture-password", &test_vault.path).unwrap();
 
         let entry1 = NewEntry {
             title: "Google Workspace".to_string(),

@@ -77,6 +77,10 @@ pub enum DuplicateStrategy {
 
 /// Parses a CSV string into a 2D matrix of row cells, respecting quotes & escaped quotes.
 pub fn parse_csv_matrix(content: &str) -> Vec<Vec<String>> {
+    parse_csv_checked(content).unwrap_or_default()
+}
+
+fn parse_csv_checked(content: &str) -> crate::Result<Vec<Vec<String>>> {
     let mut rows = Vec::new();
     let mut current_row = Vec::new();
     let mut current_field = String::new();
@@ -99,54 +103,48 @@ pub fn parse_csv_matrix(content: &str) -> Vec<Vec<String>> {
             }
         } else {
             match c {
-                '"' => in_quotes = true,
+                '"' if current_field.is_empty() => in_quotes = true,
+                '"' => current_field.push('"'),
                 ',' => {
-                    current_row.push(current_field.trim().to_string());
+                    current_row.push(std::mem::take(&mut current_field));
                     current_field = String::new();
                 }
-                '\n' => {
-                    current_row.push(current_field.trim().to_string());
+                '\r' | '\n' => {
+                    if c == '\r' && chars.peek() == Some(&'\n') { chars.next(); }
+                    current_row.push(std::mem::take(&mut current_field));
                     if !current_row.iter().all(|f| f.is_empty()) {
                         rows.push(current_row);
                     }
                     current_row = Vec::new();
                     current_field = String::new();
                 }
-                '\r' => {
-                    // Skip carriage return
-                    if chars.peek() == Some(&'\n') {}
-                }
                 _ => current_field.push(c),
             }
         }
     }
 
+    if in_quotes {
+        return Err(crate::VaultError::InvalidFormat("Unclosed quoted CSV field".into()));
+    }
     if !current_field.is_empty() || !current_row.is_empty() {
-        current_row.push(current_field.trim().to_string());
+        current_row.push(current_field);
         if !current_row.iter().all(|f| f.is_empty()) {
             rows.push(current_row);
         }
     }
 
-    rows
+    Ok(rows)
 }
 
-/// Helper function to clean TOTP secret (extracts secret parameter if full otpauth:// URI).
+/// Preserve URI parameters (algorithm, digits, period and issuer) for code generation.
 pub fn clean_totp_secret(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    if trimmed.starts_with("otpauth://") {
-        if let Some(pos) = trimmed.find("secret=") {
-            let sub = &trimmed[pos + 7..];
-            let secret = sub.split('&').next().unwrap_or("").trim();
-            if !secret.is_empty() {
-                return Some(secret.to_string());
-            }
-        }
-        return None;
+    if trimmed.starts_with("otpauth://") || trimmed.starts_with("steam://") {
+        return Some(trimmed.to_owned());
     }
 
     // Clean space/dash formatting inside raw base32 secret
@@ -207,58 +205,24 @@ impl Importer {
             )));
         }
 
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
+        let trimmed = content.trim_start_matches('\u{feff}');
+        if trimmed.trim().is_empty() {
             return Err(crate::VaultError::InvalidFormat("The imported file is empty.".to_string()));
         }
 
         let auto_detected = Self::detect_format(trimmed);
 
-        let target_format = if requested_format == ImportFormat::AutoDetect {
+        // A recognized file structure takes precedence over the selected brand.
+        let final_format = if auto_detected != ImportFormat::GenericCsv
+            || requested_format == ImportFormat::AutoDetect {
             auto_detected
         } else {
             requested_format
         };
-
-        // Try parsing with requested format first
-        let primary_parse = Self::execute_parse(trimmed, target_format);
-        let primary_parse = match primary_parse {
-            Err(error) if target_format == ImportFormat::KeepassXml && auto_detected == ImportFormat::KeepassXml => return Err(error),
-            other => other,
-        };
-
-        let (final_format, entries, is_mismatch, suggested_brand) = match primary_parse {
-            Ok(res) if !res.is_empty() => {
-                let mismatch = requested_format != ImportFormat::AutoDetect
-                    && requested_format != auto_detected
-                    && auto_detected != ImportFormat::GenericCsv;
-
-                let brand_name = if mismatch {
-                    Some(Self::format_to_brand_name(auto_detected).to_string())
-                } else {
-                    None
-                };
-
-                (target_format, res, mismatch, brand_name)
-            }
-            _ => {
-                // Primary format returned 0 items or failed. Fallback to auto-detected format if different.
-                if target_format != auto_detected {
-                    if let Ok(fallback_entries) = Self::execute_parse(trimmed, auto_detected) {
-                        if !fallback_entries.is_empty() {
-                            let brand_name = Self::format_to_brand_name(auto_detected).to_string();
-                            (auto_detected, fallback_entries, true, Some(brand_name))
-                        } else {
-                            (target_format, Vec::new(), false, None)
-                        }
-                    } else {
-                        (target_format, Vec::new(), false, None)
-                    }
-                } else {
-                    (target_format, Vec::new(), false, None)
-                }
-            }
-        };
+        let is_mismatch = requested_format != ImportFormat::AutoDetect
+            && requested_format != final_format;
+        let suggested_brand = is_mismatch.then(|| Self::format_to_brand_name(final_format).to_owned());
+        let entries = Self::execute_parse(trimmed, final_format)?;
 
         let total_found = entries.len();
         let format_label = Self::format_to_label(final_format);
@@ -276,7 +240,7 @@ impl Importer {
     }
 
     fn execute_parse(trimmed: &str, format: ImportFormat) -> crate::Result<Vec<ParsedImportEntry>> {
-        let mut entries = match format {
+        let entries = match format {
             ImportFormat::BitwardenJson => Self::parse_bitwarden_json(trimmed)?,
             ImportFormat::BitwardenCsv => Self::parse_bitwarden_csv(trimmed)?,
             ImportFormat::OnePasswordCsv => Self::parse_1password_csv(trimmed)?,
@@ -290,9 +254,9 @@ impl Importer {
             ImportFormat::GenericCsv | ImportFormat::AutoDetect => Self::parse_generic_csv(trimmed)?,
         };
 
-        // Filter out completely empty entries
-        entries.retain(|e| !e.title.is_empty() || !e.username.is_empty() || !e.password.is_empty() || !e.notes.is_empty());
-        entries.truncate(MAX_IMPORT_ENTRIES);
+        if entries.len() > MAX_IMPORT_ENTRIES {
+            return Err(crate::VaultError::InvalidFormat(format!("Import exceeds the limit of {MAX_IMPORT_ENTRIES} entries. Split the export into smaller files.")));
+        }
         Ok(entries)
     }
 
@@ -343,7 +307,12 @@ impl Importer {
 
     /// Auto-detects the format from raw content.
     fn detect_format(content: &str) -> ImportFormat {
+        let content = content.trim_start();
         if content.starts_with('{') {
+            if serde_json::from_str::<serde_json::Value>(content).ok()
+                .is_some_and(|json| json.get("vaults").is_some()) {
+                return ImportFormat::ProtonPassJson;
+            }
             if content.contains("\"items\"") || content.contains("\"encrypted\"") {
                 return ImportFormat::BitwardenJson;
             }
@@ -359,7 +328,7 @@ impl Importer {
 
         let matrix = parse_csv_matrix(content);
         if let Some(header) = matrix.first() {
-            let h_lower: Vec<String> = header.iter().map(|s| s.to_lowercase()).collect();
+            let h_lower: Vec<String> = header.iter().map(|s| s.trim().to_lowercase()).collect();
 
             if h_lower.iter().any(|h| h == "folder") && h_lower.iter().any(|h| h == "login_username") {
                 return ImportFormat::BitwardenCsv;
@@ -398,7 +367,9 @@ impl Importer {
 
         let mut result = Vec::new();
 
-        if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
+        let items = json.get("items").and_then(|i| i.as_array())
+            .ok_or_else(|| crate::VaultError::InvalidFormat("Missing Bitwarden items array".into()))?;
+        {
             for item in items {
                 let title = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let notes = item.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -466,6 +437,21 @@ impl Importer {
                     }
                 }
 
+                for key in ["card", "identity", "sshKey"] {
+                    if let Some(fields) = item.get(key).and_then(|v| v.as_object()) {
+                        for (name, value) in fields {
+                            if !value.is_null() {
+                                custom_fields.push(CustomField { id: Uuid::new_v4(), name: name.clone(),
+                                    value: value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()),
+                                    field_type: FieldType::Password, sensitive: true });
+                            }
+                        }
+                    }
+                }
+                let tags = json.get("folders").and_then(|v| v.as_array()).into_iter().flatten()
+                    .filter(|folder| item.get("folderId").is_some_and(|id| !id.is_null() && folder.get("id") == Some(id)))
+                    .filter_map(|folder| folder.get("name").and_then(|v| v.as_str()))
+                    .map(str::to_owned).collect();
                 let email = if username.contains('@') { username.clone() } else { String::new() };
 
                 result.push(ParsedImportEntry {
@@ -478,7 +464,7 @@ impl Importer {
                     totp_secret: totp,
                     custom_fields,
                     entry_type,
-                    tags: Vec::new(),
+                    tags,
                     is_duplicate: false,
                     duplicate_reason: None,
                 });
@@ -490,7 +476,7 @@ impl Importer {
 
     /// Bitwarden CSV parser
     fn parse_bitwarden_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.len() < 2 {
             return Ok(Vec::new());
         }
@@ -537,7 +523,7 @@ impl Importer {
 
     /// 1Password CSV parser
     fn parse_1password_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.len() < 2 {
             return Ok(Vec::new());
         }
@@ -548,7 +534,7 @@ impl Importer {
         let mut result = Vec::new();
         for row in matrix.iter().skip(1) {
             let title = idx.get(row, &["title", "name"]);
-            let username = idx.get(row, &["username", "user", "email"]);
+            let username = idx.get(row, &["username", "user", "login", "login name", "email"]);
             let password = idx.get(row, &["password", "pass"]);
             let url = idx.get(row, &["url", "website"]);
             let notes = idx.get(row, &["notes", "note", "comments"]);
@@ -567,7 +553,7 @@ impl Importer {
                 totp_secret,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: Vec::new(),
+                tags: idx.get(row, &["tags", "vault", "folder"]).split(';').map(str::trim).filter(|tag| !tag.is_empty()).map(str::to_owned).collect(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -578,7 +564,7 @@ impl Importer {
 
     /// KeePass / KeePassXC CSV parser
     fn parse_keepass_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.len() < 2 {
             return Ok(Vec::new());
         }
@@ -589,7 +575,7 @@ impl Importer {
         let mut result = Vec::new();
         for row in matrix.iter().skip(1) {
             let title = idx.get(row, &["title"]);
-            let username = idx.get(row, &["username", "user_name"]);
+            let username = idx.get(row, &["username", "user_name", "login name"]);
             let password = idx.get(row, &["password"]);
             let url = idx.get(row, &["url"]);
             let notes = idx.get(row, &["notes", "comment"]);
@@ -639,8 +625,10 @@ impl Importer {
         let mut result = Vec::new();
         for entry in document.descendants().filter(|n| n.has_tag_name("Entry")) {
             if entry.ancestors().skip(1).any(|n| n.has_tag_name("History") || n.has_tag_name("Entry")) { continue; }
-            if result.len() >= MAX_IMPORT_ENTRIES { break; }
-            let mut fields = std::collections::HashMap::new();
+            if result.len() >= MAX_IMPORT_ENTRIES {
+                return Err(crate::VaultError::InvalidFormat(format!("Import exceeds the limit of {MAX_IMPORT_ENTRIES} entries")));
+            }
+            let mut fields = std::collections::BTreeMap::new();
             for field in entry.children().filter(|n| n.has_tag_name("String")) {
                 let key = field.children().find(|n| n.has_tag_name("Key")).map(xml_text).transpose()?.unwrap_or_default();
                 let value = field.children().find(|n| n.has_tag_name("Value"));
@@ -659,7 +647,6 @@ impl Importer {
             let notes = fields.remove("Notes").unwrap_or_default();
             let totp_raw = fields.remove("TimeOtp-Secret-Base32").or_else(||fields.remove("otp")).unwrap_or_default();
             let totp_secret = clean_totp_secret(&totp_raw);
-            if title.is_empty() && username.is_empty() && password.is_empty() && notes.is_empty() { continue; }
             let mut tags = Vec::new();
             if let Some(group) = entry.ancestors().find(|n| n.has_tag_name("Group")) {
                 if let Some(name) = group.children().find(|n| n.has_tag_name("Name")) {
@@ -673,15 +660,18 @@ impl Importer {
                 }
             }
             let email = if username.contains('@') { username.clone() } else { String::new() };
+            let custom_fields = fields.into_iter().map(|(name, value)| CustomField {
+                id: Uuid::new_v4(), name, value, field_type: FieldType::Password, sensitive: true,
+            }).collect();
             result.push(ParsedImportEntry { title, username, password, url, email, notes, totp_secret,
-                custom_fields: Vec::new(), entry_type: EntryType::Login, tags, is_duplicate: false, duplicate_reason: None });
+                custom_fields, entry_type: EntryType::Login, tags, is_duplicate: false, duplicate_reason: None });
         }
         Ok(result)
     }
 
     /// Chrome / Edge / Firefox CSV parser
     fn parse_chrome_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.len() < 2 {
             return Ok(Vec::new());
         }
@@ -692,7 +682,7 @@ impl Importer {
         let mut result = Vec::new();
         for row in matrix.iter().skip(1) {
             let title = idx.get(row, &["name", "title"]);
-            let url = idx.get(row, &["url", "url_href"]);
+            let url = idx.get(row, &["url", "url_href", "hostname", "website"]);
             let username = idx.get(row, &["username", "user"]);
             let password = idx.get(row, &["password", "pass"]);
             let notes = idx.get(row, &["note", "notes"]);
@@ -717,7 +707,7 @@ impl Importer {
                 totp_secret: None,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: Vec::new(),
+                tags: idx.get(row, &["tags", "vault", "folder"]).split(';').map(str::trim).filter(|tag| !tag.is_empty()).map(str::to_owned).collect(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -728,7 +718,7 @@ impl Importer {
 
     /// LastPass CSV parser
     fn parse_lastpass_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.len() < 2 {
             return Ok(Vec::new());
         }
@@ -774,7 +764,7 @@ impl Importer {
 
     /// Dashlane CSV parser
     fn parse_dashlane_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.len() < 2 {
             return Ok(Vec::new());
         }
@@ -802,7 +792,7 @@ impl Importer {
                 totp_secret: None,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: Vec::new(),
+                tags: idx.get(row, &["tags", "vault", "folder"]).split(';').map(str::trim).filter(|tag| !tag.is_empty()).map(str::to_owned).collect(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -814,55 +804,46 @@ impl Importer {
     /// Proton Pass JSON parser
     fn parse_protonpass_json(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
         let json: serde_json::Value = serde_json::from_str(content)
-            .map_err(|e| crate::VaultError::InvalidFormat(format!("Invalid Proton Pass JSON: {}", e)))?;
-
+            .map_err(|_| crate::VaultError::InvalidFormat("Invalid Proton Pass JSON".into()))?;
+        let vaults: Vec<&serde_json::Value> = match json.get("vaults") {
+            Some(serde_json::Value::Object(vaults)) => vaults.values().collect(),
+            Some(serde_json::Value::Array(vaults)) => vaults.iter().collect(),
+            _ => return Err(crate::VaultError::InvalidFormat("Missing Proton Pass vaults".into())),
+        };
         let mut result = Vec::new();
-
-        if let Some(vaults) = json.get("vaults").and_then(|v| v.as_array()) {
-            for vault in vaults {
-                if let Some(items) = vault.get("items").and_then(|i| i.as_array()) {
-                    for item in items {
-                        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let notes = item.get("note").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        
-                        let mut username = String::new();
-                        let mut password = String::new();
-                        let mut url = String::new();
-                        let mut totp = None;
-
-                        if let Some(data) = item.get("data") {
-                            username = data.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            password = data.get("password").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            if let Some(t) = data.get("totpUri").or_else(|| data.get("totp")).and_then(|v| v.as_str()) {
-                                totp = clean_totp_secret(t);
-                            }
-                            if let Some(urls) = data.get("urls").and_then(|v| v.as_array())
-                                && let Some(u) = urls.first().and_then(|v| v.as_str()) {
-                                    url = u.to_string();
-                                }
-                        }
-
-                        let email = if username.contains('@') { username.clone() } else { String::new() };
-
-                        result.push(ParsedImportEntry {
-                            title,
-                            username,
-                            password,
-                            url,
-                            email,
-                            notes,
-                            totp_secret: totp,
-                            custom_fields: Vec::new(),
-                            entry_type: EntryType::Login,
-                            tags: Vec::new(),
-                            is_duplicate: false,
-                            duplicate_reason: None,
-                        });
-                    }
-                }
+        for vault in vaults {
+            let items = vault.get("items").and_then(|v| v.as_array())
+                .ok_or_else(|| crate::VaultError::InvalidFormat("Missing Proton Pass items".into()))?;
+            for item in items {
+                let data = item.get("data").ok_or_else(|| crate::VaultError::InvalidFormat("Missing Proton Pass item data".into()))?;
+                let metadata = data.get("metadata").unwrap_or(item);
+                let content = data.get("content").unwrap_or(data);
+                let text = |object: &serde_json::Value, keys: &[&str]| -> String {
+                    keys.iter().filter_map(|key| object.get(key).and_then(|v| v.as_str())).find(|v| !v.is_empty()).unwrap_or("").to_owned()
+                };
+                let email = text(content, &["itemEmail", "email"]);
+                let mut username = text(content, &["itemUsername", "username"]);
+                if username.is_empty() { username = email.clone(); }
+                let urls = content.get("urls").and_then(|v| v.as_array());
+                let url = urls.and_then(|urls| urls.first()).and_then(|v| v.as_str().or_else(|| v.get("url").and_then(|v| v.as_str()))).unwrap_or("").to_owned();
+                let entry_type = match data.get("type").and_then(|v| v.as_str()) {
+                    Some("note") => EntryType::SecureNote,
+                    Some("creditCard") => EntryType::CreditCard,
+                    Some("identity") => EntryType::Identity,
+                    _ => EntryType::Login,
+                };
+                // Retain extended fields and unsupported item data rather than silently discarding it.
+                let custom_fields = vec![CustomField { id: Uuid::new_v4(), name: "Proton Pass data".into(),
+                    value: data.to_string(), field_type: FieldType::Password, sensitive: true }];
+                let tags = vault.get("name").and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(|v| vec![v.to_owned()]).unwrap_or_default();
+                result.push(ParsedImportEntry {
+                    title: text(metadata, &["name", "title"]), username, email, url,
+                    password: text(content, &["password"]), notes: text(metadata, &["note", "notes"]),
+                    totp_secret: clean_totp_secret(&text(content, &["totpUri", "totp"])),
+                    custom_fields, entry_type, tags, is_duplicate: false, duplicate_reason: None,
+                });
             }
         }
-
         Ok(result)
     }
 
@@ -871,15 +852,18 @@ impl Importer {
         Self::parse_generic_csv(content)
     }
 
-    /// Generic CSV parser with fuzzy column matching and positional index fallback
+    /// Generic CSV parser with explicit column aliases and headerless positional fallback
     fn parse_generic_csv(content: &str) -> crate::Result<Vec<ParsedImportEntry>> {
-        let matrix = parse_csv_matrix(content);
+        let matrix = parse_csv_checked(content)?;
         if matrix.is_empty() {
             return Ok(Vec::new());
         }
 
-        // If single row without header, or matrix >= 2
-        let has_header = matrix.len() >= 2;
+        // Do not discard the first record merely because more than one row exists.
+        let has_header = matrix[0].iter().any(|cell| matches!(
+            cell.trim().to_ascii_lowercase().as_str(),
+            "title" | "name" | "username" | "password" | "url" | "website" | "login" | "email"
+        ));
         let start_row = if has_header { 1 } else { 0 };
 
         let idx = if has_header {
@@ -891,19 +875,19 @@ impl Importer {
         let mut result = Vec::new();
         for row in matrix.iter().skip(start_row) {
             let mut title = idx.get(row, &["title", "name", "item", "service", "account"]);
-            let mut username = idx.get(row, &["username", "user", "login", "email"]);
+            let mut username = idx.get(row, &["username", "user", "login", "login name", "email"]);
             let mut password = idx.get(row, &["password", "pass", "secret"]);
-            let mut url = idx.get(row, &["url", "website", "link", "uri"]);
+            let mut url = idx.get(row, &["url", "website", "link", "uri", "hostname"]);
             let mut notes = idx.get(row, &["notes", "note", "comment", "description"]);
             let totp_raw = idx.get(row, &["totp", "otp", "totp_secret"]);
 
             // Positional index fallback if headers were unmapped
-            if title.is_empty() && username.is_empty() && password.is_empty() {
-                if !row.is_empty() { title = row[0].trim().to_string(); }
-                if row.len() > 1 { username = row[1].trim().to_string(); }
-                if row.len() > 2 { password = row[2].trim().to_string(); }
-                if row.len() > 3 { url = row[3].trim().to_string(); }
-                if row.len() > 4 { notes = row[4].trim().to_string(); }
+            if !has_header {
+                if !row.is_empty() { title = row[0].to_string(); }
+                if row.len() > 1 { username = row[1].to_string(); }
+                if row.len() > 2 { password = row[2].to_string(); }
+                if row.len() > 3 { url = row[3].to_string(); }
+                if row.len() > 4 { notes = row[4].to_string(); }
             }
 
             let email = if username.contains('@') { username.clone() } else { String::new() };
@@ -929,7 +913,7 @@ impl Importer {
                 totp_secret,
                 custom_fields: Vec::new(),
                 entry_type: EntryType::Login,
-                tags: Vec::new(),
+                tags: idx.get(row, &["tags", "vault", "folder"]).split(';').map(str::trim).filter(|tag| !tag.is_empty()).map(str::to_owned).collect(),
                 is_duplicate: false,
                 duplicate_reason: None,
             });
@@ -949,7 +933,7 @@ impl HeaderIndex {
     fn new(header: &[String]) -> Self {
         let mut map = std::collections::HashMap::new();
         for (i, h) in header.iter().enumerate() {
-            let clean = h.trim().to_lowercase().replace([' ', '_', '-'], "");
+            let clean = h.trim_start_matches('\u{feff}').trim().to_lowercase().replace([' ', '_', '-'], "");
             map.insert(clean, i);
         }
         Self { map }
@@ -961,27 +945,11 @@ impl HeaderIndex {
             let clean = cand.replace([' ', '_', '-'], "");
             if let Some(&idx) = self.map.get(&clean)
                 && idx < row.len() {
-                    let val = row[idx].trim();
+                    let val = &row[idx];
                     if !val.is_empty() {
                         return val.to_string();
                     }
                 }
-        }
-
-        // 2. Try substring / partial matches
-        for cand in candidates {
-            let clean = cand.replace([' ', '_', '-'], "");
-            if clean.len() < 3 {
-                continue;
-            }
-            for (key, &idx) in &self.map {
-                if (key.contains(&clean) || clean.contains(key)) && idx < row.len() {
-                    let val = row[idx].trim();
-                    if !val.is_empty() {
-                        return val.to_string();
-                    }
-                }
-            }
         }
 
         String::new()
@@ -999,6 +967,83 @@ fn xml_text(node: roxmltree::Node<'_, '_>) -> crate::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proton_object_vaults_and_bitwarden_folders_preserve_data() {
+        let proton = r#"{"vaults":{"v1":{"name":"Personal","items":[{"data":{"type":"login","metadata":{"name":"GitHub","note":"fixture note"},"content":{"itemUsername":"alice","itemEmail":"alice@example.test","password":" fixture ","urls":["https://github.com"],"totpUri":"otpauth://totp/GitHub?secret=JBSWY3DPEHPK3PXP&digits=8"},"extraFields":[{"fieldName":"backup","data":{"content":"fixture"}}]}}]}}}"#;
+        let preview = Importer::parse_str(proton, ImportFormat::AutoDetect).unwrap();
+        assert_eq!(preview.detected_format_key, "protonpass_json");
+        assert_eq!(preview.entries.len(), 1);
+        assert_eq!(preview.entries[0].title, "GitHub");
+        assert_eq!(preview.entries[0].password, " fixture ");
+        assert_eq!(preview.entries[0].tags, vec!["Personal"]);
+        assert!(preview.entries[0].totp_secret.as_ref().unwrap().contains("digits=8"));
+        assert!(preview.entries[0].custom_fields[0].value.contains("extraFields"));
+        let bitwarden = r#"{"folders":[{"id":"work","name":"Work"}],"items":[{"name":"Card","folderId":"work","type":3,"card":{"number":"fixture","code":"123"}}]}"#;
+        let preview = Importer::parse_str(bitwarden, ImportFormat::AutoDetect).unwrap();
+        assert_eq!(preview.entries[0].tags, vec!["Work"]);
+        assert_eq!(preview.entries[0].custom_fields.len(), 2);
+    }
+
+    #[test]
+    fn csv_preserves_credentials_and_does_not_use_partial_header_matches() {
+        let preview = Importer::parse_str("\u{feff}Title,Username,Password,One-time password\r\nGitHub, User ,\" secret \",OTP", ImportFormat::OnePasswordCsv).unwrap();
+        assert_eq!(preview.entries[0].username, " User ");
+        assert_eq!(preview.entries[0].password, " secret ");
+        let empty = Importer::parse_str("Title,Username,Password,One-time password\nGitHub,,,OTP", ImportFormat::OnePasswordCsv).unwrap();
+        assert_eq!(empty.entries[0].password, "");
+    }
+
+    #[test]
+    fn supported_csv_formats_preserve_both_accounts_and_secret_whitespace() {
+        for (format, header) in [
+            (ImportFormat::BitwardenCsv, "name,login_username,login_password,login_uri"),
+            (ImportFormat::OnePasswordCsv, "Title,Username,Password,URL"),
+            (ImportFormat::KeepassCsv, "Title,User Name,Password,URL"),
+            (ImportFormat::ChromeCsv, "name,username,password,url"),
+            (ImportFormat::LastPassCsv, "name,username,password,url"),
+            (ImportFormat::DashlaneCsv, "title,login,password,url"),
+            (ImportFormat::ProtonPassCsv, "name,username,password,url"),
+            (ImportFormat::GenericCsv, "title,username,password,url"),
+        ] {
+            let csv = format!("{header}\r\nGitHub,alice,\" first \",https://github.com\r\nGitHub,bob,\" second \",https://github.com");
+            let entries = Importer::parse_str(&csv, format).unwrap().entries;
+            assert_eq!(entries.len(), 2, "{format:?}");
+            assert_eq!(entries[0].username, "alice", "{format:?}");
+            assert_eq!(entries[1].password, " second ", "{format:?}");
+        }
+    }
+
+    #[test]
+    fn headerless_csv_keeps_first_entry_and_header_only_is_empty() {
+        let preview = Importer::parse_str("GitHub,alice,one\nGitLab,bob,two", ImportFormat::GenericCsv).unwrap();
+        assert_eq!(preview.total_found, 2);
+        assert_eq!(preview.entries[0].title, "GitHub");
+        assert_eq!(Importer::parse_str("title,username,password", ImportFormat::GenericCsv).unwrap().total_found, 0);
+        let firefox = Importer::parse_str("hostname,username,password\nhttps://github.com,alice,fixture", ImportFormat::AutoDetect).unwrap();
+        assert_eq!(firefox.entries[0].url, "https://github.com");
+        let legacy = Importer::parse_str("Account,Login Name,Password,Web Site\nGitHub,alice,fixture,https://github.com", ImportFormat::AutoDetect).unwrap();
+        assert_eq!(legacy.entries[0].username, "alice");
+        assert_eq!(legacy.entries[0].url, "https://github.com");
+    }
+
+    #[test]
+    fn parser_errors_are_not_reported_as_successful_empty_imports() {
+        assert!(Importer::parse_str("{broken", ImportFormat::AutoDetect).is_err());
+        assert!(Importer::parse_str("title,username,password\nGitHub,alice,\"unfinished", ImportFormat::AutoDetect).is_err());
+        assert!(Importer::parse_str(r#"{"encrypted":true}"#, ImportFormat::AutoDetect).is_err());
+        let preview = Importer::parse_str("<KeePassFile><Entry><String><Key>Token</Key><Value>fixture</Value></String></Entry></KeePassFile>", ImportFormat::BitwardenJson).unwrap();
+        assert!(preview.is_format_mismatch);
+        assert_eq!(preview.total_found, 1);
+        assert_eq!(preview.entries[0].custom_fields[0].value, "fixture");
+        assert!(preview.entries[0].custom_fields[0].sensitive);
+    }
+
+    #[test]
+    fn import_limit_rejects_instead_of_silently_truncating() {
+        let csv = format!("title,username,password\n{}", "GitHub,user,fixture\n".repeat(MAX_IMPORT_ENTRIES + 1));
+        assert!(Importer::parse_str(&csv, ImportFormat::AutoDetect).is_err());
+    }
 
     #[test]
     fn test_csv_matrix_parsing() {
@@ -1042,7 +1087,7 @@ mod tests {
         assert_eq!(entry.username, "alice@gmail.com");
         assert_eq!(entry.password, "supersecretpassword123");
         assert_eq!(entry.url, "https://accounts.google.com");
-        assert_eq!(entry.totp_secret, Some("JBSWY3DPEHPK3PXP".to_string()));
+        assert_eq!(entry.totp_secret, Some("otpauth://totp/Google?secret=JBSWY3DPEHPK3PXP".to_string()));
         assert_eq!(entry.custom_fields.len(), 2); // 1 alt URI + 1 custom field
         assert_eq!(entry.custom_fields[1].name, "Recovery Key");
         assert_eq!(entry.custom_fields[1].value, "1234-5678");
@@ -1050,7 +1095,7 @@ mod tests {
 
     #[test]
     fn test_totp_uri_cleaner() {
-        assert_eq!(clean_totp_secret("otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP&issuer=Test"), Some("JBSWY3DPEHPK3PXP".to_string()));
+        assert_eq!(clean_totp_secret("otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP&issuer=Test"), Some("otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP&issuer=Test".to_string()));
         assert_eq!(clean_totp_secret("jbsw y3dp-ehpk 3pxp"), Some("JBSWY3DPEHPK3PXP".to_string()));
     }
 

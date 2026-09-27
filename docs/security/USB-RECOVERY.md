@@ -4,7 +4,9 @@ Implemented in 0.2.4. Existing vaults remain in their original format until reco
 
 ## What USB binding does
 
-On Windows, Settings → Security → USB binding and recovery lets you create a recovery kit and bind that vault copy to an attached USB storage device. The creation dialog also offers USB binding and presents the recovery shares before completing setup.
+On Windows, Settings → Security → Access and recovery contains separate USB protection and Recovery keys rows. Choose Set up for USB protection. If recovery is not enabled, first create and save the recovery keys, then select the drive and authenticate to enable binding. Manage opens the controls for an existing configuration. The creation dialog also offers USB protection and presents the recovery shares before completing setup.
+
+Refresh the drive list after connecting or removing a drive. A missing device or failed scan clears the previous selection. Protection actions remain disabled until status has loaded successfully; use Retry after a status error. Hardware security-key protection must be disabled before enabling the local USB/recovery envelope.
 
 Opening a bound file requires its password, any configured key file, and a matching connected USB device. Files may be renamed, placed in any directory, or copied to the computer and back. There is no hidden key file on the stick. The stick need not contain the vault while it is being opened.
 
@@ -34,7 +36,7 @@ Password changes and USB replacement/removal preserve the current v2 kit. Each n
 
 ## Linking and synchronization
 
-Each replica has its own randomly keyed storage envelope and local password/USB/recovery settings. Pairing shares the inner synchronization keys through the authenticated encrypted channel, without sending USB wrapping slots or recovery material. A paired phone receives an independent local envelope without the desktop's USB requirement. QR pairing can provision a new local password for the protected replica.
+Each replica has its own randomly keyed storage envelope and local password/USB/recovery settings. Pairing shares the inner synchronization keys through the authenticated encrypted channel, without sending USB wrapping slots, recovery material or local hardware-password restoration records. A paired phone receives an independent local envelope without the desktop's USB requirement. QR pairing can provision a new local password for the protected replica. QR expiry also applies during handshake, transfer and receipt processing.
 
 P2P and normal WebDAV synchronization exchange encrypted content snapshots. Applying a phone edit on the desktop retains the desktop envelope and recovery kit. Desktop edits likewise preserve the phone's local policy. Two-way entry edits do not require repeated adoption. QR pairing creates new copies; PIN pairing can merge existing vaults and re-encrypt their entries correctly. A new-copy adoption refuses to overwrite an existing file.
 
@@ -44,7 +46,9 @@ Legacy raw file-download routes refuse to overwrite a protected local file. USB-
 
 ## Compatibility
 
-- USB enumeration/enrollment is implemented for Windows. Recovery v2 and independent replica envelopes are platform-neutral Rust, but live mobile/Linux builds were not verified for this change.
+New vault passwords, password replacements and recovery passwords must contain at least 12 Unicode characters and cannot consist only of whitespace. Confirmation must match exactly. Both the interface and native engine enforce this; passwords are never trimmed before use. Existing nonempty shorter passwords remain supported for unlocking older files. New-vault creation refuses to replace an existing file.
+
+- USB enumeration/enrollment is implemented for Windows. Recovery v2 and independent replica envelopes are platform-neutral Rust. Release builds cover Android and Linux; physical phone-PC pairing and USB behavior on other operating systems are not established by those builds.
 - Older applications cannot open `YNS2` files. Keep an appropriate backup before migration and update paired clients.
 - Migrating clears biometric quick unlock. Legacy hardware 2FA must be disabled in an already authenticated session before migration. Protected v2 replicas reject biometric and legacy hardware-key enrollment rather than introducing an alternate path around local protection.
 - Existing v1–v5 `YNTR` parsing remains for unmigrated files and encrypted synchronization payloads. Recovery remains an offline operation.
@@ -58,5 +62,7 @@ Shamir multiplication uses fixed rounds without secret-indexed lookup tables and
 Regression coverage includes wrong factors, tampering, malformed framing, recovery replacement/consumption, failed-save rollback, independent replica sync in both directions, decrypted entry contents after cross-vault pairing, and separate share export confirmation. A real connected Windows USB was tested non-destructively with a disposable vault: enrollment, lock/reopen, rename/copy to the computer and back, password change retaining binding, and recovery with the original kit passed. No existing user vault was opened or changed. Formatting, unplug/replug, Windows reinstallation, other physical computers and firmware changes were not exercised. Automated tests do not constitute an independent cryptographic audit.
 
 Windows validation including the subsequent reliability/UI fixes: 285 Rust workspace tests passed (nine opt-in tests ignored), 127 frontend tests passed, and the TypeScript/Vite production build passed. The live USB probe passed during the recovery implementation. These counts record that implementation milestone; later update checks are described in [Updates and application data](UPDATES.md). Real phone-PC synchronization and platform-specific device behavior still need device testing.
+
+The 2026-09-27 follow-up passed 156 frontend/tooling tests and 308 debug Rust tests (nine opt-in tests ignored), with additional coverage for password validation, duplicate submissions, stale USB selections, failed exports, import completeness and non-overwriting creation. Its compact dialogs were checked using synthetic fixture screens. No additional physical USB or phone test was performed for that follow-up.
 
 CLI usage: `yntra --path <file> recovery generate --output-dir <directory>`, `recovery revoke`, and `recovery restore --share-a-file <file> --share-b-file <file>`. Password prompts are hidden. Move generated share files to separate safe locations. The old `shamir` diagnostic command produces legacy hash shares and is not a v2 recovery kit.

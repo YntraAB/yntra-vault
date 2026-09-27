@@ -74,6 +74,9 @@ impl VaultManager {
         new_password: &str,
         new_key_file: Option<&Path>,
     ) -> crate::Result<()> {
+        self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        super::validation::validate_new_master_password(new_password)?;
+        if current.is_empty() { return Err(VaultError::InvalidPassword); }
         let previous = (self.data.clone(), self.keys.clone(), self.salt, self.hardware2fa.clone(), self.biometric.clone(), self.storage.clone());
         let result = self.change_master_password_inner(current, current_key_file, new_password, new_key_file);
         if result.is_err() {

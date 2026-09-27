@@ -18,14 +18,24 @@ const previous = new Map<string, PropertyDescriptor | undefined>();
 let root: Root | undefined;
 let mount: typeof import('react-dom/client').createRoot;
 
+async function fillInput(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    input.focus();
+    Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new dom.Event('input', { bubbles: true }));
+    input.dispatchEvent(new dom.KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+  });
+}
+
 beforeAll(async () => {
-  for (const [key, value] of Object.entries({ window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage, CustomEvent: dom.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true })) {
+  for (const [key, value] of Object.entries({ window: dom, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element, SVGElement: dom.SVGElement, navigator: dom.navigator, localStorage: dom.localStorage, CustomEvent: dom.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true })) {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   mount = (await import('react-dom/client')).createRoot;
 });
 afterEach(async () => {
+  (await import('framer-motion')).MotionGlobalConfig.skipAnimations = false;
   await act(async () => root?.unmount());
   root = undefined;
   resetBackend();
@@ -41,6 +51,251 @@ afterAll(() => {
 });
 
 describe('secret and synchronization lifecycle', () => {
+  it('starts locked and selecting a vault alone cannot unlock it', async () => {
+    let auth!: ReturnType<typeof useAuth>;
+    function Harness() { const value = useAuth(); useEffect(() => { auth = value; }, [value]); return null; }
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<ToastProvider><AuthProvider><Harness /></AuthProvider></ToastProvider>); });
+    expect(auth.isLocked).toBe(true);
+    await act(async () => auth.setCurrentVault({ id: 'fixture', name: 'Fixture', path: '/fixture.vdb' }));
+    expect(auth.isLocked).toBe(true);
+  });
+
+  it('prevents empty advancement and short Unicode passwords during rekey, and blocks duplicate submissions', async () => {
+    const { ChangeMasterPasswordModal } = await import('@/features/auth/components/ChangeMasterPasswordModal');
+    const { frameSteps, frameData } = await import('motion-dom');
+    (await import('framer-motion')).MotionGlobalConfig.skipAnimations = true;
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend(); let calls = 0, closed = 0;
+    let finish!: () => void;
+    Object.assign(backend, { changeMasterPasswordBytes: async () => { calls++; return new Promise<void>(resolve => { finish = resolve; }); } });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<ToastProvider><ChangeMasterPasswordModal open onClose={() => { closed++; }} /></ToastProvider>); });
+    const button = (text: string) => [...container.querySelectorAll('button')].find(b => b.textContent?.trim() === text)!;
+    expect(button('Next').disabled).toBe(true);
+    const current = container.querySelector<HTMLInputElement>('input[type=password]')!;
+    await act(async () => current.dispatchEvent(new dom.KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })));
+    expect(button('Next').disabled).toBe(true);
+    await fillInput(current, 'legacy-pass');
+    await act(async () => button('Next').click());
+    for (let tick = 0; tick < 4; tick++) await act(async () => { frameData.timestamp = Math.max(frameData.timestamp, performance.now()) + 500; for (const step of Object.values(frameSteps)) step.process(frameData); });
+    const passwords = container.querySelectorAll<HTMLInputElement>('input[type=password]');
+    expect(passwords.length).toBe(2);
+    for (const password of ['            ', '🔐🔐🔐🔐🔐🔐']) {
+      await fillInput(passwords[0], password); await fillInput(passwords[1], password);
+      expect(button('Change Master Password').disabled).toBe(true);
+      await act(async () => passwords[1].dispatchEvent(new dom.KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })));
+      expect(calls).toBe(0);
+    }
+    await fillInput(passwords[0], 'valid-fixture-password'); await fillInput(passwords[1], 'valid-fixture-password');
+    await act(async () => { button('Change Master Password').click(); button('Change Master Password').click(); });
+    expect(calls).toBe(1);
+    await act(async () => { container.querySelector<HTMLDivElement>('.fixed')!.click(); dom.dispatchEvent(new dom.KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(closed).toBe(0);
+    await act(async () => finish());
+    expect(closed).toBe(1);
+  });
+
+  it('rejects invalid new-vault credentials before any path dialog or backend creation', async () => {
+    const { CreateVaultModal } = await import('@/features/auth/components/CreateVaultModal');
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend();
+    let paths = 0, creates = 0;
+    Object.assign(backend, { getMobileVaultPath: async () => { paths++; return '/fixture.vdb'; }, createVaultBytes: async () => { creates++; } });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<CreateVaultModal open onClose={() => {}} onCreated={() => {}} />); });
+    await fillInput(container.querySelector<HTMLInputElement>('input[type=text]')!, 'Fixture');
+    const passwords = container.querySelectorAll<HTMLInputElement>('input[type=password]');
+    for (const password of ['', 'short', '            ', '🔐🔐🔐🔐🔐🔐']) {
+      await fillInput(passwords[0], password);
+      await fillInput(passwords[1], password);
+      expect(container.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(true);
+      await act(async () => container.querySelector('form')!.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true })));
+      expect(paths).toBe(0); expect(creates).toBe(0);
+    }
+    await fillInput(passwords[0], 'valid-fixture-password');
+    await fillInput(passwords[1], 'different-fixture-password');
+    expect(container.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(true);
+    await fillInput(passwords[1], 'valid-fixture-password');
+    expect(container.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(false);
+  });
+
+  it('blocks invalid recovery credentials even on direct form submission', async () => {
+    const { RecoveryForm } = await import('@/features/auth/components/LocalProtection');
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend(); let calls = 0;
+    Object.assign(backend, { recoverVault: async () => { calls++; } });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<RecoveryForm path="/fixture.vdb" onBack={() => {}} onRecovered={() => {}} />); });
+    const fields = container.querySelectorAll<HTMLInputElement>('input');
+    await fillInput(fields[0], 'fixture-share-a'); await fillInput(fields[1], 'fixture-share-b');
+    for (const password of ['', 'short', '            ', '🔐🔐🔐🔐🔐🔐']) {
+      await fillInput(fields[2], password); await fillInput(fields[3], password);
+      expect(container.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(true);
+      await act(async () => container.querySelector('form')!.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true })));
+      expect(calls).toBe(0);
+    }
+    await fillInput(fields[2], 'valid-fixture-password'); await fillInput(fields[3], 'valid-fixture-password');
+    await fillInput(fields[1], 'fixture-share-a');
+    expect(container.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(true);
+  });
+
+  it('clears disconnected USB selections and failed scans instead of retaining a stale binding', async () => {
+    const { UsbPicker } = await import('@/features/auth/components/LocalProtection');
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend();
+    let devices = [{ id: 'drive-one', name: 'USB' }], fail = false;
+    Object.assign(backend, { listUsbStorageDevices: async () => { if (fail) throw new Error('Scan failed'); return devices; } });
+    const values: string[] = [];
+    function Harness() {
+      const [value, setValue] = React.useState('drive-one');
+      return <UsbPicker value={value} onChange={next => { values.push(next); setValue(next); }} />;
+    }
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<Harness />); });
+    expect(container.querySelector('select')?.value).toBe('drive-one');
+    devices = [];
+    await act(async () => container.querySelector('button')!.click());
+    expect(values).toEqual(['']);
+    expect(container.querySelector('select')?.value).toBe('');
+    expect(container.textContent).toContain('Connect a USB drive');
+    fail = true;
+    await act(async () => container.querySelector('button')!.click());
+    expect(container.querySelector('[role=alert]')?.textContent).toContain('Scan failed');
+    expect(container.textContent).not.toContain('Connect a USB drive');
+  });
+
+  it('blocks duplicate creation and dismissal while choosing a vault path, then recovers after cancellation', async () => {
+    const { CreateVaultModal } = await import('@/features/auth/components/CreateVaultModal');
+    let paths = 0, closes = 0, creates = 0;
+    let finish!: (value: string | null) => void;
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend();
+    Object.assign(backend, {
+      getMobileVaultPath: () => { paths++; return new Promise<string | null>(resolve => { finish = resolve; }); },
+      createVaultBytes: async () => { creates++; },
+    });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<CreateVaultModal open onClose={() => { closes++; }} onCreated={() => {}} />); });
+    await fillInput(container.querySelector<HTMLInputElement>('input[type=text]')!, 'Fixture');
+    const passwords = container.querySelectorAll<HTMLInputElement>('input[type=password]');
+    await fillInput(passwords[0], 'fixture-password');
+    await fillInput(passwords[1], 'fixture-password');
+    const form = container.querySelector('form')!;
+    await act(async () => {
+      form.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(paths).toBe(1);
+    expect(container.querySelector('fieldset')?.disabled).toBe(true);
+    await act(async () => {
+      container.querySelector<HTMLDivElement>('.fixed')!.click();
+      dom.dispatchEvent(new dom.KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(closes).toBe(0);
+    await act(async () => finish(null));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(creates).toBe(0);
+    expect(container.querySelector('fieldset')?.disabled).toBe(false);
+    await act(async () => container.querySelector<HTMLDivElement>('.fixed')!.click());
+    expect(closes).toBe(1);
+  });
+
+  it('keeps recovery actions unavailable when protection status fails to load', async () => {
+    const { LocalProtectionSettings } = await import('@/features/auth/components/LocalProtection');
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend();
+    let fails = true;
+    Object.assign(backend, { getLocalProtection: async () => { if (fails) throw new Error('Status failed'); return { protected: false, usb_bound: false, recovery_enabled: false }; } });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<LocalProtectionSettings />); });
+    const create = () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Create')!;
+    expect(create().disabled).toBe(true);
+    expect(container.querySelector('[role=alert]')?.textContent).toContain('Status failed');
+    fails = false;
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry')!.click());
+    expect(create().disabled).toBe(false);
+  });
+
+  it('still shows a newly created vault recovery kit when recent-vault history is damaged', async () => {
+    const { CreateVaultModal } = await import('@/features/auth/components/CreateVaultModal');
+    const { initializePlatform } = await import('@/lib/platform');
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async (command: string) => command === 'get_runtime_platform' ? 'windows' : null } });
+    await initializePlatform();
+    const backend = await getBackend();
+    const kit = { vault_id: 'fixture', vault_name: 'Fixture', created_at: '', generated_at: '', format_version: 2, total_entries: 0, verification_hash: 'fixture', document_markdown: '', shares: [1, 2, 3].map(i => ({ share_index: i, label: `Share ${i}`, share_data: `fixture-${i}` })) };
+    let creates = 0;
+    Object.assign(backend, {
+      getMobileVaultPath: async () => '/fixture.vdb',
+      listUsbStorageDevices: async () => [{ id: 'fixture-usb', name: 'Fixture USB' }],
+      createProtectedVault: async () => { creates++; return { info: { id: 'fixture', name: 'Fixture', path: '/fixture.vdb' }, kit }; },
+    });
+    dom.localStorage.setItem('yntra-vault-recent-vaults', '{invalid');
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<CreateVaultModal open onClose={() => {}} onCreated={() => {}} />); });
+    const fill = async (input: HTMLInputElement, value: string) => {
+      await act(async () => {
+        input.focus();
+        Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+        input.dispatchEvent(new dom.Event('input', { bubbles: true }));
+        input.dispatchEvent(new dom.KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+      });
+    };
+    await fill(container.querySelector<HTMLInputElement>('input[type=text]')!, 'Fixture');
+    const passwords = container.querySelectorAll<HTMLInputElement>('input[type=password]');
+    await fill(passwords[0], 'synthetic-fixture-password');
+    await fill(passwords[1], 'synthetic-fixture-password');
+    const usbToggle = [...container.querySelectorAll('label')].find(label => label.textContent?.includes('USB protection'))!.querySelector('input')!;
+    await act(async () => usbToggle.click());
+    await act(async () => { const select = container.querySelector('select')!; select.value = 'fixture-usb'; select.dispatchEvent(new dom.Event('change', { bubbles: true })); });
+    await act(async () => container.querySelector('form')!.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true })));
+    expect(creates).toBe(1);
+    expect(dom.document.querySelector('[role=dialog]')?.textContent).toContain('Start saving');
+  });
+
+  it('shows imported tags immediately without reopening the vault', async () => {
+    const { ImportModal } = await import('@/features/sync/components/ImportModal');
+    const { frameSteps, frameData } = await import('motion-dom');
+    (await import('framer-motion')).MotionGlobalConfig.skipAnimations = true;
+    Object.assign(dom, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} }, __TAURI_INTERNALS__: { transformCallback: () => 1, unregisterCallback: () => {}, invoke: async (command: string) => command === 'plugin:dialog|open' ? '/fixture.csv' : null } });
+    const backend = await getBackend();
+    let imported = false;
+    Object.assign(backend, {
+      listEntries: async () => [],
+      getTags: async () => imported ? [{ id: 'work', name: 'Work', color: '', icon: 'tag' }] : [],
+      parseImportFile: async () => ({ total_found: 1, duplicates_count: 0, format_detected: 'CSV', entries: [{ title: 'GitHub', username: 'fixture', url: 'https://github.com', tags: ['Work'], is_duplicate: false }] }),
+      importEntries: async () => { imported = true; return 1; },
+    });
+    dom.localStorage.setItem('yntra-vault-settings', JSON.stringify({ disableSkeletonDelays: true }));
+    let auth!: ReturnType<typeof useAuth>;
+    let entries!: ReturnType<typeof useEntries>;
+    function Harness() {
+      const a = useAuth(), e = useEntries();
+      useEffect(() => { auth = a; entries = e; }, [a, e]);
+      return <ImportModal isOpen onClose={() => {}} />;
+    }
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<ToastProvider><SettingsProvider><AuthProvider><EntriesProvider><Harness /></EntriesProvider></AuthProvider></SettingsProvider></ToastProvider>); });
+    await act(async () => { auth.setCurrentVault({ id: 'test', name: 'Test', path: '/test.vdb' }); auth.setIsLocked(false); });
+    const click = async (label: string) => {
+      const button = [...container.querySelectorAll('button')].find(button => button.textContent?.includes(label));
+      expect(button).toBeDefined();
+      await act(async () => { button!.click(); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+      for (let tick = 0; tick < 4; tick++) {
+        await act(async () => {
+          frameData.timestamp = Math.max(frameData.timestamp, performance.now()) + 500;
+          for (const step of Object.values(frameSteps)) step.process(frameData);
+        });
+      }
+    };
+    await click('Recommended');
+    await click('Browse File');
+    await click('Import 1 Items');
+    expect(imported).toBe(true);
+    expect(entries.tags.some(tag => tag.name === 'Work')).toBe(true);
+  });
+
   it('hides desktop automation on Android even on a wide screen and reports failed copies honestly', async () => {
     const { AutotypeButton } = await import('@/features/entries/components/AutotypeButton');
     const { default: SmartLoginButton } = await import('@/features/entries/components/SmartLoginButton');
@@ -96,7 +351,7 @@ describe('secret and synchronization lifecycle', () => {
     }
     const container=dom.document.createElement('div'); dom.document.body.append(container);
     await act(async()=>{root=mount(container as unknown as Element);root.render(<ToastProvider><SettingsProvider><AuthProvider><EntriesProvider><Harness/></EntriesProvider></AuthProvider></SettingsProvider></ToastProvider>);});
-    await act(async()=>{auth.setCurrentVault({id:'test',name:'Test',path:'/test.vdb'});entries.toggleP2pListener(true);});
+    await act(async()=>{auth.setCurrentVault({id:'test',name:'Test',path:'/test.vdb'});auth.setIsLocked(false);entries.toggleP2pListener(true);});
     expect(starts).toBe(1);
     expect(entries.isP2pListening).toBe(false);
     await act(async()=>ready());
@@ -146,6 +401,31 @@ describe('secret and synchronization lifecycle', () => {
     expect(container.querySelector('code')).toBeNull();
     expect(completed).toBe(false);
     await act(async()=>button('Done').click());expect(completed).toBe(true);
+  });
+
+  it('opens only one recovery export dialog and does not mark a cancelled export as saved', async () => {
+    const { RecoveryKitCards } = await import('@/features/auth/components/RecoveryKitWizard');
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend();
+    let dialogs = 0, exports = 0;
+    let finish!: (path: string | null) => void;
+    Object.assign(backend, {
+      saveFileDialog: () => { dialogs++; return new Promise<string | null>(resolve => { finish = resolve; }); },
+      exportRecoveryShare: async () => { exports++; },
+    });
+    const kit = { vault_id: 'fixture', vault_name: 'Fixture', created_at: '', generated_at: '', format_version: 2, total_entries: 0, verification_hash: 'fixture', document_markdown: '', shares: [1, 2, 3].map(i => ({ share_index: i, label: `Share ${i}`, share_data: `fixture-${i}` })) };
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<RecoveryKitCards kit={kit} />); });
+    const button = (label: string) => [...container.querySelectorAll('button')].find(b => b.textContent?.trim() === label)!;
+    await act(async () => button('Start saving').click());
+    await act(async () => { button('Save this share').click(); button('Save this share').click(); });
+    expect(dialogs).toBe(1);
+    expect(container.querySelector<HTMLInputElement>('input[type=checkbox]')?.disabled).toBe(true);
+    await act(async () => finish(null));
+    expect(exports).toBe(0);
+    expect(container.querySelector('[role=status]')).toBeNull();
+    expect(button('Continue').disabled).toBe(true);
+    expect(button('Save this share').disabled).toBe(false);
   });
 
   it('resizes panels within viewport bounds and persists on release, including settings reload', async()=>{
@@ -416,7 +696,7 @@ describe('secret and synchronization lifecycle', () => {
       root = mount(container as unknown as Element);
       root.render(<ToastProvider><SettingsProvider><AuthProvider><EntriesProvider><Harness /></EntriesProvider></AuthProvider></SettingsProvider></ToastProvider>);
     });
-    await act(async () => { auth.setCurrentVault({ id: 'vault-1', name: 'Test', path: '/test.vdb' }); });
+    await act(async () => { auth.setCurrentVault({ id: 'vault-1', name: 'Test', path: '/test.vdb' }); auth.setIsLocked(false); });
     await act(async () => { await entries.selectEntryById(entry.id); });
     expect(entries.selectedEntry?.password).toBe('old');
     entry.password = 'updated';

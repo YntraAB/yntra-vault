@@ -36,16 +36,20 @@ impl Drop for OperationLease {
 
 /// Short socket waits preserve partially transferred frames while allowing
 /// cancellation on Windows, where shutdown of a cloned socket need not wake recv.
-pub struct CancellableStream { stream: TcpStream, cancel: Option<Arc<AtomicBool>> }
+pub struct CancellableStream { stream: TcpStream, cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant> }
 impl CancellableStream {
     pub fn new(stream: TcpStream, cancel: Option<Arc<AtomicBool>>) -> io::Result<Self> {
         stream.set_read_timeout(Some(Duration::from_millis(200)))?;
         stream.set_write_timeout(Some(Duration::from_millis(200)))?;
-        Ok(Self { stream, cancel })
+        Ok(Self { stream, cancel, deadline: None })
     }
+    pub fn set_deadline(&mut self, deadline: Instant) { self.deadline = Some(deadline); }
     fn io<T>(&mut self, mut operation: impl FnMut(&mut TcpStream) -> io::Result<T>) -> io::Result<T> {
         let start = Instant::now();
         loop {
+            if self.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "Pairing session expired"));
+            }
             if self.cancel.as_ref().is_some_and(|c| c.load(Ordering::Acquire)) {
                 return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "Connection cancelled"));
             }
@@ -69,6 +73,19 @@ impl Write for CancellableStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn session_deadline_stops_a_peer_even_when_it_keeps_sending() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let mut server = CancellableStream::new(server, None).unwrap();
+        server.set_deadline(Instant::now() + Duration::from_millis(50));
+        client.write_all(b"first").unwrap();
+        server.read_exact(&mut [0; 5]).unwrap();
+        std::thread::sleep(Duration::from_millis(75));
+        client.write_all(b"last").unwrap();
+        assert_eq!(server.read_exact(&mut [0; 4]).unwrap_err().kind(), io::ErrorKind::TimedOut);
+    }
     #[test]
     fn cancellation_cannot_revive_an_old_operation() {
         let slot = Arc::new(OperationSlot::default());

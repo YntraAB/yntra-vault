@@ -13,6 +13,7 @@ pub struct CreatedProtectedVault { info: VaultInfo, kit: yntra_vault_core::vault
 #[tauri::command]
 pub async fn create_protected_vault(name:String,password:String,path:String,usb_id:String,key_file_path:Option<String>,state:State<'_,AppState>) -> Result<CreatedProtectedVault,String> {
     let password=Zeroizing::new(password);let path=PathBuf::from(path);
+    yntra_vault_core::vault::validation::validate_new_master_password(&password).map_err(|e|e.to_string())?;
     if path.exists(){return Err("A vault already exists at this location".into());}
     let parent=path.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
     std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;

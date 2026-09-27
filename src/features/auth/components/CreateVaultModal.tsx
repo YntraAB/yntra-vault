@@ -4,6 +4,7 @@ import { UsbPicker } from './LocalProtection';
 import { RecoveryKitDialog } from './RecoveryKitWizard';
 import type { EmergencyKit } from '@/lib/backend';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
+import { isValidNewMasterPassword } from '@/lib/masterPassword';
 /**
  * CreateVaultModal — Secure vault creation flow
  * 
@@ -13,7 +14,7 @@ import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Database, FolderOpen, Eye, EyeOff, Loader2, ShieldCheck, KeyRound } from 'lucide-react';
+import { X, Database, FolderOpen, Eye, EyeOff, Loader2, ShieldCheck, KeyRound, Usb } from 'lucide-react';
 import { PasswordStrength } from '@/features/audit';
 import { isTauri, openFileDialog, saveFileDialog, getBackend } from '@/lib/backend';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -49,6 +50,8 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   const [generateNewKeyFile, setGenerateNewKeyFile] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const requestClose = () => { if (!submitting.current && !pendingKit) onClose(); };
   const [error, setError] = useState<string | null>(null);
 
   const nameRef = useRef<HTMLInputElement>(null);
@@ -56,7 +59,8 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   // Focus name field on open
   useEffect(() => {
     if (open) {
-      setTimeout(() => nameRef.current?.focus(), 100);
+      const timer = setTimeout(() => nameRef.current?.focus(), 100);
+      return () => clearTimeout(timer);
     }
   }, [open]);
 
@@ -80,7 +84,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   // Esc to close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open && !pendingKit && !loading) onClose();
+      if (e.key === 'Escape' && open && !pendingKit && !submitting.current) onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -147,19 +151,21 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     }
   }, [name, generateNewKeyFile, t]);
 
-  const validate = (checkPath: string, passLength: number): string | null => {
+  const validate = (checkPath?: string): string | null => {
     if (name.trim().length < 2) return t('create_vault.err_name_short') || 'Vault name must be at least 2 characters';
-    if (!checkPath.trim()) return t('create_vault.err_choose_location') || 'Please choose a file location';
-    if (passLength < 12) return t('create_vault.err_pass_length') || 'Master password must be at least 12 characters';
+    if (checkPath !== undefined && !checkPath.trim()) return t('create_vault.err_choose_location') || 'Please choose a file location';
+    if (!isValidNewMasterPassword(password)) return t('create_vault.err_pass_length') || 'Master password must be at least 12 characters';
     if (!confirmPassword) return t('create_vault.err_confirm_pass') || 'Please confirm your master password';
     if (password !== confirmPassword) return t('create_vault.err_pass_mismatch');
+    if (bindUsb && (!capabilities.usbBinding || !usbId)) return c('Välj en ansluten USB-sticka.', 'Select a connected USB drive.');
     if (useKeyFile && !keyFilePath.trim()) return t('create_vault.err_keyfile_required') || 'Please choose or specify a Key File location';
     return null;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const createVault = async () => {
     setError(null);
+    const inputError = validate();
+    if (inputError) { setError(inputError); return; }
 
     let targetPath = path.trim();
 
@@ -200,7 +206,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
       }
     }
 
-    const validationError = validate(targetPath, password.length);
+    const validationError = validate(targetPath);
     if (validationError) {
       setError(validationError);
       return;
@@ -208,7 +214,6 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
 
     const secretBytes = passInputRef.current?.getSecretBytes();
     const passBytes = secretBytes && secretBytes.length > 0 ? secretBytes : new TextEncoder().encode(password);
-    setLoading(true);
     try {
       let info;
       let createdKit:EmergencyKit|null=null;
@@ -231,16 +236,18 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
         info = { id: crypto.randomUUID(), name: name.trim(), path: targetPath };
       }
 
-      // Do not persist keyfile paths in localStorage to preserve 2FA factor isolation
-      localStorage.removeItem('yntra-vault-keyfiles');
-
-      const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
-      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
       const newVault = { id: info.id, name: info.name, path: info.path };
-      appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
-
-      // Trigger the new-vault tutorial on first open
-      localStorage.setItem('yntra-vault-show-tutorial', 'true');
+      // Optional UI history must never hide the recovery kit of an already created vault.
+      try {
+        localStorage.removeItem('yntra-vault-keyfiles');
+        let recent: unknown = [];
+        try { recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]'); } catch { /* Discard malformed history. */ }
+        const updated = (Array.isArray(recent) ? recent : []).filter((v): v is Vault =>
+          !!v && typeof v.id === 'string' && typeof v.name === 'string' && typeof v.path === 'string' && v.id !== info.id && v.path !== info.path
+        ).map(v => ({ id: v.id, name: v.name, path: v.path }));
+        appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
+        localStorage.setItem('yntra-vault-show-tutorial', 'true');
+      } catch { console.warn('Vault created, but optional UI history could not be saved.'); }
 
       if(createdKit){setPendingVault(newVault);setPendingKit(createdKit);setPassword('');setConfirmPassword('');return;}
       onCreated(newVault);
@@ -254,11 +261,25 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
       setUseKeyFile(false);
       setGenerateNewKeyFile(true);
       onClose();
-    } catch (err: any) {
-      setError(err?.toString() || 'Failed to create vault');
+    } catch (err) {
+      setError(String(err || 'Failed to create vault'));
+      setPassword('');
+      setConfirmPassword('');
     } finally {
       passBytes.fill(0);
       passInputRef.current?.clearSecretBytes();
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
+    setLoading(true);
+    try {
+      await createVault();
+    } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -272,7 +293,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 p-3 sm:p-4 touch-pan-y overscroll-contain"
-          onClick={onClose}
+          onClick={requestClose}
         >
           <motion.div
             initial={{ scale: 0.97, opacity: 0, y: 6 }}
@@ -296,7 +317,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
               <ActionTooltip content={t('common.close')}>
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
                   <X size={15} />
@@ -306,6 +327,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5 flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
+              <fieldset disabled={loading} className="contents">
               {/* Vault Name */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--text-secondary)]">{t('create_vault.vault_name')}</label>
@@ -333,7 +355,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                       setPathModified(true);
                     }}
                     placeholder={t('create_vault.location_ph')}
-                    className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
+                    className="h-8 min-w-0 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 text-[12px] font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] placeholder:font-sans focus:border-[var(--border-focus)]"
                   />
                   {isTauri() && (
                     <ActionTooltip content={t('common.browse')}>
@@ -394,9 +416,16 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                 )}
               </div>
 
-              {isTauri()&&capabilities.usbBinding&&<div className="flex flex-col gap-2 text-[12px]">
-                <label className="flex gap-2"><input type="checkbox" checked={bindUsb} onChange={e=>setBindUsb(e.target.checked)}/>{c('Kräv den här USB-stickan vid upplåsning','Require this USB drive to unlock')}</label>
-                {bindUsb&&<><UsbPicker value={usbId} onChange={setUsbId} disabled={loading}/><p>{c('Du får ett recovery-kit efter skapandet. Spara minst två delar på separata platser. Bindningen hindrar enkel kopiering men kan kringgås om serienumret stjäls.','You receive a recovery kit after creation. Store at least two shares separately. Binding deters simple copying but can be bypassed if the serial is stolen.')}</p></>}
+              {isTauri() && capabilities.usbBinding && <div className="flex flex-col gap-3 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                <label className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)] cursor-pointer">
+                  <input type="checkbox" checked={bindUsb} onChange={event => { setBindUsb(event.target.checked); setError(null); }} className="accent-[var(--text-primary)]"/>
+                  <Usb size={14} className="text-[var(--text-secondary)]"/>{c('USB-skydd', 'USB protection')}
+                </label>
+                {bindUsb && <div className="flex flex-col gap-2 pl-6">
+                  <UsbPicker value={usbId} onChange={setUsbId} disabled={loading}/>
+                  <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">{c('Stickan krävs vid upplåsning. I nästa steg sparar du återställningsnycklar.', 'The drive is required to unlock. Next, you will save recovery keys.')}</p>
+                  <details className="text-[11px] text-[var(--text-tertiary)]"><summary className="cursor-pointer">{c('Om USB-skyddet', 'About USB protection')}</summary><p className="mt-1">{c('Serienumret kan förfalskas. USB-skydd ersätter inte en säker dator.', 'Serial numbers can be spoofed. USB protection does not replace a secure computer.')}</p></details>
+                </div>}
               </div>}
               {/* Key File Option */}
               <div className="flex flex-col gap-2 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
@@ -416,7 +445,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
 
                 {useKeyFile && (
                   <div className="mt-1 flex flex-col gap-2 pl-6">
-                    <div className="flex items-center gap-4 text-[11px] text-[var(--text-secondary)]">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-[var(--text-secondary)]">
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
                           type="radio"
@@ -445,7 +474,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                         value={keyFilePath}
                         onChange={(e) => setKeyFilePath(e.target.value)}
                         placeholder={generateNewKeyFile ? t('create_vault.save_keyfile_ph') : t('create_vault.exist_keyfile_ph')}
-                        className="h-8 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
+                        className="h-8 min-w-0 flex-1 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
                       />
                       {isTauri() && (
                         <button
@@ -481,14 +510,14 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
               <div className="flex justify-end gap-2 pt-1 border-t border-[var(--border-subtle)]">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
                   {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || validate() !== null}
                   className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-base)] transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
                 >
                   {loading ? (
@@ -501,6 +530,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
                   )}
                 </button>
               </div>
+              </fieldset>
             </form>
           </motion.div>
         </motion.div>

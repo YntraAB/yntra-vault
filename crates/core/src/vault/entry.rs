@@ -442,6 +442,10 @@ impl VaultManager {
     /// Update an existing entry. Tracks password history.
     /// Does not update `updated_at` or trigger disk write if only non-content metadata (e.g. breach status) changed.
     pub fn update_entry(&mut self, id: Uuid, update: UpdateEntry) -> crate::Result<()> {
+        self.update_entry_inner(id, update, true)
+    }
+
+    pub(crate) fn update_entry_inner(&mut self, id: Uuid, update: UpdateEntry, persist: bool) -> crate::Result<()> {
         let entry_key = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();
         let now = Utc::now();
         let mut content_changed = false;
@@ -681,7 +685,7 @@ impl VaultManager {
                 self.add_entry_to_index(id, &title, &username, &url, &email, &tags);
             }
 
-            self.save()?;
+            if persist { self.save()?; }
         }
 
         Ok(())

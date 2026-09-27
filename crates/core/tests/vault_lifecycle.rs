@@ -17,6 +17,45 @@ struct TestVault {
     path: PathBuf,
 }
 
+#[test]
+fn rejects_invalid_new_credentials_before_creating_or_rewriting_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("not-created").join("vault.vdb");
+    for password in ["", "short", "            ", "🔐🔐🔐🔐🔐🔐"] {
+        assert!(VaultManager::create("Fixture", password, &path).is_err());
+        assert!(VaultManager::create_with_keyfile_bytes("Fixture", password, Some(&[7; 32]), &path).is_err());
+        assert!(!path.parent().unwrap().exists());
+        assert!(VaultManager::recover_with_shares(&path, "fixture-a", "fixture-b", password).is_err());
+    }
+    let password = "original fixture password";
+    let mut manager = VaultManager::create("Fixture", password, &path).unwrap();
+    let original = fs::read(&path).unwrap();
+    assert!(VaultManager::create("Replacement", "another valid password", &path).is_err());
+    assert_eq!(fs::read(&path).unwrap(), original);
+    for replacement in ["", "short", "            ", "🔐🔐🔐🔐🔐🔐"] {
+        assert!(manager.change_master_password(password, replacement).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(manager.is_unlocked());
+    }
+    assert!(VaultManager::open(&path, "").is_err());
+    assert!(VaultManager::open(&path, password).is_ok());
+    manager.generate_emergency_kit(password).unwrap();
+    let protected = fs::read(&path).unwrap();
+    assert!(manager.change_master_password(password, "            ").is_err());
+    assert_eq!(fs::read(&path).unwrap(), protected);
+    assert!(VaultManager::open(&path, password).is_ok());
+
+    // Adoption may preserve a legacy password, but never create an empty-password file.
+    use yntra_vault_core::services::sync::pairing::{complete_adopted_vault_save, PendingAdoptedVault};
+    let pending = PendingAdoptedVault { sync_keys: None, data: manager.data.clone(), salt: [42; 32], dest_path: dir.path().join("adopted").join("legacy.vdb") };
+    for empty in ["", "            "] {
+        assert!(complete_adopted_vault_save(&pending, empty).is_err());
+        assert!(!pending.dest_path.parent().unwrap().exists());
+    }
+    complete_adopted_vault_save(&pending, "legacy").unwrap();
+    assert!(VaultManager::open(&pending.dest_path, "legacy").is_ok());
+}
+
 impl TestVault {
     fn new() -> Self {
         let mut path = std::env::temp_dir();
@@ -728,7 +767,7 @@ fn test_change_master_password_on_empty_vault_verifies_current_password() {
 
     let initial_pass = "InitialPass123!";
     let wrong_pass = "WrongPass999!";
-    let new_pass = "NewPass456!";
+    let new_pass = "NewPassword456!";
 
     let mut manager = VaultManager::create("Empty Vault", initial_pass, &vault_path).unwrap();
     assert_eq!(manager.data.entries.len(), 0);
@@ -774,8 +813,8 @@ fn test_change_master_password_locked_vault_fails() {
 fn test_rekey_rebuilds_search_index() {
     let dir = tempfile::tempdir().unwrap();
     let vault_path = dir.path().join("test_rekey_search.vdb");
-    let old_pass = "OldPass123!";
-    let new_pass = "NewPass456!";
+    let old_pass = "OldPassword123!";
+    let new_pass = "NewPassword456!";
 
     let mut manager = VaultManager::create("Rekey Search Vault", old_pass, &vault_path).unwrap();
     let entry = NewEntry {

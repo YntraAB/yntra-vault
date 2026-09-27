@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_tag_search_index_invalidation_on_delete_and_update() {
         let test_vault = TestVault::new();
-        let mut manager = VaultManager::create("tag-test-vault", "password123", &test_vault.path).unwrap();
+        let mut manager = VaultManager::create("tag-test-vault", "fixture-password123", &test_vault.path).unwrap();
 
         let tag_id = manager.add_tag("Production", "#ff0000", "server").unwrap();
 
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_reorder_tags() {
         let test_vault = TestVault::new();
-        let mut manager = VaultManager::create("reorder-tags-vault", "password123", &test_vault.path).unwrap();
+        let mut manager = VaultManager::create("reorder-tags-vault", "fixture-password123", &test_vault.path).unwrap();
 
         let id1 = manager.add_tag("Tag1", "#ff0000", "tag").unwrap();
         let id2 = manager.add_tag("Tag2", "#00ff00", "tag").unwrap();
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(manager.tags()[2].id, id2);
 
         // Verify persistence to encrypted disk file
-        let reloaded = VaultManager::open(&test_vault.path, "password123").unwrap();
+        let reloaded = VaultManager::open(&test_vault.path, "fixture-password123").unwrap();
         assert_eq!(reloaded.tags()[0].id, id3);
         assert_eq!(reloaded.tags()[1].id, id1);
         assert_eq!(reloaded.tags()[2].id, id2);

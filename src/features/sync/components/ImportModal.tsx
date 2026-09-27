@@ -28,7 +28,7 @@ export interface ImportModalProps {
 export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
   const { t } = useTranslation();
   const { backend } = useBackend();
-  const { refreshEntries } = useEntries();
+  const { refreshEntries, refreshTags } = useEntries();
   const { addToast } = useToast();
 
   const [step, setStep] = useState<'brand' | 'file' | 'preview' | 'importing' | 'complete'>('brand');
@@ -182,7 +182,7 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
     try {
       const count = await backend.importEntries(toImport, duplicateStrategy);
       setImportedCount(count);
-      await refreshEntries();
+      await Promise.all([refreshEntries(), refreshTags()]);
       setStep('complete');
       addToast({ message: t('toast.import_success', { count }), type: 'success' });
       if (onSuccess) onSuccess();

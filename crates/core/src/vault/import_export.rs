@@ -13,21 +13,79 @@ use crate::vault::importer::{DuplicateStrategy, ParsedImportEntry};
 use crate::vault::manager::VaultManager;
 use crate::vault::types::{BreachStatus, Entry, FieldScope, Tag};
 
+// Empty usernames are identities, never wildcards. Keep case-sensitive logins distinct.
+fn import_identity_matches(entry: &Entry, item: &ParsedImportEntry) -> bool {
+    !item.title.trim().is_empty()
+        && entry.title.trim().eq_ignore_ascii_case(item.title.trim())
+        && entry.username == item.username
+        && entry.url.trim() == item.url.trim()
+        && entry.entry_type == item.entry_type
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use crate::vault::importer::{Importer, ImportFormat};
+
+    #[test]
+    fn records_in_the_same_export_are_not_silently_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manager = VaultManager::create("Import", "fixture-password", &dir.path().join("import.vdb")).unwrap();
+        let mut entries = Importer::parse_str("title,username,password\nGitHub,alice,first\nGitHub,alice,second", ImportFormat::GenericCsv).unwrap().entries;
+        assert_eq!(manager.check_import_duplicates(&mut entries), 0);
+        assert_eq!(manager.bulk_import_entries(entries, DuplicateStrategy::Skip).unwrap(), 2);
+    }
+
+    #[test]
+    fn github_accounts_remain_distinct_and_overwrite_registers_tags() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("import.vdb");
+        let mut manager = VaultManager::create("Import", "fixture-password", &path).unwrap();
+        let csv = "title,username,password,url\nGitHub,,one,https://github.com\nGitHub,alice,two,https://github.com\nGitHub,Alice,three,https://github.com\nGitHub,alice,four,https://enterprise.invalid";
+        let entries = Importer::parse_str(csv, ImportFormat::GenericCsv).unwrap().entries;
+        assert_eq!(manager.bulk_import_entries(entries.clone(), DuplicateStrategy::Skip).unwrap(), 4);
+        let mut preview = entries.clone();
+        assert_eq!(manager.check_import_duplicates(&mut preview), 4);
+        let mut changed = entries[1].clone();
+        changed.password = "updated-fixture".into();
+        changed.tags = vec![" Work ".into()];
+        assert_eq!(manager.bulk_import_entries(vec![changed], DuplicateStrategy::Overwrite).unwrap(), 1);
+        assert!(manager.data.tags.iter().any(|t| t.name == "Work"));
+        assert_eq!(manager.data.entries[1].tags, vec!["Work"]);
+        let reopened = VaultManager::open(&path, "fixture-password").unwrap();
+        assert_eq!(reopened.data.entries.len(), 4);
+        assert_eq!(reopened.get_entry(reopened.data.entries[1].id).unwrap().password, "updated-fixture");
+    }
+
+    #[test]
+    fn failed_bulk_save_rolls_back_new_entries_overwrites_and_tags() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("import.vdb");
+        let mut manager = VaultManager::create("Import", "fixture-password", &path).unwrap();
+        let mut entries = Importer::parse_str("title,username,password\nGitHub,alice,old", ImportFormat::GenericCsv).unwrap().entries;
+        manager.bulk_import_entries(entries.clone(), DuplicateStrategy::KeepBoth).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let id = manager.data.entries[0].id;
+        entries[0].password = "changed".into();
+        entries[0].tags = vec!["New tag".into()];
+        let mut new = entries[0].clone(); new.title = "GitLab".into(); entries.push(new);
+        manager.path = dir.path().to_owned(); // A directory cannot be replaced by a vault file.
+        assert!(manager.bulk_import_entries(entries, DuplicateStrategy::Overwrite).is_err());
+        assert_eq!(manager.data.entries.len(), 1);
+        assert_eq!(manager.get_entry(id).unwrap().password, "old");
+        assert!(!manager.data.tags.iter().any(|t| t.name == "New tag"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+}
+
 impl VaultManager {
     /// Checks an array of ParsedImportEntry against current vault entries for duplicates.
     pub fn check_import_duplicates(&self, entries: &mut [ParsedImportEntry]) -> usize {
         let mut dup_count = 0;
         for item in entries.iter_mut() {
-            let t_lower = item.title.trim().to_lowercase();
-            let u_lower = item.username.trim().to_lowercase();
-
-            let match_found = self.data.entries.iter().any(|e| {
-                let e_t = e.title.trim().to_lowercase();
-                let e_u = e.username.trim().to_lowercase();
-                let title_matches = !t_lower.is_empty() && e_t == t_lower;
-                let user_matches = e_u == u_lower || u_lower.is_empty() || e_u.is_empty();
-                title_matches && user_matches
-            });
+            item.is_duplicate = false;
+            item.duplicate_reason = None;
+            let match_found = self.data.entries.iter().any(|e| import_identity_matches(e, item));
 
             if match_found {
                 item.is_duplicate = true;
@@ -44,29 +102,42 @@ impl VaultManager {
         entries: Vec<ParsedImportEntry>,
         strategy: DuplicateStrategy,
     ) -> crate::Result<usize> {
+        if entries.len() > super::importer::MAX_IMPORT_ENTRIES {
+            return Err(VaultError::InvalidFormat("Too many import entries".into()));
+        }
+        let previous = self.data.clone();
+        let result = self.bulk_import_entries_inner(entries, strategy);
+        if result.is_err() {
+            self.data = previous;
+            self.rebuild_search_index();
+        }
+        result
+    }
+
+    fn bulk_import_entries_inner(&mut self, entries: Vec<ParsedImportEntry>, strategy: DuplicateStrategy) -> crate::Result<usize> {
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
         let entry_key = keys.entry_key.clone();
         let mut count = 0;
+        // Match the same pre-import vault that the preview inspected.
+        let existing_count = self.data.entries.len();
 
         let tag_colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899", "#06b6d4"];
         let mut color_idx = 0;
 
-        for item in entries {
-            let t_lower = item.title.trim().to_lowercase();
-            let u_lower = item.username.trim().to_lowercase();
+        for mut item in entries {
+            item.tags = item.tags.into_iter().map(|tag| tag.trim().to_owned()).filter(|tag| !tag.is_empty()).collect();
+            let existing_id = self.data.entries.iter().take(existing_count)
+                .find(|e| import_identity_matches(e, &item)).map(|e| e.id);
+            if existing_id.is_some() && matches!(strategy, DuplicateStrategy::Skip) { continue; }
 
-            let existing_id = self
-                .data
-                .entries
-                .iter()
-                .find(|e| {
-                    let e_t = e.title.trim().to_lowercase();
-                    let e_u = e.username.trim().to_lowercase();
-                    let title_matches = !t_lower.is_empty() && e_t == t_lower;
-                    let user_matches = e_u == u_lower || u_lower.is_empty() || e_u.is_empty();
-                    title_matches && user_matches
-                })
-                .map(|e| e.id);
+            for tag_name in &item.tags {
+                let tag_name = tag_name.trim();
+                if !tag_name.is_empty() && !self.data.tags.iter().any(|t| t.name == tag_name) {
+                    self.data.tags.push(Tag { id: Uuid::new_v4(), name: tag_name.into(),
+                        color: tag_colors[color_idx % tag_colors.len()].into(), icon: "tag".into() });
+                    color_idx += 1;
+                }
+            }
 
             if let Some(target_id) = existing_id {
                 match strategy {
@@ -108,29 +179,13 @@ impl VaultManager {
                             },
                             ..Default::default()
                         };
-                        self.update_entry(target_id, update)?;
+                        self.update_entry_inner(target_id, update, false)?;
                         count += 1;
                         continue;
                     }
                     DuplicateStrategy::KeepBoth => {
                         // Fallthrough to add as new entry
                     }
-                }
-            }
-
-            // Ensure all tags attached to item exist in vault's global tag list
-            for tag_name in &item.tags {
-                let tag_trimmed = tag_name.trim();
-                if !tag_trimmed.is_empty()
-                    && !self.data.tags.iter().any(|t| t.name.eq_ignore_ascii_case(tag_trimmed))
-                {
-                    self.data.tags.push(Tag {
-                        id: Uuid::new_v4(),
-                        name: tag_trimmed.to_string(),
-                        color: tag_colors[color_idx % tag_colors.len()].to_string(),
-                        icon: "tag".to_string(),
-                    });
-                    color_idx += 1;
                 }
             }
 

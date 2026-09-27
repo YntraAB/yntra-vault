@@ -38,7 +38,7 @@ export function SecurityTab({
   const { t, language } = useTranslation();
   const [localProtection,setLocalProtection]=useState<LocalProtectionInfo|null>(null);
   const protectedLocal=localProtection?.protected===true;
-  const unavailable=language==='sv'?'Inte tillgängligt med recovery v2 och USB-bindning.':'Unavailable with recovery v2 and USB binding.';
+  const unavailable=language==='sv'?'Kan inte kombineras med valvets lokala skydd.':'Cannot be combined with this vault’s local protection.';
 
   return (
     <div className="flex flex-col gap-6">
@@ -115,9 +115,9 @@ export function SecurityTab({
         <button
           type="button"
           onClick={onToggleBiometric}
-          disabled={protectedLocal || hwActive || isTogglingBio}
+          disabled={!localProtection || protectedLocal || hwActive || isTogglingBio}
           className={`h-8 rounded-[3px] px-3 text-[12px] font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 select-none whitespace-nowrap shrink-0 ${
-            hwActive || isTogglingBio
+            !localProtection || protectedLocal || hwActive || isTogglingBio
               ? 'border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-tertiary)] opacity-50 cursor-not-allowed'
               : bioActive
                 ? 'border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
@@ -169,7 +169,7 @@ export function SecurityTab({
             <button
               type="button"
               onClick={() => onOpenHwModal('enroll')}
-              disabled={protectedLocal}
+              disabled={!localProtection || protectedLocal}
               className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               {t('common.enable')}
@@ -179,7 +179,7 @@ export function SecurityTab({
       </SettingRow>)}
 
 
-      <LocalProtectionSettings onProtectionChanged={setLocalProtection} />
+      <LocalProtectionSettings onProtectionChanged={setLocalProtection} hardwareActive={hwActive} />
     </div>
   );
 }

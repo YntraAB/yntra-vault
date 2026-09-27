@@ -138,7 +138,7 @@ export default function AppLayout() {
     settings.sidebarWidth, settings.passwordListWidth, updateSettings,
   );
 
-  if (isLocked) {
+  if (!currentVault || isLocked) {
     return null;
   }
 

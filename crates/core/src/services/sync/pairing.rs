@@ -661,7 +661,7 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
     let host_payload = PairingHostPayload {
         sync_keys: if host_manager.storage.is_some() { Some(SyncKeyMaterial(Zeroizing::new(host_manager.get_subkeys()?.to_bytes()))) } else { None },
         salt: host_manager.salt,
-        data: { let mut data = host_manager.data.clone(); data.settings.emergency_kit_audit = None; data },
+        data: { let mut data = host_manager.data.clone(); data.settings.emergency_kit_audit = None; data.settings.hardware_password_key = None; data },
         error_msg: None,
     };
     let serialized_merged = Zeroizing::new(
@@ -1088,6 +1088,7 @@ pub fn complete_adopted_vault_save(
     pending: &PendingAdoptedVault,
     password: &str,
 ) -> crate::Result<()> {
+    if password.trim().is_empty() { return Err(VaultError::InvalidPassword); }
     if let Some(parent) = pending.dest_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -1362,6 +1363,8 @@ pub fn run_p2p_qr_pairing_host(
     let _ = stream.set_read_timeout(sock_timeout);
     let _ = stream.set_write_timeout(sock_timeout);
     let mut stream = super::lifecycle::CancellableStream::new(stream, cancel_flag.clone())?;
+    let remaining = (session.expires_at - Utc::now()).to_std().unwrap_or_default();
+    stream.set_deadline(std::time::Instant::now() + remaining);
 
     // 1. Verify Magic Header & Session ID
     let mut magic = [0u8; 4];
@@ -1475,7 +1478,7 @@ pub fn run_p2p_qr_pairing_host(
     let host_payload = QrPairingPayload {
         sync_keys: if host_manager.storage.is_some() { Some(SyncKeyMaterial(Zeroizing::new(host_manager.get_subkeys()?.to_bytes()))) } else { None },
         salt: host_manager.salt,
-        data: { let mut data = host_manager.data.clone(); data.settings.emergency_kit_audit = None; data },
+        data: { let mut data = host_manager.data.clone(); data.settings.emergency_kit_audit = None; data.settings.hardware_password_key = None; data },
         master_password: if include_password { Some(master_password.to_string()) } else { None },
         error_msg: None,
     };

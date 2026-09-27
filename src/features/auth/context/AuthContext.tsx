@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [backendReady, setBackendReady] = useState(false);
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [currentVault, setCurrentVault] = useState<Vault | null>(null);
-  const [isLocked, setIsLocked] = useState(false);
+  const [isLocked, setIsLocked] = useState(true);
   const { addToast } = useToast();
 
   // Initialize backend when running in Tauri

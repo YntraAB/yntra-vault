@@ -22,6 +22,7 @@ import { isTauri, getBackend, openFileDialog, saveFileDialog, type StrengthScore
 import { useBackend } from '@/lib/useBackend';
 import { ActionTooltip } from '@/components/ui/tooltip';
 import { SecureSecretInput, type SecureSecretInputRef } from '@/components/ui';
+import { isValidNewMasterPassword } from '@/lib/masterPassword';
 
 export interface ChangeMasterPasswordModalProps {
   open: boolean;
@@ -56,6 +57,8 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
   const [generateNewKeyFile, setGenerateNewKeyFile] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const requestClose = () => { if (!submitting.current) onClose(); };
   const [error, setError] = useState<string | null>(null);
   const [strengthScore, setStrengthScore] = useState<StrengthScore | null>(null);
 
@@ -89,7 +92,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) onClose();
+      if (e.key === 'Escape' && open && !submitting.current) onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -176,11 +179,9 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
 
   // Step 0 -> Step 1 validation
   const handleAdvanceToStep1 = () => {
+    if (submitting.current) return;
     setError(null);
-    const curSecret = curInputRef.current?.getSecretBytes();
-    const curBytes = curSecret && curSecret.length > 0 ? curSecret : new TextEncoder().encode(currentPassword);
-    
-    if (curBytes.length === 0) {
+    if (!currentPassword) {
       setError(t('cmp.err_enter_current') || 'Enter your current password');
       return;
     }
@@ -195,14 +196,9 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
   // Final Rekey Submission
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (submitting.current) return;
     setError(null);
-
-    const curSecret = curInputRef.current?.getSecretBytes();
-    const newSecret = newInputRef.current?.getSecretBytes();
-    const curBytes = curSecret && curSecret.length > 0 ? curSecret : new TextEncoder().encode(currentPassword);
-    const newBytes = newSecret && newSecret.length > 0 ? newSecret : new TextEncoder().encode(newPassword);
-
-    if (curBytes.length === 0) {
+    if (!currentPassword) {
       setStep(0);
       setError(t('cmp.err_enter_current') || 'Enter your current password');
       return;
@@ -212,7 +208,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
       setError(t('cmp.err_current_keyfile') || 'Please select current Key File');
       return;
     }
-    if (newBytes.length < 12) {
+    if (!isValidNewMasterPassword(newPassword)) {
       setError(t('cmp.err_min_chars') || 'New password must be at least 12 characters');
       return;
     }
@@ -229,7 +225,10 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
       return;
     }
 
+    submitting.current = true;
     setLoading(true);
+    const curBytes = new TextEncoder().encode(currentPassword);
+    const newBytes = new TextEncoder().encode(newPassword);
     try {
       if (isTauri()) {
         const be = await getBackend();
@@ -246,8 +245,8 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
       }
       addToast({ message: t('toast.master_password_changed') || 'Master password changed successfully', type: 'success' });
       onClose();
-    } catch (err: any) {
-      const errStr = err?.toString() || 'Failed to change password';
+    } catch (err) {
+      const errStr = String(err || 'Failed to change password');
       setError(errStr);
       // If current password was wrong, return to Step 0 for correction
       if (errStr.toLowerCase().includes('password') || errStr.toLowerCase().includes('key') || errStr.toLowerCase().includes('invalid')) {
@@ -259,6 +258,8 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
       curInputRef.current?.clearSecretBytes();
       newInputRef.current?.clearSecretBytes();
       confirmInputRef.current?.clearSecretBytes();
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -280,7 +281,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 p-3 sm:p-4 touch-pan-y overscroll-contain"
-          onClick={onClose}
+          onClick={requestClose}
         >
           <motion.div
             initial={{ scale: 0.97, opacity: 0, y: 6 }}
@@ -308,7 +309,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
               <ActionTooltip content={t('common.close')}>
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
                   <X size={15} />
@@ -344,6 +345,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
 
             {/* Form Body with Animated Steps */}
             <div className="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
+              <fieldset disabled={loading} className="contents">
               <AnimatePresence mode="wait">
                 {/* STEP 0: CURRENT PASSWORD & CURRENT KEYFILE */}
                 {step === 0 && (
@@ -452,7 +454,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                     <div className="flex justify-between items-center pt-3 border-t border-[var(--border-subtle)] mt-2">
                       <button
                         type="button"
-                        onClick={onClose}
+                        onClick={requestClose}
                         className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                       >
                         {t('common.cancel')}
@@ -460,7 +462,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                       <button
                         type="button"
                         onClick={handleAdvanceToStep1}
-                        disabled={!currentPassword.trim()}
+                        disabled={loading || !currentPassword || (useCurrentKeyFile && !currentKeyFile.trim())}
                         className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3.5 text-[12px] font-medium text-[var(--bg-base)] transition-all hover:opacity-90 disabled:opacity-40 cursor-pointer shadow-xs"
                       >
                         <span>{t('common.next')}</span>
@@ -686,7 +688,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={onClose}
+                          onClick={requestClose}
                           className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                         >
                           {t('common.cancel')}
@@ -696,7 +698,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                           onClick={() => handleSubmit()}
                           disabled={
                             loading ||
-                            newPassword.length < 12 ||
+                            !currentPassword || !isValidNewMasterPassword(newPassword) ||
                             !confirmPassword ||
                             newPassword !== confirmPassword ||
                             (useNewKeyFile && !newKeyFile.trim())
@@ -720,6 +722,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                   </motion.div>
                 )}
               </AnimatePresence>
+              </fieldset>
             </div>
           </motion.div>
         </motion.div>

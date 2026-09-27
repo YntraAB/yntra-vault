@@ -1546,10 +1546,13 @@ mod tests {
         let before = serde_json::to_vec(&desktop.storage.as_ref().unwrap().header).unwrap();
 
         // Model the authenticated pairing handoff, excluding the desktop's unlock slots.
-        let mut mobile = VaultManager::from_sync_data(&mobile_path,desktop.data.clone(),desktop.salt,keys.clone(),"Mobile password 2026").unwrap();
+        let mut received = desktop.data.clone();
+        received.settings.hardware_password_key = Some(crate::crypto::cipher::EncryptedBlob { nonce: vec![0; 24], ciphertext: vec![0; 48] });
+        let mut mobile = VaultManager::from_sync_data(&mobile_path,received,desktop.salt,keys.clone(),"Mobile password 2026").unwrap();
         assert!(!mobile.protection_info().usb_bound);
         assert!(!mobile.protection_info().recovery_enabled);
         assert!(mobile.data.settings.emergency_kit_audit.is_none());
+        assert!(mobile.data.settings.hardware_password_key.is_none());
         mobile.update_entry(id,UpdateEntry {password:Some("mobile update".into()),..Default::default()}).unwrap();
         let snapshot = SyncSnapshot::from_manager(&desktop).unwrap();
         let (_, merged, _) = apply_and_save_remote_vault(&mobile.sync_bytes().unwrap(),&keys,&snapshot.path(),None).unwrap();

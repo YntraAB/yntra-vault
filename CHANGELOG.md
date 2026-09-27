@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.4] - 2026-09-26
 
+### Reliability follow-up rebuilt at user request — 2026-09-27
+
+This rebuild retains version 0.2.4. Install it manually over an existing 0.2.4 installation; automatic update checks do not offer unchanged versions. The application identity, data locations and permanent Android signing identity are preserved.
+
+#### Import fixes
+- Refresh entries and tags together so imported tags appear immediately; register tags on overwrite as well as insertion.
+- Match duplicates by title, exact username, URL and entry type. Empty usernames no longer match unrelated accounts, and later records in one export are not silently skipped as duplicates of earlier imported records.
+- Stage bulk inserts/overwrites and save once; restore entries, tags and search state if persistence fails.
+- Preserve CSV credential whitespace, use exact column aliases, retain the first headerless row, and handle UTF-8 BOM and common line endings. Report malformed files and entry-limit violations instead of empty success or silent truncation.
+- Retain KeePass custom fields and custom-field-only entries, Bitwarden folder tags and card/identity/SSH fields, and Proton keyed vaults with nested metadata/content. Preserve extended Proton data in sensitive custom fields and complete OTP/Steam URIs with their parameters. Unsupported archives, attachments and operational passkey migration are not newly implemented.
+
+#### USB and recovery interface
+- Replace verbose settings with compact USB protection and Recovery keys rows and focused dialogs matching the rest of the app. Move technical USB details into an expandable explanation while keeping biometric removal/re-pairing consequences visible.
+- Align recovery setup with the shared compact three-step dialog. Preserve one visible share at a time, individual exports, two distinct saved-share confirmations and keyboard focus containment; unfinished recovery setup cannot be dismissed.
+- Clear stale/disconnected USB selections after refresh or discovery failure, ignore obsolete responses and late keyfile selections, disable actions after status-load failure and offer retry. Disable incompatible hardware-key/local-protection setup.
+- Guard duplicate creation, password changes and share exports; block dismissal during active writes and never report a cancelled export as saved. Damaged or unavailable optional recent-vault history cannot hide a newly created recovery kit. Fit path/keyfile controls on narrow screens.
+
+#### Password and synchronization security
+- Validate creation fields before file selection or keyfile generation; buttons, Enter and direct form submissions enforce the same confirmation and optional-factor requirements.
+- Require non-blank new master passwords of at least 12 Unicode characters in the interface and native creation/rekey/recovery paths. Count characters rather than UTF-8 bytes or UTF-16 units, preserve credential whitespace exactly, and retain unlock support for existing nonempty shorter passwords.
+- Reject empty ordinary unlocks, blank pending QR adoption and missing/duplicate recovery shares. Clear password state with temporary buffers after password-change attempts.
+- Start locked, prevent rendering vault contents without a selected unlocked vault, and prevent native login from falling through to simulated success without a selected vault.
+- Create new vault files atomically without overwriting an existing file; normal saves retain atomic replacement.
+- Enforce QR expiry throughout handshake, transfer and receipt I/O, including peers that keep sending bytes. Exclude local hardware-password restoration records from PIN/QR payloads and receiving adoption.
+
+#### Verification
+- Add native and component regressions for import completeness/tag visibility/rollback, QR expiry and local-factor isolation, stale USB selections, cancelled/duplicate actions, invalid passwords/confirmations, initial lock state, non-overwriting creation and legacy password compatibility. Synthetic fixtures do not establish every exporter or physical USB/phone configuration's compatibility.
+
 ### Android startup correction (rebuilt at user request)
 
 ### Fixed

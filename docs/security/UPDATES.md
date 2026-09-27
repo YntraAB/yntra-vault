@@ -1,6 +1,8 @@
 # Updates and preservation of application data
 
-Updated for 0.2.4, 2026-09-26. These changes do not publish a release or change the installed app's version.
+Updated for the user-requested 0.2.4 reliability rebuild, 2026-09-27. The version number, application identity and permanent Android signing identity are retained.
+
+The replacement includes the import, USB/recovery interface and password-validation fixes listed in the [0.2.4 changelog](../../CHANGELOG.md). If 0.2.4 is already installed, download and install the replacement package manually over it: automatic checks intentionally do not offer the same version as an upgrade. Uninstalling or clearing application data is not part of this procedure.
 
 ## Checking and installing
 
