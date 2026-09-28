@@ -10,8 +10,9 @@ Security fixes and advisories are prioritized for active development releases:
 
 | Version | Supported          | Status |
 | ------- | ------------------ | ------ |
-| `0.1.x` | :white_check_mark: | Active Development / Evaluation |
-| `< 0.1` | :x:                | Unsupported / Deprecated |
+| `0.2.5` | :white_check_mark: | Active local development / unpublished |
+| `0.2.4` | :white_check_mark: | Published baseline; security behavior is documented separately |
+| `< 0.2` | :x:                | Unsupported / Deprecated |
 
 > **Pre-Audit Notice**: Yntra Vault is currently in active development. While built with defense-in-depth cryptographic primitives and hardware-assisted memory locking, the codebase **has not yet undergone an independent third-party security audit**. It is provided for evaluation, testing, and community security review.
 
@@ -19,7 +20,7 @@ Security fixes and advisories are prioritized for active development releases:
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, cryptographic weakness, or memory safety flaw in Yntra Vault, please report it **privately and responsibly**. Do not open public GitHub issues or discussions for unpatched vulnerabilities.
+If you discover a security vulnerability, cryptographic weakness, or memory safety flaw in Yntra Vault, please report it **privately and responsibly**. Do not open public GitHub issues or discussions for unpatched vulnerabilities. Yntra Vault does not currently operate a paid bug bounty; a small maintainer team handles reports through coordinated disclosure.
 
 ### Reporting Channels
 
@@ -39,7 +40,9 @@ Please provide detailed information to help us triage and verify the issue promp
 - Platform and operating system details (Windows, Linux, macOS) and target architecture.
 - Any suggested mitigations or patches (optional).
 
-### Response SLA & Disclosure Timeline
+### Response targets & Disclosure Timeline
+
+These are best-effort targets for a small open-source maintainer team, not guaranteed service levels.
 
 | Milestone | Target Window | Description |
 | --------- | ------------- | ----------- |

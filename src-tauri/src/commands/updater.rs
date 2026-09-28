@@ -181,20 +181,56 @@ pub async fn install_portable_update(
 }
 
 fn stage_apk(directory: &std::path::Path, hash: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    stage_package(directory, hash, bytes, "apk")
+}
+
+fn stage_package(directory: &std::path::Path, hash: &str, bytes: &[u8], extension: &str) -> Result<std::path::PathBuf, String> {
     use std::io::Write;
     if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) || !verify_sha256(bytes, hash) {
         return Err("Invalid update package checksum".into());
     }
-    let path = directory.join(format!("{}.apk", hash.to_ascii_lowercase()));
+    if !["apk", "exe", "AppImage", "dmg"].contains(&extension) { return Err("Unsupported package type".into()); }
+    let path = directory.join(format!("{}.{}", hash.to_ascii_lowercase(), extension));
     if path.exists() {
+        let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() || metadata.file_type().is_symlink()
+            || metadata.len() > yntra_vault_core::services::updater::MAX_UPDATE_PACKAGE_SIZE as u64 {
+            return Err("Invalid cached update package".into());
+        }
         let existing = std::fs::read(&path).map_err(|e| e.to_string())?;
         if !verify_sha256(&existing, hash) { return Err("Cached update package is damaged".into()); }
         return Ok(path);
     }
     let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
     file.write_all(bytes).and_then(|_| file.as_file().sync_all()).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    if extension == "AppImage" {
+        use std::os::unix::fs::PermissionsExt;
+        file.as_file().set_permissions(std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
     file.persist_noclobber(&path).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+/// Verify publisher metadata and package bytes before opening the system installer.
+#[tauri::command]
+pub async fn install_desktop_update(url: String, expected_sha256: String, app: AppHandle) -> Result<(), String> {
+    let (platform, extension) = if cfg!(target_os = "windows") { ("windows-x86_64", "exe") }
+        else if cfg!(target_os = "linux") { ("linux-x86_64", "AppImage") }
+        else if cfg!(all(target_os = "macos", target_arch = "aarch64")) { ("darwin-aarch64", "dmg") }
+        else if cfg!(target_os = "macos") { ("darwin-x86_64", "dmg") }
+        else { return Err("Desktop installation is unavailable on this platform".into()); };
+    let _guard = InstallGuard::acquire()?;
+    verify_official_asset(platform, &url, &expected_sha256).await?;
+    let bytes = download_file(&url).await.map_err(|e| e.to_string())?;
+    let directory = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("updates");
+    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let path = stage_package(&directory, &expected_sha256, &bytes, extension)?;
+    yntra_vault_core::services::network::ensure_allowed().map_err(|e| e.to_string())?;
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app.shell().open(path.to_string_lossy().to_string(), None).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 async fn verify_official_asset(platform: &str, url: &str, sha256: &str) -> Result<String, String> {

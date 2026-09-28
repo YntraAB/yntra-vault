@@ -48,12 +48,14 @@ export interface SettingsContextType {
   settings: AppSettings;
   updateSettings: (partial: Partial<AppSettings>) => void;
   externalFaviconsReady: boolean;
+  networkAccessReady: boolean;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [externalFaviconsReady, setExternalFaviconsReady] = useState(false);
+  const [networkAccessReady, setNetworkAccessReady] = useState(false);
   const faviconSync = useRef(Promise.resolve());
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
@@ -76,7 +78,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   });
 
   const updateSettings = useCallback((partial: Partial<AppSettings>) => {
-    if (partial.externalFaviconsEnabled !== undefined && partial.externalFaviconsEnabled !== settings.externalFaviconsEnabled) {
+    if (partial.operationMode !== undefined && partial.operationMode !== settings.operationMode) {
+      setNetworkAccessReady(false);
+    }
+    if (partial.operationMode !== undefined || partial.externalFaviconsEnabled !== undefined) {
       setExternalFaviconsReady(false);
     }
     setSettings((prev) => {
@@ -88,7 +93,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-  }, [settings.externalFaviconsEnabled]);
+  }, [settings.operationMode]);
 
   // Sync minimizeToTray setting to backend
   useEffect(() => {
@@ -136,20 +141,30 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   // Sync externalFaviconsEnabled setting to backend and notify UI cache
   useEffect(() => {
-    const isEnabled = settings.externalFaviconsEnabled === true;
+    const networkEnabled = settings.operationMode !== 'airgap';
+    const isEnabled = networkEnabled && settings.externalFaviconsEnabled === true;
     let cancelled = false;
     if (!isEnabled) window.dispatchEvent(new CustomEvent('yntra-favicons-cleared'));
     // Serialize toggles and wait for the native gate before any icon request.
     faviconSync.current = faviconSync.current.catch(() => {}).then(async () => {
       if (cancelled) return;
-      if (isTauri()) await (await getBackend()).setExternalFaviconsEnabled(isEnabled);
+      if (isTauri()) {
+        const backend = await getBackend();
+        await backend.setNetworkAccess(networkEnabled);
+        if (!cancelled) setNetworkAccessReady(networkEnabled);
+        await backend.setExternalFaviconsEnabled(isEnabled);
+      }
       if (!cancelled) {
+        setNetworkAccessReady(networkEnabled);
         setExternalFaviconsReady(isEnabled);
         if (isEnabled) window.dispatchEvent(new CustomEvent('yntra-favicons-reset'));
       }
-    }).catch(err => console.error('Failed to sync externalFaviconsEnabled setting:', err));
+    }).catch(err => {
+      if (!cancelled) { setNetworkAccessReady(false); setExternalFaviconsReady(false); }
+      console.error('Failed to apply network privacy setting:', err);
+    });
     return () => { cancelled = true; };
-  }, [settings.externalFaviconsEnabled]);
+  }, [settings.externalFaviconsEnabled, settings.operationMode]);
 
   // Apply font size & density globally to document root
   useEffect(() => {
@@ -161,7 +176,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [settings.fontSize, settings.density]);
 
-  const value = useMemo(() => ({ settings, updateSettings, externalFaviconsReady }), [settings, updateSettings, externalFaviconsReady]);
+  const value = useMemo(() => ({ settings, updateSettings, externalFaviconsReady, networkAccessReady }), [settings, updateSettings, externalFaviconsReady, networkAccessReady]);
 
   return (
     <SettingsContext.Provider value={value}>

@@ -10,6 +10,7 @@ use tauri::{Manager, Emitter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    yntra_vault_core::services::network::set_enabled(false);
     // Disable core dumps and debugger attachment at process startup
     yntra_vault_core::crypto::prevent_core_dumps();
 
@@ -29,6 +30,7 @@ pub fn run() {
             smart_login_running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pairing_operation: Default::default(),
             sync_listener_operation: Default::default(),
+            sync_client_operation: Default::default(),
             qr_pairing_session: Mutex::new(None),
             pending_adopted_vault: Mutex::new(None),
         });
@@ -44,16 +46,7 @@ pub fn run() {
                     let app = window.app_handle();
                     let state = app.state::<AppState>();
                     if state.lock_on_focus_loss.load(std::sync::atomic::Ordering::Relaxed) {
-                        if let Ok(mut vault) = state.vault.lock() {
-                            if let Some(ref mut manager) = *vault {
-                                state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
-                                state.pairing_operation.cancel();
-                                state.sync_listener_operation.cancel();
-                                manager.lock();
-                            }
-                            *vault = None;
-                        }
-                        let _ = yntra_vault_core::crypto::clear_clipboard();
+                        let _ = commands::platform::lock_session(app, &state);
                         let _ = window.emit("vault-locked", ());
                     }
                 }
@@ -64,17 +57,7 @@ pub fn run() {
                         let _ = window.hide();
                         api.prevent_close();
 
-                        // Lock the vault on close-to-tray
-                        if let Ok(mut vault) = state.vault.lock() {
-                            if let Some(ref mut manager) = *vault {
-                                state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
-                                state.pairing_operation.cancel();
-                                state.sync_listener_operation.cancel();
-                                manager.lock();
-                            }
-                            *vault = None;
-                        }
-                        let _ = yntra_vault_core::crypto::clear_clipboard();
+                        let _ = commands::platform::lock_session(app, &state);
                         let _ = window.emit("vault-locked", ());
                     }
                 }
@@ -87,6 +70,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Vault
             commands::get_runtime_platform,
+            commands::set_network_access,
             commands::configure_auto_lock,
             commands::record_user_activity,
             commands::import_vault_document,
@@ -241,11 +225,17 @@ pub fn run() {
             commands::check_app_update,
             commands::download_and_install_apk,
             commands::install_portable_update,
+            commands::install_desktop_update,
             commands::get_app_version,
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
             yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&app.path().app_data_dir()?.join("device-id"))?;
+            // A platform key-store failure disables enrollment; offline vault access still works.
+            if yntra_vault_core::services::sync::pairing::initialize_local_signing_identity(&app.path().app_data_dir()?.join("device-signing-key")).is_err() {
+                eprintln!("Device signing identity unavailable; pairing requires a working local key store");
+            }
+            yntra_vault_core::services::favicon::clear_favicon_cache();
 
             #[cfg(target_os = "windows")]
             {
@@ -325,72 +315,53 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     let state = app_handle.state::<AppState>();
                     if app_handle.state::<commands::platform::AutoLockState>().expired() {
-                        if let Ok(mut vault) = state.vault.lock() {
-                            if let Some(mut manager) = vault.take() {
-                                state.pairing_operation.cancel();
-                                state.sync_listener_operation.cancel();
-                                state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
-                                manager.lock();
-                                if let Ok(mut session) = state.qr_pairing_session.lock() { *session = None; }
-                                if let Ok(mut pending) = state.pending_adopted_vault.lock() { *pending = None; }
-                                let _ = commands::platform::clear(&app_handle);
-                                let _ = app_handle.emit("vault-locked", ());
-                            }
-                        }
+                        let active = state.vault.lock().map(|vault| vault.is_some()).unwrap_or(true);
+                        let _ = commands::platform::lock_session(&app_handle, &state);
+                        if active { let _ = app_handle.emit("vault-locked", ()); }
                     }
 
 
-                    // Aggressive Auto-Lock: Check OS Workstation Lock / Screen Lock / Sleep
+                    // Only supported OS detectors can enable this policy.
                     if state.lock_on_system_lock.load(std::sync::atomic::Ordering::Relaxed)
-                        && yntra_vault_core::crypto::is_workstation_locked()
-                            && let Ok(mut vault) = state.vault.lock()
-                                && vault.is_some() {
-                                    if let Some(ref mut manager) = *vault {
-                                        state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
-                                state.pairing_operation.cancel();
-                                state.sync_listener_operation.cancel();
-                                        manager.lock();
-                                    }
-                                    *vault = None;
-                                    let _ = yntra_vault_core::crypto::clear_clipboard();
-                                    let _ = app_handle.emit("vault-locked", ());
-                                }
-
-                    // Extract path while holding lock briefly, then check filesystem outside lock
-                    let vault_path_str = {
-                        let vault = match state.vault.lock() {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-                        (*vault).as_ref().map(|manager| manager.info().path)
-                    };
-                    // Filesystem check outside mutex scope
-                    if let Some(path_str) = vault_path_str {
-                        let path = std::path::Path::new(&path_str);
-                        if !path.exists() {
-                            let tmp_path = path.with_extension("vdb.tmp");
-                            if !tmp_path.exists() {
-                                std::thread::sleep(std::time::Duration::from_millis(200));
-                                if !path.exists() && !tmp_path.exists() {
-                                    if let Ok(mut vault) = state.vault.lock() {
-                                        if vault.as_ref().is_some_and(|manager| manager.path == path) {
-                                            state.pairing_operation.cancel();
-                                            state.sync_listener_operation.cancel();
-                                            state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
-                                            *vault = None;
-                                            let _ = commands::platform::clear(&app_handle);
-                                            let _ = app_handle.emit("vault-connection-lost", ());
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        && yntra_vault_core::crypto::is_workstation_locked() {
+                        let active = state.vault.lock().map(|vault| vault.is_some()).unwrap_or(true);
+                        let _ = commands::platform::lock_session(&app_handle, &state);
+                        if active { let _ = app_handle.emit("vault-locked", ()); }
                     }
+
                 }
             });
+            // Independent workers: slow USB enumeration or filesystem I/O cannot
+            // delay the inactivity/system-lock monitor or each other.
+            for check_usb in [false, true] {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let state = app_handle.state::<AppState>();
+                    let snapshot = state.vault.lock().ok().and_then(|vault| {
+                        vault.as_ref().and_then(|manager| manager.presence_snapshot())
+                    });
+                    let Some(snapshot) = snapshot else { continue; };
+                    let lost = if check_usb {
+                        snapshot.requires_usb() && !snapshot.usb_present()
+                    } else {
+                        // Atomic saves can briefly replace the path. Recheck after
+                        // a short grace period, but never trust a leftover .tmp file.
+                        if snapshot.file_present() {
+                            false
+                        } else {
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            !snapshot.file_present()
+                        }
+                    };
+                    if lost && state.clear_session_if_disconnected(&snapshot, check_usb).unwrap_or(false) {
+                        let _ = commands::platform::clear(&app_handle);
+                        let _ = app_handle.emit("vault-connection-lost", ());
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running Yntra Vault");
 }
-

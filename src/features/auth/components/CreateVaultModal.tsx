@@ -52,6 +52,19 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   const [loading, setLoading] = useState(false);
   const submitting = useRef(false);
   const requestClose = () => { if (!submitting.current && !pendingKit) onClose(); };
+  const cancelPendingKit = () => {
+    if (!pendingKit || !pendingVault) return;
+    const confirmed = typeof window.confirm !== 'function' || window.confirm(c(
+      'Återställningsnycklarna har inte sparats. Vill du stänga ändå? Du kan skapa nya nycklar senare från valvets säkerhetsinställningar.',
+      'The recovery shares have not been saved. Close anyway? You can create a new kit later from the vault security settings.',
+    ));
+    if (!confirmed) return;
+    const createdVault = pendingVault;
+    setPendingKit(null);
+    setPendingVault(null);
+    onCreated(createdVault);
+    onClose();
+  };
   const [error, setError] = useState<string | null>(null);
 
   const nameRef = useRef<HTMLInputElement>(null);
@@ -284,7 +297,7 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     }
   };
 
-  if (pendingKit && pendingVault && open) return <RecoveryKitDialog kit={pendingKit} onDone={() => { onCreated(pendingVault); setPendingKit(null); setPendingVault(null); onClose(); }} />;
+  if (pendingKit && pendingVault && open) return <RecoveryKitDialog kit={pendingKit} onDone={() => { onCreated(pendingVault); setPendingKit(null); setPendingVault(null); onClose(); }} onCancel={cancelPendingKit} />;
   return (
     <AnimatePresence>
       {open && (

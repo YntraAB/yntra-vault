@@ -2,7 +2,7 @@
 
 This document describes cryptographic design arguments and intended security invariants in **Yntra Vault**. It is not an independent audit or a formal verification of the entire implementation.
 
-**0.2.4 scope:** The later `YNS2` local envelope, random-secret recovery v2 and hardware-bound `YNTR` v5 are described in [the format specification](../architecture/VDB_SPEC.md) and [recovery specification](EMERGENCY_RECOVERY.md). Older password-derived diagrams and legacy recovery arguments below do not prove those implementations. Known-host-compromise, backup-revocation and updater-signature limits remain in [USB/recovery](USB-RECOVERY.md) and [updates](UPDATES.md).
+**0.2.5 scope:** The later `YNS2` local envelope, random-secret recovery v2 and hardware-bound `YNTR` v5 are described in [the format specification](../architecture/VDB_SPEC.md) and [recovery specification](EMERGENCY_RECOVERY.md). Older password-derived diagrams and legacy recovery arguments below do not prove those implementations. Known-host-compromise, backup-revocation and updater-signature limits remain in [USB/recovery](USB-RECOVERY.md) and [updates](UPDATES.md).
 
 ---
 
@@ -55,7 +55,7 @@ $$\text{SubKey}_i = \text{HKDF-Expand}\left(\text{HKDF-Extract}(\text{Salt}, MK)
 Where domain info strings are defined as:
 * `yntra-vault-encryption-key-v1`: Vault-level outer payload envelope
 * `yntra-vault-entry-encryption-key-v1`: Per-entry field-level encryption
-* `yntra-vault-hmac-integrity-key-v1`: Legacy HMAC and P2P session authentication
+* `yntra-vault-hmac-integrity-key-v1`: Legacy file HMAC and P2P shared-vault membership (not device identity)
 * `yntra-vault-trigram-search-key-v1`: Blind trigram search indexing
 
 **Security Invariant (Domain Separation)**:
@@ -180,11 +180,14 @@ When testing passwords against public breach databases, Yntra Vault implements s
 
 **Mathematical Privacy Guarantee**:
 ### 5.3 Peer-to-Peer Mutual Authentication Protocol
-To prevent unauthenticated password oracles during local network synchronization, the P2P sync protocol implements strict client-first verification:
-1. Listener generates a 32-byte CSPRNG challenge (`server_challenge`) and transmits it to the peer.
-2. Client computes `client_sig = HMAC-SHA512(server_challenge, hmac_key)` and transmits `(client_challenge, client_sig)`.
-3. Listener verifies `client_sig` using constant-time verification *before* computing or transmitting any response. Connections failing verification are terminated with `UNAUTHOR`.
-4. Only upon successful client verification does the listener compute `server_sig = HMAC-SHA512(client_challenge, hmac_key)` and return authentication confirmation.
+Version 0.2.5 uses `YNSYN003`. Shared vault keys establish vault membership; they do not identify a particular device. Each installation creates a separate Ed25519 signing key, wrapped with the platform key-wrapping mechanism, and pairing explicitly enrolls its public key in the local trusted-device list.
+
+1. Both sides generate fresh 32-byte challenges and ephemeral P-256 ECDH key pairs. The length-prefixed transcript binds protocol version, both salt commitments, challenges, UUIDs, and ephemeral public keys.
+2. The client proves shared-key possession with HMAC-SHA512 and signs the role-labelled transcript with its device key. The listener checks both proofs against its local enrollment before returning its own proofs.
+3. The client verifies the listener's HMAC and pinned device signature before sending vault data. Empty trust lists, unknown or duplicate IDs, missing keys, and legacy peers fail closed and require explicit pairing; there is no shared-key-only compatibility fallback.
+4. ECDH and HKDF-SHA256 derive a fresh session encryption key. XChaCha20-Poly1305 envelopes bind the transcript and transfer direction as AAD. Ordinary sync never replaces local device enrollment with a remote trusted-device list.
+
+Removing a device blocks future authenticated sync access on the device where it was revoked, even if the removed device knows the shared vault keys or another device's UUID. Revocation does not erase prior copies or rotate shared inner vault keys: a former peer retaining those keys may decrypt a separately acquired compatible vault snapshot. These are design arguments and regression-tested invariants, not a formal proof or an independent protocol audit.
 
 ### 5.4 Keyed HMAC Emergency Kit Fingerprinting
 Master password recovery sheets include an integrity checksum and audit log fingerprint. Rather than computing an unkeyed cryptographic digest of the raw master password (which would provide an offline brute-force verification oracle if the paper sheet is compromised), the fingerprint is computed as a keyed Pseudorandom Function (PRF):
@@ -193,8 +196,10 @@ $$\text{Fingerprint} = \text{Truncate}_8\left(\text{HMAC-SHA512}\left(\text{"ynt
 
 Because $K_{\text{hmac}}$ is derived through Argon2id (256MB RAM, 4 passes) and HKDF-SHA512, an attacker possessing only the printed recovery sheet cannot evaluate candidate passwords against the fingerprint without allocating full Argon2id memory per attempt, and cannot precompute rainbow tables across vaults.
 
-### 5.5 Multi-Part ccTLD & SSO Boundary Isolation (Smart Login)
-Automated credential autofill enforces strict effective top-level domain (`eTLD+1`) boundary isolation. Naive domain extraction splitting on the final two components collapses distinct organizations sharing a multi-part country code (e.g. `victim.co.uk` and `attacker.co.uk` collapsing to `co.uk`), allowing cross-tenant credential injection. Yntra Vault's `base_domain` incorporates an explicit list of multi-part ccTLD public suffixes and ccTLD heuristics to guarantee that `eTLD+1` matches exactly before credentials can be populated. Furthermore, SSO auth domain pairings (`AUTH_DOMAINS`) enforce strict boundary and dot-prefix matching.
+### 5.5 Exact-Origin & Explicit SSO Isolation (Smart Login)
+Credential URLs are parsed with `url::Url`, reject userinfo, backslashes, and control characters, and require HTTPS for remote hosts. Credentials may be filled only at the exact saved origin (scheme, host, and effective port), or an explicitly listed pair of HTTPS hosts at port 443 in `AUTH_DOMAINS`. There is no base-domain, wildcard-subdomain, or public-suffix heuristic. Separate tenants such as `alice.pages.dev` and `bob.pages.dev` therefore remain separate, as do `example.com` and `login.example.com` unless explicitly enrolled as an SSO pair. HTTP is allowed only for explicit loopback diagnostics and still must match its exact origin.
+
+The engine checks the current page immediately before each credential or OTP fill and submission. JavaScript fill operations also check the expected origin in the same evaluation; native Windows typing receives the freshly verified expected URL. Cancellation and the network policy are checked at these boundaries. Browser startup fails with a restart instruction if safe de-elevation fails; it never retries with `--no-sandbox`. A compromised permitted origin or privileged local process remains outside this origin check's protection.
 
 ### 5.6 CSV Formula Injection Sanitization (CWE-1236)
 Decrypted vault exports to CSV format (`export_csv`) neutralize spreadsheet formula injection / DDE attacks. Any field whose initial character or trimmed character starts with `=`, `+`, `-`, `@`, `\t`, or `\r` is prepended with a single quote (`'`), instructing spreadsheet engines (Excel, LibreOffice Calc) to interpret the cell strictly as literal text.
@@ -208,9 +213,9 @@ Keyfiles represent a distinct "something you have" authentication factor. To pre
 ### 5.9 Atomic Key-Wrap File Creation
 Linux fallback key wrapping (`linux_get_or_create_wrap_key`) requires valid `XDG_CONFIG_HOME` or `HOME` directories, enforces `0o700` directory permissions, and creates the wrap key file atomically with mode `0o600` via `OpenOptionsExt::mode`, eliminating umask permission race conditions and rejecting insecure `/tmp` fallback paths.
 
-### 5.10 Zero-Knowledge Device Pairing Protocol & Ephemeral Transit Keys
+### 5.10 PIN Pairing, Authenticated Enrollment & Session Binding
 Device pairing permits instant, secure cross-device database synchronization using an ephemeral 6-digit numeric PIN without requiring USB file transfers:
-1. **Pairing Secret Derivation**: Both devices derive an ephemeral pairing key via BLAKE3 domain separation and Argon2id:
+1. **Pairing Secret Derivation**: Both devices derive a pairing key via BLAKE3 domain separation and Argon2id:
    $$\text{Salt}_{\text{pair}} = \text{BLAKE3}\left(\text{"yntra-pairing-salt-v1:"} \mathbin{\Vert} \text{Normalize}(\text{PIN})\right)$$
    $$K_{\text{master}} = \text{Argon2id}(\text{MasterPassword}, \text{Salt}_{\text{pair}}, m=256\text{MB}, t=4, p=4)$$
    $$\text{SubKeys} = \text{HKDF-SHA512}(K_{\text{master}})$$
@@ -218,11 +223,11 @@ Device pairing permits instant, secure cross-device database synchronization usi
    $$\text{BeaconID} = \text{BLAKE3}_{\text{keyed}}\left(\text{BLAKE3}(K_{\text{hmac}}), \text{"yntra-pairing-beacon-v2"}\right)$$
    Because $\text{BeaconID}$ is keyed with the Argon2id-derived HMAC subkey, eavesdroppers on the local network cannot crack the 6-digit PIN offline without expending 256MB RAM per candidate attempt.
 3. **Active UDP Query-Response Reflection & Amplification Resistance**:
-   Clients emit query pulses $\text{Packet}_{\text{query}} = [\text{"YQRY"} \mathbin{\Vert} \text{BeaconID}]$ (36 bytes). Hosts verify the token in constant time (`ConstantTimeEq`) and respond with $\text{Packet}_{\text{reply}} = [\text{"YPAR"} \mathbin{\Vert} \text{BeaconID} \mathbin{\Vert} \text{Port}_{\text{tcp}}]$ (38 bytes). The response-to-request byte ratio is $38/36 \approx 1.05$, providing mathematical proof of zero traffic amplification. Unauthenticated reflection is impossible without knowledge of the Argon2id-derived $\text{BeaconID}$.
+   Clients emit 36-byte `YQRY` query payloads and hosts return 38-byte `YPAR` payloads only after matching the keyed beacon token. This limits payload amplification, but it is not a proof against reflection: observed tokens and spoofed source addresses still depend on network controls. In protocol v3, exchanged device metadata (including the signing public key) is MAC-authenticated with both fresh challenges and a role label. Both metadata records also enter the encrypted payload AAD, preventing replay, reflection, and enrollment-key substitution by an unauthenticated network peer. Reusing a PIN and password reuses pairing-derived keys; fresh challenges bind each transfer to its session.
 
 ### 5.11 Unauthenticated Client Isolation & Adopt Mode (`ClientPairingMode::AdoptIntoDir`)
 When a client pairs while unauthenticated (e.g. from the `VaultSelect` start screen, where `state.vault = None`), the client is constrained to strict Adopt Mode:
-- **Zero Local Read Invariant**: The client opens zero files from the filesystem and decrypts zero local storage blocks.
+- **No Existing Vault Read**: The client reads no existing local vault files or entries. The installation's separate signing identity is still used for pairing.
 - **Zero Data Transmission**: The client transmits zero entries (`client_entries_count = 0`), preventing any leakage of unauthenticated or local credentials.
 - **Filesystem Anti-Collision Invariant**: The adopted database is written to a dedicated non-colliding file (`<HostVaultName>.vdb`, `<HostVaultName> (1).vdb`), ensuring that existing local databases on disk are never modified or overwritten.
 
@@ -231,30 +236,19 @@ LAN discovery packets are simultaneously routed across:
 1. Global broadcast (`255.255.255.255:5323`)
 2. Administratively scoped local multicast (`239.255.53.23:5323` under RFC 2365 / `239.255.0.0/16`)
 3. Subnet directed broadcasts (`x.y.z.255:5323`) for every network adapter detected by `get_local_lan_ips`.
-All discovery traffic is strictly restricted to local administrative boundaries and will not route beyond the local autonomous system or private network gateway.
+Discovery is intended for the LAN. Actual routing and administrative boundaries depend on the host firewall, interfaces, and network configuration; discovery does not establish peer trust.
 
 ### 5.13 P2P Discovery Self-Echo Loop Isolation, Immediate Socket Release & Filesystem Neutralization
 1. **In-Loop Self-Echo Isolation**: When devices actively listen for UDP discovery beacons on port 5323 while concurrently broadcasting their own presence, naive implementations risk terminating the discovery scan upon processing their own broadcast packet. `listen_discovery_beacon` matches received packet source IP addresses against the node's known local network interfaces and loopback *inside* the receive loop. Self-echo packets are dropped immediately and the loop continues, guaranteeing that discovery persists until external peers respond or the timeout expires.
-2. **Atomic Pairing Socket Release & Instant Cancellation**: Host pairing listeners on port 5324 poll an atomic cancellation flag (`pairing_cancel: Arc<AtomicBool>`) every 40ms via the Tauri IPC command `cancel_pairing_host`. Listening sockets are released immediately upon user cancellation or modal dismissal, preventing port lockups on TCP 5324 and UDP 5323 and eliminating dangling connection acceptances after session termination.
+2. **Bounded Cancellation & Session Deadline**: Accept loops and `CancellableStream` I/O poll cancellation and network policy, using short socket timeouts (200ms for stream I/O). Streams have an absolute session deadline, normally 90 seconds, so a peer cannot keep a connection alive indefinitely by trickling bytes. Cancellation releases sockets when the blocked operation next observes the flag; scheduling and non-I/O work can add latency.
 3. **Windows DOS Reserved Device Name Sanitization**: Filenames derived during vault adoption (`ClientPairingMode::AdoptIntoDir`) are sanitized against reserved Windows DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) in `sanitize_vault_filename`, preventing filesystem namespace collisions and denial-of-service conditions during initial pairing.
 
-### 5.14 Ephemeral QR-Code Optical Pairing & Out-of-Band Transit Isolation (Protocol `YQR2`)
-Zero-knowledge optical QR-code pairing establishes a single-use authenticated transit tunnel between devices using an air-gapped optical pre-shared secret:
-1. **Optical Secret Generation**: The host creates a 256-bit CSPRNG secret $S_{\text{optical}} \leftarrow \{0,1\}^{256}$ and a UUIDv4 session identifier $\text{ID}_{\text{session}}$. The optical payload encodes `yntrapair://v2?id=<session_id>&s=<secret_hex>&ip=<ip>&p=<port>&sas=<sas>&name=<name>`. Master passwords and database blobs are never encoded in the optical image.
-2. **Deterministic Short Authentication String (SAS)**:
-   $$\text{SAS} = \text{BLAKE3}_{\text{keyed}}\left(S_{\text{optical}}, \text{"yntra-qr-sas-v2"}\right)[0..8] \pmod{10000}$$
-   Formatted as a 4-digit decimal number (`0000`–`9999`) displayed simultaneously on both host display and client viewfinder, providing out-of-band visual MitM resistance.
-3. **Transit Key Derivation**:
-   $$(K_{\text{c2h}}, K_{\text{h2c}}, K_{\text{auth}}) = \text{HKDF-SHA512}\left(\text{IKM}=S_{\text{optical}}, \text{salt}=\text{"yntra-qr-transit-v2"}\right)$$
-4. **Mutual Pre-Authentication Handshake (`YQR2`)**:
-   - Client sends 68-byte frame: $[\text{"YQR2"} \mathbin{\Vert} \text{ID}_{\text{session}} \mathbin{\Vert} C_{\text{client}} \mathbin{\Vert} \text{HMAC}(K_{\text{c2h}}, C_{\text{client}})]$.
-   - Host validates $\text{ID}_{\text{session}}$ and evaluates HMAC in constant time (`subtle::ConstantTimeEq`).
-   - Host responds with 48-byte frame: $[C_{\text{host}} \mathbin{\Vert} \text{HMAC}(K_{\text{h2c}}, C_{\text{host}})]$, verified in constant time by the client before continuing.
-5. **Dynamic Session AAD Binding**:
-   $$\text{AAD}_{\text{transit}} = \text{"yntra-qr-transit-v2:"} \mathbin{\Vert} \text{ID}_{\text{session}}$$
-   Ciphertext is encrypted using $K_{\text{h2c}}$ with `XChaCha20-Poly1305` and a 24-byte random nonce, cryptographically binding every transit packet to the unique session ID.
-6. **Zero-IPC Plaintext Isolation**:
-   Provisioned master passwords are held exclusively within `zeroize::Zeroizing` buffers in Rust `AppState.pending_adopted_vault`. Plaintext credentials never cross the Tauri IPC boundary into webview JavaScript, preventing memory retention in V8 heap or browser snapshots. Biometric envelopes are wrapped directly into platform hardware (TPM 2.0 / DPAPI / Secure Enclave).
+### 5.14 QR Pairing and Authenticated Device Enrollment (Transport `YQR3`)
+The host generates a 256-bit random QR secret and a UUID session with a 90-second lifetime. The URI remains `yntrapair://v2` because its payload format is unchanged; the incompatible network transport is `YQR3` with `PAIR3_OK` acknowledgment. The QR includes connection hints and the secret, never a master password or vault payload. Anyone who obtains the QR secret during its lifetime has the corresponding pairing authority.
+
+A client-first mutual HMAC exchange proves knowledge of the QR-derived keys before vault transfer. Both fresh challenges and role-labelled, authenticated metadata bind the enrolled device UUIDs and Ed25519 public keys. Encrypted transfer AAD binds that metadata transcript and the QR session ID. PIN pairing uses the same authenticated metadata rule. Old pairing transports must update; their unauthenticated metadata is not silently accepted.
+
+The short authentication string is a visual confirmation aid. This is a local network transfer bootstrapped by an optical secret, not an air-gapped protocol. Network policy, cancellation, frame-size limits, and session deadlines apply. Received passwords are removed from the native result before serialization to the webview. A pending passwordless adoption holds native vault data and sync keys until the user selects a local wrapping password; cancellation and vault lock clear that pending state. It does not prove possession of the host's old master password.
 
 ---
 
@@ -271,23 +265,23 @@ Zero-knowledge optical QR-code pairing establishes a single-use authenticated tr
 | Heap Scrambling | Ephemeral XChaCha20-Poly1305 | `crates/crypto/src/scrambled.rs` |
 | Atomic File Writes | Temp file `write()` + atomic `rename()` | `crates/core/src/vault/manager.rs` |
 | k-Anonymity Query | 5-char SHA-1 prefix over HTTPS | `crates/core/src/services/hibp.rs` |
-| P2P Mutual Auth | Client-first challenge-response HMAC verification | `crates/core/src/services/sync/mod.rs` |
-| Zero-Knowledge Pairing | Ephemeral Argon2id transit subkeys + 6-digit PIN | `crates/core/src/services/sync/pairing.rs` |
+| P2P Mutual Auth | Shared-key HMAC + pinned Ed25519 signatures + fresh P-256 ECDH | `crates/core/src/services/sync/mod.rs` and `identity.rs` |
+| PIN Pairing | Password/PIN-derived keys + authenticated metadata and session AAD | `crates/core/src/services/sync/pairing.rs` |
 | Timing-Safe Discovery | `subtle::ConstantTimeEq` across all UDP beacons | `crates/core/src/services/sync/mod.rs` & `pairing.rs` |
-| Adopt Mode Isolation | Zero local reads and collision avoidance on unauthenticated clients | `crates/core/src/services/sync/pairing.rs` |
-| UDP Amplification Defense | 1:1 request/reply ratio with Argon2id token gating | `crates/core/src/services/sync/pairing.rs` |
-| Self-Echo Isolation | In-loop local IP dropping and continuation | `crates/core/src/services/sync/mod.rs` |
-| Pairing Socket Release | 40ms `AtomicBool` polling + `cancel_pairing_host` | `crates/core/src/services/sync/pairing.rs` & `src-tauri/src/commands/sync.rs` |
+| Adopt Mode Isolation | No existing local vault reads and collision avoidance | `crates/core/src/services/sync/pairing.rs` |
+| UDP Amplification Defense | Small bounded reply payload with keyed token gating | `crates/core/src/services/sync/pairing.rs` |
+| Self-Echo Isolation | In-loop local IP dropping and continuation | `crates/core/src/services/sync/mod.rs` and `identity.rs` |
+| Pairing Socket Release | Cancellable I/O, network policy, and absolute deadlines | `crates/core/src/services/sync/pairing.rs` & `src-tauri/src/commands/sync.rs` |
 | DOS Device Sanitization | Windows reserved name neutralization on adopt | `crates/core/src/services/sync/pairing.rs` |
 | Hardware 2FA KEK | Argon2id 256MB key stretching | `crates/crypto/src/hardware2fa.rs` |
 | Constant-Time Verification | `subtle::ConstantTimeEq` comparisons | `crates/core/src/totp/mod.rs` & `crates/cli/src/ipc.rs` |
 | Emergency Kit PRF Checksum | Keyed HMAC over session $K_{\text{hmac}}$ | `crates/core/src/vault/emergency.rs` |
-| eTLD+1 ccTLD Isolation | Multi-part ccTLD public suffix resolution | `crates/core/src/smartlogin/discovery.rs` |
+| Credential Origin Isolation | Parsed exact HTTPS origins and explicit SSO pairs | `crates/core/src/smartlogin/discovery.rs` |
 | CDP JS String Escaping | `serde_json::to_string` DOM serialization | `crates/core/src/smartlogin/engine.rs` |
 | CSV Formula Defense | CWE-1236 quote-prefixing on export | `crates/core/src/vault/import_export.rs` |
 | Settings Memory Scrubbing | Reset `self.data.settings` on `lock()` | `crates/core/src/vault/manager.rs` |
 | Keyfile Factor Isolation | Strict exclusion from browser `localStorage` | `src/pages/Login.tsx` & `CreateVaultModal.tsx` |
 | Atomic Wrap Key Creation | `OpenOptionsExt::mode(0o600)` on Unix | `crates/crypto/src/tpm.rs` |
-| QR Zero-Knowledge Pairing | Optical CSPRNG secret + YQR2 mutual HMAC | `crates/core/src/services/sync/pairing.rs` |
-| Transit Dynamic AAD | `format!("yntra-qr-transit-v2:{}", session_id)` | `crates/core/src/services/sync/pairing.rs` |
+| QR Pairing | QR secret + YQR3 HMAC and authenticated enrollment metadata | `crates/core/src/services/sync/pairing.rs` |
+| Transit Dynamic AAD | Session ID, fresh challenges, roles, and device metadata | `crates/core/src/services/sync/pairing.rs` |
 | Zero-IPC Secret Isolation | `PendingAdoptedVault` zeroized in native state | `src-tauri/src/commands/sync.rs` |

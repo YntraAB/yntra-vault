@@ -6,3 +6,5 @@ pub mod sync;
 pub mod autostart;
 pub mod favicon;
 pub mod updater;
+mod update_signature;
+pub mod network;

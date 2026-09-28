@@ -15,47 +15,20 @@ const LOCAL_STORAGE_KEY = 'yntra-favicons-cache';
 const COOLDOWN_MS = 30_000;
 const MAX_CONCURRENT_FETCHES = 4;
 
-function loadPersistedFavicons(): Map<string, string> {
-  const map = new Map<string, string>();
-  if (typeof window === 'undefined' || !window.localStorage) return map;
+function purgeLegacyFaviconCache() {
+  if (typeof window === 'undefined') return;
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        for (const [k, v] of Object.entries(parsed)) {
-          if (typeof v === 'string' && v.startsWith('data:')) {
-            map.set(k, v);
-          }
-        }
-      }
-    }
+    window.localStorage.removeItem(LOCAL_STORAGE_KEY);
   } catch {
-    // Ignore parse or storage access errors
+    // Browser storage may be unavailable. Never load or write cached account domains.
   }
-  return map;
 }
 
-const faviconCache = loadPersistedFavicons();
+purgeLegacyFaviconCache();
+const faviconCache = new Map<string, string>();
 const inFlightRequests = new Map<string, Promise<string | null>>();
 const failedCooldowns = new Map<string, number>();
 const updateListeners = new Set<() => void>();
-
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-function schedulePersist() {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    try {
-      const entries = Array.from(faviconCache.entries()).slice(-250);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
-    } catch {
-      // Ignore quota exceptions
-    }
-  }, 1000);
-}
 
 interface QueueItem {
   domain: string;
@@ -66,9 +39,10 @@ interface QueueItem {
 const requestQueue: QueueItem[] = [];
 let activeFetches = 0;
 let cacheGeneration = 0;
+let sessionLocked = false;
 
 function processQueue() {
-  while (activeFetches < MAX_CONCURRENT_FETCHES && requestQueue.length > 0) {
+  while (!sessionLocked && activeFetches < MAX_CONCURRENT_FETCHES && requestQueue.length > 0) {
     const item = requestQueue.shift();
     if (!item) break;
     activeFetches++;
@@ -105,8 +79,8 @@ function enqueueFaviconFetch(
         inFlightRequests.delete(domain);
         if (res && res.startsWith('data:image/')) {
           faviconCache.set(domain, res);
+          if (faviconCache.size > 250) faviconCache.delete(faviconCache.keys().next().value!);
           failedCooldowns.delete(domain);
-          schedulePersist();
           updateListeners.forEach((fn) => fn());
         } else {
           failedCooldowns.set(domain, Date.now() + COOLDOWN_MS);
@@ -123,17 +97,11 @@ function enqueueFaviconFetch(
 
 export function clearFaviconCache() {
   cacheGeneration++;
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = null;
   inFlightRequests.clear();
   for (const item of requestQueue.splice(0)) item.resolve(null);
   faviconCache.clear();
   failedCooldowns.clear();
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
-    } catch { /* Storage may be unavailable. */ }
-  }
+  purgeLegacyFaviconCache();
   updateListeners.forEach((fn) => fn());
 }
 
@@ -142,11 +110,25 @@ export function resetFaviconCooldowns() {
   updateListeners.forEach((fn) => fn());
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('online', resetFaviconCooldowns);
-  window.addEventListener('yntra-favicons-cleared', clearFaviconCache);
-  window.addEventListener('yntra-favicons-reset', resetFaviconCooldowns);
+const lockFavicons = () => { sessionLocked = true; clearFaviconCache(); };
+const unlockFavicons = () => { sessionLocked = false; resetFaviconCooldowns(); };
+let eventWindow: Window | undefined;
+function ensureFaviconListeners() {
+  if (typeof window === 'undefined' || eventWindow === window) return;
+  const handlers = [
+    ['online', resetFaviconCooldowns], ['yntra-favicons-cleared', clearFaviconCache],
+    ['yntra-favicons-reset', resetFaviconCooldowns], ['yntra-session-locked', lockFavicons],
+    ['yntra-session-unlocked', unlockFavicons],
+  ] as const;
+  for (const [event, handler] of handlers) {
+    eventWindow?.removeEventListener(event, handler);
+    window.addEventListener(event, handler);
+  }
+  eventWindow = window;
+  sessionLocked = false;
+  purgeLegacyFaviconCache();
 }
+ensureFaviconListeners();
 
 export function extractDomain(url?: string, title?: string): string | null {
   if (url) {
@@ -169,7 +151,7 @@ export function Favicon({
 }: FaviconProps) {
   const { backend } = useBackend();
   const { settings, externalFaviconsReady } = useSettings();
-  const isEnabled = settings.externalFaviconsEnabled === true && externalFaviconsReady;
+  const isEnabled = settings.operationMode !== 'airgap' && settings.externalFaviconsEnabled === true && externalFaviconsReady;
   const domain = extractDomain(url, title);
 
   const [image, setImage] = useState<{ domain: string; url: string } | null>(null);
@@ -177,11 +159,13 @@ export function Favicon({
   const imgUrl = isEnabled && image?.domain === domain ? image.url : null;
 
   useEffect(() => {
+    ensureFaviconListeners();
     if (!domain || !isEnabled || !backend) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () => {
       clearTimeout(timer);
+      if (sessionLocked) { setImage(null); return; }
       const cached = faviconCache.get(domain);
       if (cached) {
         setImage({ domain, url: cached });
@@ -220,7 +204,6 @@ export function Favicon({
             if (domain) {
               faviconCache.delete(domain);
               failedCooldowns.set(domain, Date.now() + COOLDOWN_MS);
-              schedulePersist();
             }
             setImage(null);
             setRetry(value => value + 1);

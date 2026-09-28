@@ -51,6 +51,16 @@ pub struct Entry {
     pub attachments: Vec<FileAttachment>,
 }
 
+impl Drop for Entry {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.notes.zeroize();
+        self.username.zeroize();
+        self.email.zeroize();
+        for field in &mut self.custom_fields { field.value.zeroize(); }
+    }
+}
+
 /// Encrypted file attachment stored inside an entry.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileAttachment {
@@ -81,6 +91,13 @@ pub struct NewAttachment {
     #[serde(alias = "mimeType")]
     pub mime_type: String,
     pub data: Vec<u8>,
+}
+
+impl Drop for NewAttachment {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.data.zeroize();
+    }
 }
 
 /// Lightweight entry preview for list views — no decryption needed.
@@ -128,9 +145,16 @@ pub struct CustomField {
     pub id: Uuid,
     pub name: String,
     pub field_type: FieldType,
-    /// Value is encrypted for sensitive field types
+    /// Protected by the outer vault encryption; scrubbed when its entry is dropped.
     pub value: String,
     pub sensitive: bool,
+}
+
+impl Drop for CustomField {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.value.zeroize();
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -255,6 +279,9 @@ pub struct TrustedDevice {
     pub last_sync_at: Option<DateTime<Utc>>,
     /// BLAKE3 keyed hash of the persistent pairing token for verifying sync sessions
     pub token_hash: String,
+    /// Per-install proof key. Empty legacy records must be paired again.
+    #[serde(default)]
+    pub signing_public_key: Vec<u8>,
 }
 
 fn default_device_type() -> String {

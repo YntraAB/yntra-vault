@@ -732,28 +732,9 @@ fn spawn_browser_process(
                 logger.log(LoginState::LaunchingBrowser, format!("De-elevated browser PID: {pid}. Waiting for CDP endpoint..."));
                 return Ok(BrowserChild::DeElevated { pid });
             }
-            Err(e) => {
-                logger.log(LoginState::LaunchingBrowser, format!("De-elevation fallback ({e}) — launching directly with sandbox compatibility flags..."));
-                let mut elevated_args = args.to_vec();
-                elevated_args.push("--no-sandbox".to_string());
-                elevated_args.push("--disable-gpu-sandbox".to_string());
-                elevated_args.push("--test-type".to_string());
-                let mut cmd = std::process::Command::new(exe);
-                cmd.args(&elevated_args);
-                if let Some(parent) = browser_info.exe_path.parent() {
-                    cmd.current_dir(parent);
-                }
-                cmd.stdin(std::process::Stdio::null());
-                cmd.stdout(std::process::Stdio::null());
-                cmd.stderr(std::process::Stdio::null());
-                let c = cmd.spawn().map_err(|err| {
-                    crate::error::VaultError::SmartLoginError(format!(
-                        "Failed to launch {}: {err}", browser_info.name
-                    ))
-                })?;
-                logger.log(LoginState::LaunchingBrowser, format!("Browser PID: {}. Waiting for CDP endpoint...", c.id()));
-                return Ok(BrowserChild::Process(c));
-            }
+            Err(_) => return Err(crate::error::VaultError::SmartLoginError(
+                "Secure browser launch failed. Restart Yntra Vault without administrator privileges.".into()
+            )),
         }
     }
 
@@ -1106,3 +1087,4 @@ fn scan_common_paths(browsers: &mut Vec<BrowserInfo>, default_progid: &Option<St
 fn normalize_path(path: &Path) -> PathBuf {
     path.to_string_lossy().to_lowercase().into()
 }
+

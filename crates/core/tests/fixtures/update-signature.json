@@ -1,0 +1,11 @@
+{
+  "publicKey": "cb71155da2e7c6c69fa8c0d5498219df7a020ace1dd948c9c7328411c4159051",
+  "manifest": "{\"version\":\"0.2.5\",\"notes\":\"Synthetic interoperability fixture\"}\n",
+  "envelope": {
+    "schema": 1,
+    "key_id": "yntra-update-1",
+    "issued_at": 1000,
+    "expires_at": 7777000,
+    "signature": "bs6W4O0JNtNiziiIMJBfypbWAyr/brbn9JPAP3Go5hnIjyL09zLGK2BhS9z/6siBqLS4ldlS1HlYRU+xSRlwAw=="
+  }
+}

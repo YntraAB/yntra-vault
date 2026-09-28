@@ -51,7 +51,7 @@ pub fn bench_protected_memory(c: &mut Criterion) {
         b.iter(|| ScrambledString::new(black_box(sensitive_text)));
     });
 
-    let scrambled = ScrambledString::new(sensitive_text);
+    let scrambled = ScrambledString::new(sensitive_text).unwrap();
     group.bench_function("ScrambledString Heap Decrypt & Zeroizing Drop", |b| {
         b.iter(|| {
             let decrypted = scrambled.decrypt().unwrap();
@@ -66,7 +66,7 @@ pub fn bench_protected_memory(c: &mut Criterion) {
         });
     });
 
-    let protected = ProtectedSecret::new(sensitive_text);
+    let protected = ProtectedSecret::new(sensitive_text).unwrap();
     group.bench_function("ProtectedSecret Scoped Execution with_secret", |b| {
         b.iter(|| {
             protected.with_secret(|s| black_box(s.len())).unwrap()

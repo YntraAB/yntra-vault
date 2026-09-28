@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from 'react';
 import { appMetadata } from '@/lib/appMetadata';
 import { UpdateModal } from './UpdateModal';
-import { openExternalUrl } from '@/lib/utils';
 import { useBackend } from '@/lib/useBackend';
 import { useSettings } from '@/features/settings/context/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -19,9 +18,9 @@ export type UpdateStatus =
 
 function useUpdaterState() {
   const { backend } = useBackend();
-  const { settings } = useSettings();
+  const { settings, networkAccessReady } = useSettings();
   const { addToast } = useToast();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
 
   const [status, setStatus] = useState<UpdateStatus>('idle');
   const [updateInfo, setUpdateInfo] = useState<CheckUpdateResult | null>(null);
@@ -42,7 +41,7 @@ function useUpdaterState() {
   }, [backend]);
 
   const checkForUpdates = useCallback(async (silent = false) => {
-    if (!backend || operation.current) return;
+    if (!backend || operation.current || !networkAccessReady || settings.operationMode === 'airgap') return;
     operation.current = true;
     hasAutoChecked.current = true;
     setStatus('checking');
@@ -85,11 +84,11 @@ function useUpdaterState() {
       }
     }
     finally { operation.current = false; }
-  }, [backend, addToast, t]);
+  }, [backend, addToast, t, networkAccessReady, settings.operationMode]);
 
   // Automatic background update check on app launch if enabled
   useEffect(() => {
-    if (hasAutoChecked.current || !backend) return;
+    if (hasAutoChecked.current || !backend || !networkAccessReady) return;
     if (settings.autoCheckUpdates === true && settings.operationMode !== 'airgap') {
       // Slight delay so initial vault UI loads smoothly
       const timer = setTimeout(() => {
@@ -98,10 +97,10 @@ function useUpdaterState() {
       }, 2500);
       return () => clearTimeout(timer);
     }
-  }, [backend, settings.autoCheckUpdates, settings.operationMode, checkForUpdates]);
+  }, [backend, settings.autoCheckUpdates, settings.operationMode, networkAccessReady, checkForUpdates]);
 
   const installUpdate = useCallback(async () => {
-    if (!backend || !updateInfo?.has_update || !updateInfo.download_url || operation.current) return;
+    if (!backend || !updateInfo?.has_update || !updateInfo.download_url || operation.current || !networkAccessReady || settings.operationMode === 'airgap') return;
     operation.current = true;
 
     setIsDownloading(true);
@@ -143,9 +142,10 @@ function useUpdaterState() {
           type: 'success',
         });
       } else {
-        // Standard desktop packages are installed through the browser download.
-        await openExternalUrl(updateInfo.download_url);
+        if (!updateInfo.sha256) throw new Error('The update is missing its verified checksum. Check for updates again.');
+        await backend.installDesktopUpdate(updateInfo.download_url, updateInfo.sha256);
         setStatus('ready');
+        addToast({ message: language === 'sv' ? 'Det verifierade uppdateringspaketet har öppnats. Slutför installationen i systemets installationsprogram.' : 'Verified update package opened. Complete installation in the system installer.', type: 'info' });
       }
       setIsModalOpen(false);
     } catch (err: unknown) {
@@ -160,7 +160,7 @@ function useUpdaterState() {
       operation.current = false;
       setIsDownloading(false);
     }
-  }, [backend, updateInfo, addToast, t]);
+  }, [backend, updateInfo, addToast, t, language, networkAccessReady, settings.operationMode]);
 
   return {
     status,

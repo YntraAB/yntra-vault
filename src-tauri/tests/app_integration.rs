@@ -9,6 +9,43 @@ use yntra_vault_core::generator::GeneratorOptions;
 use yntra_vault_core::vault::types::StrengthLevel;
 use yntra_vault_core::vault::VaultManager;
 
+#[test]
+fn removable_storage_loss_locks_only_the_observed_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("presence.vdb");
+    let password = "Synthetic-Presence-Password!";
+    let manager = VaultManager::create("Presence", password, &path).unwrap();
+    let old = manager.presence_snapshot().unwrap();
+    let state = AppState {
+        vault: Mutex::new(Some(manager)),
+        minimize_to_tray: AtomicBool::new(false),
+        lock_on_focus_loss: AtomicBool::new(false),
+        lock_on_system_lock: AtomicBool::new(false),
+        smart_login_cancel: Default::default(), smart_login_running: Default::default(),
+        pairing_operation: Default::default(), sync_listener_operation: Default::default(),
+        sync_client_operation: Default::default(), qr_pairing_session: Mutex::new(None),
+        pending_adopted_vault: Mutex::new(None),
+    };
+    // A file restored by a completed save must not trigger the earlier loss probe.
+    assert!(!state.clear_session_if_disconnected(&old, false).unwrap());
+    // Even the same path and same vault reopened is a different session.
+    *state.vault.lock().unwrap() = Some(VaultManager::open(&path, password).unwrap());
+    assert!(!state.clear_session_if_disconnected(&old, true).unwrap());
+    let current = state.vault.lock().unwrap().as_ref().unwrap().presence_snapshot().unwrap();
+    let pairing = state.pairing_operation.begin().unwrap();
+    let listener = state.sync_listener_operation.begin().unwrap();
+    let client = state.sync_client_operation.begin().unwrap();
+    std::fs::write(path.with_extension("vdb.tmp"), b"stale temporary file").unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(state.clear_session_if_disconnected(&current, false).unwrap());
+    assert!(state.vault.lock().unwrap().is_none());
+    assert!(pairing.cancel.load(Ordering::Acquire));
+    assert!(listener.cancel.load(Ordering::Acquire));
+    assert!(client.cancel.load(Ordering::Acquire));
+    assert!(state.smart_login_cancel.load(Ordering::Acquire));
+    assert!(!state.clear_session_if_disconnected(&current, false).unwrap());
+}
+
 #[tokio::test]
 async fn test_app_state_and_atomic_settings() {
     let state = AppState {
@@ -20,6 +57,7 @@ async fn test_app_state_and_atomic_settings() {
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
         pairing_operation: Default::default(),
         sync_listener_operation: Default::default(),
+        sync_client_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -95,6 +133,7 @@ async fn test_app_state_vault_lifecycle() {
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
         pairing_operation: Default::default(),
         sync_listener_operation: Default::default(),
+        sync_client_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -159,6 +198,7 @@ async fn test_app_state_vault_reload() {
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
         pairing_operation: Default::default(),
         sync_listener_operation: Default::default(),
+        sync_client_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -237,6 +277,7 @@ async fn test_autotype_lock_release_invariant() {
         smart_login_running: std::sync::Arc::new(AtomicBool::new(false)),
         pairing_operation: Default::default(),
         sync_listener_operation: Default::default(),
+        sync_client_operation: Default::default(),
         qr_pairing_session: Mutex::new(None),
         pending_adopted_vault: Mutex::new(None),
     };
@@ -294,4 +335,3 @@ async fn test_autotype_lock_release_invariant() {
     }
     assert!(state.vault.lock().unwrap().is_none());
 }
-

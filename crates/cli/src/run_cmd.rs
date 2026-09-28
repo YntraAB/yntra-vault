@@ -101,7 +101,7 @@ async fn resolve_yntra_secret_uri(
     let field = parts[1].to_lowercase();
 
     // Try fast IPC first
-    let entry = if let Some(IpcResponse::GetEntry(e)) = try_ipc_request(&IpcRequest::GetEntry { query: entry_query.to_string() }).await {
+    let mut entry = if let Some(IpcResponse::GetEntry(e)) = try_ipc_request(&IpcRequest::GetEntry { query: entry_query.to_string() }).await {
         e
     } else {
         let pass = password.ok_or_else(|| VaultError::VaultLocked)?;
@@ -111,17 +111,17 @@ async fn resolve_yntra_secret_uri(
     };
 
     let resolved = match field.as_str() {
-        "password" | "pass" | "secret" => entry.password,
-        "username" | "user" => entry.username,
-        "url" => entry.url,
-        "email" => entry.email,
-        "notes" => entry.notes,
+        "password" | "pass" | "secret" => std::mem::take(&mut entry.password),
+        "username" | "user" => std::mem::take(&mut entry.username),
+        "url" => std::mem::take(&mut entry.url),
+        "email" => std::mem::take(&mut entry.email),
+        "notes" => std::mem::take(&mut entry.notes),
         "totp" => {
-            let secret = entry.totp_secret.ok_or_else(|| VaultError::InvalidFormat(format!("Entry '{}' has no TOTP secret", entry.title)))?;
+            let secret = entry.totp_secret.as_deref().ok_or_else(|| VaultError::InvalidFormat(format!("Entry '{}' has no TOTP secret", entry.title)))?;
             let cfg = if secret.starts_with("otpauth://") {
                 parse_otpauth_uri(&secret)?
             } else {
-                TotpConfig { secret, ..Default::default() }
+                TotpConfig { secret: secret.to_owned(), ..Default::default() }
             };
             generate_totp(&cfg)?.code
         }

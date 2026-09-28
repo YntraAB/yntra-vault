@@ -62,7 +62,7 @@ impl VaultManager {
     }
 
     /// Change the vault's master password.
-    pub fn change_master_password(&mut self, current: &str, new_password: &str) -> crate::Result<()> {
+    pub fn change_master_password(&mut self, current: &str, new_password: &str) -> crate::Result<Option<super::emergency::EmergencyKit>> {
         self.change_master_password_with_keyfiles(current, None, new_password, None)
     }
 
@@ -73,7 +73,7 @@ impl VaultManager {
         current_key_file: Option<&Path>,
         new_password: &str,
         new_key_file: Option<&Path>,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<Option<super::emergency::EmergencyKit>> {
         self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
         super::validation::validate_new_master_password(new_password)?;
         if current.is_empty() { return Err(VaultError::InvalidPassword); }
@@ -91,17 +91,18 @@ impl VaultManager {
         current_key_file: Option<&Path>,
         new_password: &str,
         new_key_file: Option<&Path>,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<Option<super::emergency::EmergencyKit>> {
         if self.storage.is_some() {
             let old_kf = current_key_file.map(read_key_file_safely).transpose()?;
             if !self.verify_master_password_with_keyfile(current, old_kf.as_ref().map(|b| b.as_slice()))? { return Err(VaultError::InvalidPassword); }
             let new_kf = new_key_file.map(read_key_file_safely).transpose()?;
-            let previous = self.storage.clone();
+            let had_recovery = self.storage.as_ref().is_some_and(|s| s.header.recovery.is_some());
             if let Some(session) = &mut self.storage {
                 session.change_password(new_password, new_kf.as_ref().map(|b| b.as_slice()), self.keys.as_ref().ok_or(VaultError::VaultLocked)?)?;
             }
-            if let Err(error) = self.save() { self.storage = previous; return Err(error); }
-            return Ok(());
+            let kit = if had_recovery { Some(self.rotate_emergency_kit()?) } else { None };
+            self.save()?;
+            return Ok(kit);
         }
         let cur_kf_bytes = match current_key_file {
             Some(kf_path) => Some(read_key_file_safely(kf_path)?),
@@ -188,6 +189,6 @@ impl VaultManager {
 
         self.save()?;
         self.rebuild_search_index();
-        Ok(())
+        Ok(None)
     }
 }

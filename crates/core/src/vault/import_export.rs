@@ -28,6 +28,23 @@ mod import_tests {
     use crate::vault::importer::{Importer, ImportFormat};
 
     #[test]
+    fn plaintext_export_rejects_source_and_hardlink_without_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.vdb");
+        let alias = directory.path().join("alias.vdb");
+        let manager = VaultManager::create("Export", "synthetic password 2026", &path).unwrap();
+        std::fs::hard_link(&path, &alias).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert!(manager.export_csv(&path).is_err());
+        assert!(manager.export_json(&alias).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(std::fs::read(&alias).unwrap(), before);
+        let output = directory.path().join("export.json");
+        manager.export_json(&output).unwrap();
+        assert_eq!(std::fs::read_to_string(output).unwrap(), "[]");
+    }
+
+    #[test]
     fn records_in_the_same_export_are_not_silently_skipped() {
         let dir = tempfile::tempdir().unwrap();
         let mut manager = VaultManager::create("Import", "fixture-password", &dir.path().join("import.vdb")).unwrap();
@@ -265,6 +282,7 @@ impl VaultManager {
 
     /// Exports decrypted vault entries to a CSV file.
     pub fn export_csv(&self, dest_path: &Path) -> crate::Result<()> {
+        reject_vault_destination(&self.path, dest_path)?;
         write_sensitive_file_safely(dest_path, &self.export_csv_text()?)
     }
 
@@ -311,6 +329,7 @@ impl VaultManager {
 
     /// Exports decrypted vault entries to a JSON file.
     pub fn export_json(&self, dest_path: &Path) -> crate::Result<()> {
+        reject_vault_destination(&self.path, dest_path)?;
         write_sensitive_file_safely(dest_path, &self.export_json_text()?)
     }
 
@@ -328,28 +347,13 @@ impl VaultManager {
     }
 }
 
+fn reject_vault_destination(vault: &Path, destination: &Path) -> crate::Result<()> {
+    if vault == destination || (destination.exists() && same_file::is_same_file(vault, destination)?) {
+        return Err(VaultError::ExportError("Choose a different file: exporting here would overwrite the active vault".into()));
+    }
+    Ok(())
+}
+
 fn write_sensitive_file_safely(path: &Path, content: &str) -> crate::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| VaultError::InvalidFormat(format!("Failed to open export file with 0600: {}", e)))?;
-        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-        file.write_all(content.as_bytes())
-            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write export file: {}", e)))?;
-        file.sync_all()
-            .map_err(|e| VaultError::InvalidFormat(format!("Failed to sync export file: {}", e)))?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, content)
-            .map_err(|e| VaultError::InvalidFormat(format!("Failed to write export file: {}", e)))
-    }
+    super::storage::atomic_write(path, content.as_bytes())
 }

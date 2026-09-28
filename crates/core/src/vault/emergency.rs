@@ -116,6 +116,19 @@ impl VaultManager {
         let old_audit = self.data.settings.emergency_kit_audit.clone();
         let result = (|| {
             self.ensure_local_protection(password, keyfile)?;
+            let kit = self.rotate_emergency_kit()?;
+            self.save()?;
+            Ok(kit)
+        })();
+        if result.is_err() {
+            self.storage = previous;
+            self.keys = old_keys;
+            self.biometric = old_bio;
+            self.data.settings.emergency_kit_audit = old_audit;
+        }
+        result
+    }
+    pub(crate) fn rotate_emergency_kit(&mut self) -> crate::Result<EmergencyKit> {
             let session = self.storage.as_mut().ok_or(VaultError::VaultLocked)?;
             let (kit, secret) =
                 session.rotate_recovery(self.keys.as_ref().ok_or(VaultError::VaultLocked)?)?;
@@ -156,16 +169,8 @@ impl VaultManager {
             if audit.history.len() > 50 {
                 audit.history.remove(0);
             }
-            self.save()?;
+
             Ok(EmergencyKit {vault_id:self.data.metadata.id,vault_name:self.data.metadata.name.clone(),created_at:self.data.metadata.created_at,generated_at:now,format_version:2,total_entries:self.data.entries.len(),shares,verification_hash:fingerprint,document_markdown:"Recovery v2: save each share separately. Any two shares restore access to this vault copy without the old password or USB. A vault backup is also required. Replacing the kit revokes it for the updated file, not old backups. Never store all shares with the vault.".into()})
-        })();
-        if result.is_err() {
-            self.storage = previous;
-            self.keys = old_keys;
-            self.biometric = old_bio;
-            self.data.settings.emergency_kit_audit = old_audit;
-        }
-        result
     }
     pub fn get_emergency_kit_audit(&self) -> Option<EmergencyKitAudit> {
         self.data.settings.emergency_kit_audit.clone()
@@ -239,6 +244,7 @@ impl VaultManager {
             path,
             super::format::VaultFile::from_bytes(&inner)?,
             keys,
+            *blake3::hash(&bytes).as_bytes(),
         )?;
         let mut recovered_storage = super::storage::StorageSession::new(
             new_password,
@@ -265,6 +271,63 @@ impl VaultManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn password_change_replaces_old_snapshot_keys_and_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rotation.vdb");
+        let mut manager = VaultManager::create("Fixture", "original password 2026", &path).unwrap();
+        let old_kit = manager.generate_emergency_kit("original password 2026").unwrap();
+        let old_session = manager.storage.clone().unwrap();
+        let (_, _, old_secret) = reconstruct(&old_kit.shares[0].share_data, &old_kit.shares[1].share_data).unwrap();
+        let replacement = manager.change_master_password("original password 2026", "replacement password 2026").unwrap().unwrap();
+        manager.data.metadata.name = "New contents after password change".into();
+        manager.save().unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let (header, payload) = super::super::storage::parse(&bytes).unwrap();
+        let header_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        assert!(crate::crypto::decrypt_vault_with_aad(&payload, &old_session.key, &bytes[..8 + header_len]).is_err());
+        let current_kit = header.recovery.as_ref().unwrap().id;
+        assert!(super::super::storage::StorageSession::recover(header, current_kit, &old_secret).is_err());
+        assert!(VaultManager::recover_with_shares(&path, &old_kit.shares[0].share_data, &old_kit.shares[1].share_data, "recovered password 2026").is_err());
+        let recovered = VaultManager::recover_with_shares(&path, &replacement.shares[0].share_data, &replacement.shares[1].share_data, "recovered password 2026").unwrap();
+        assert_eq!(recovered.metadata().name, "New contents after password change");
+    }
+
+    #[test]
+    fn usb_policy_change_returns_a_replacement_recovery_kit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("usb-policy.vdb");
+        let mut manager = VaultManager::create("Fixture", "original password 2026", &path).unwrap();
+        let old_kit = manager.generate_emergency_kit("original password 2026").unwrap();
+        let old_session = manager.storage.clone().unwrap();
+        let (_, _, old_secret) = reconstruct(&old_kit.shares[0].share_data, &old_kit.shares[1].share_data).unwrap();
+        // Removing binding follows the same factor transition without OS USB access.
+        let replacement = manager.set_usb_binding("original password 2026", None, None).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let (header, payload) = super::super::storage::parse(&bytes).unwrap();
+        let header_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        assert!(crate::crypto::decrypt_vault_with_aad(&payload, &old_session.key, &bytes[..8 + header_len]).is_err());
+        let current_kit = header.recovery.as_ref().unwrap().id;
+        assert!(super::super::storage::StorageSession::recover(header, current_kit, &old_secret).is_err());
+        assert!(VaultManager::recover_with_shares(&path, &replacement.shares[0].share_data, &replacement.shares[1].share_data, "recovered password 2026").is_ok());
+    }
+
+    #[test]
+    fn failed_password_change_keeps_old_password_and_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollback.vdb");
+        let mut manager = VaultManager::create("Fixture", "original password 2026", &path).unwrap();
+        let kit = manager.generate_emergency_kit("original password 2026").unwrap();
+        let before = std::fs::read(&path).unwrap();
+        manager.path = directory.path().to_owned();
+        assert!(manager.change_master_password("original password 2026", "replacement password 2026").is_err());
+        manager.path = path.clone();
+        assert!(manager.verify_master_password("original password 2026").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(manager.protection_info().recovery_enabled, true);
+        assert!(VaultManager::recover_with_shares(&path, &kit.shares[0].share_data, &kit.shares[1].share_data, "recovered password 2026").is_ok());
+    }
     #[test]
     fn stale_session_cannot_restore_a_replaced_recovery_kit() {
         let directory = tempfile::tempdir().unwrap();
@@ -338,15 +401,15 @@ mod tests {
         );
         assert!(reconstruct(&first.shares[0].share_data, &second.shares[1].share_data).is_err());
         assert!(reconstruct(&second.shares[0].share_data, &second.shares[0].share_data).is_err());
-        manager
+        let replacement = manager
             .change_master_password("old password 123", "changed password 123")
-            .unwrap();
+            .unwrap().unwrap();
         assert!(VaultManager::open(&path, "old password 123").is_err());
         assert!(VaultManager::open(&path, "changed password 123").is_ok());
         let recovered = VaultManager::recover_with_shares(
             &path,
-            &second.shares[0].share_data,
-            &second.shares[2].share_data,
+            &replacement.shares[0].share_data,
+            &replacement.shares[2].share_data,
             "new password 123",
         )
         .unwrap();

@@ -30,6 +30,7 @@ impl AutotypeDriver for StubAutotypeDriver {
     ) -> crate::Result<()> {
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(3));
+            if super::is_cancelled() { return; }
             let driver = StubAutotypeDriver::new();
             let _ = driver.autotype_text_with_delay(&guard.username, char_delay_ms, 0);
             let _ = driver.autotype_text_with_delay("\t", char_delay_ms, 0);

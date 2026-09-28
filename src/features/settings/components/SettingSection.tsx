@@ -60,14 +60,15 @@ export function SettingRow({
 }
 
 
-export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+export function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       onClick={() => onChange(!checked)}
+      disabled={disabled}
       role="switch"
       aria-checked={checked}
-      className={`shrink-0 relative h-5 w-9 rounded-full transition-colors cursor-pointer select-none ${
+      className={`shrink-0 relative h-5 w-9 rounded-full transition-colors cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed ${
         checked ? 'bg-[var(--text-primary)]' : 'bg-[var(--border)]'
       }`}
     >

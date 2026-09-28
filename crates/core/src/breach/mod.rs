@@ -25,10 +25,14 @@ pub struct BreachResult {
 /// Only the first 5 characters of the SHA-1 hash are sent to HIBP.
 /// The rest is compared locally — HIBP never sees your password.
 pub async fn check_password_breach(password: &str) -> crate::Result<BreachResult> {
+    crate::services::network::run(check_password_breach_allowed(password)).await
+}
+
+async fn check_password_breach_allowed(password: &str) -> crate::Result<BreachResult> {
     // SHA-1 hash the password
     let mut hasher = Sha1::new();
     hasher.update(password.as_bytes());
-    let hash = format!("{:X}", hasher.finalize());
+    let hash = zeroize::Zeroizing::new(format!("{:X}", hasher.finalize()));
 
     // Split: first 5 chars sent to API, rest compared locally
     let prefix = &hash[..5];
@@ -39,10 +43,13 @@ pub async fn check_password_breach(password: &str) -> crate::Result<BreachResult
 
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
+        .https_only(true)
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| VaultError::BreachCheckError(format!("HTTP client: {}", e)))?;
 
-    let response = client.get(&url).send().await
+    let mut response = client.get(&url).header("Add-Padding", "true").send().await
         .map_err(|e| VaultError::BreachCheckError(format!("HIBP request failed: {}", e)))?;
 
     if !response.status().is_success() {
@@ -51,9 +58,22 @@ pub async fn check_password_breach(password: &str) -> crate::Result<BreachResult
         ));
     }
 
-    let body = response.text().await
-        .map_err(|e| VaultError::BreachCheckError(format!("Failed to read response: {}", e)))?;
+    const MAX_RESPONSE: usize = 1024 * 1024;
+    if response.content_length().is_some_and(|size| size > MAX_RESPONSE as u64) {
+        return Err(VaultError::BreachCheckError("Response exceeds size limit".into()));
+    }
+    let mut bytes = zeroize::Zeroizing::new(Vec::new());
+    while let Some(chunk) = response.chunk().await? {
+        if chunk.len() > MAX_RESPONSE.saturating_sub(bytes.len()) {
+            return Err(VaultError::BreachCheckError("Response exceeds size limit".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let body = std::str::from_utf8(&bytes).map_err(|_| VaultError::BreachCheckError("Invalid response encoding".into()))?;
+    Ok(parse_breach_response(body, suffix))
+}
 
+fn parse_breach_response(body: &str, suffix: &str) -> BreachResult {
     // Parse response — each line is "SUFFIX:COUNT"
     let mut breach_count = 0u64;
     let mut found = false;
@@ -62,16 +82,16 @@ pub async fn check_password_breach(password: &str) -> crate::Result<BreachResult
         if let Some((line_suffix, count_str)) = line.split_once(':')
             && line_suffix.eq_ignore_ascii_case(suffix) {
                 breach_count = count_str.trim().parse().unwrap_or(0);
-                found = true;
+                found = breach_count > 0; // HIBP padding records have count zero.
                 break;
             }
     }
 
-    Ok(BreachResult {
+    BreachResult {
         is_breached: found,
         breach_count,
         checked_at: chrono::Utc::now(),
-    })
+    }
 }
 
 /// Convert a BreachResult into a BreachStatus for storage.
@@ -131,6 +151,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Explicit live HIBP network test"]
     async fn test_known_breached_password() {
         // "password" is definitely in HIBP
         let result = check_password_breach("password").await;
@@ -167,12 +188,20 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Explicit live HIBP network test"]
     async fn test_safe_password_bloom_short_circuit() {
         let result = check_password_breach("highly_secure_non_existent_password_12345!").await;
         if let Ok(result) = result {
             assert!(!result.is_breached);
             assert_eq!(result.breach_count, 0);
         }
+    }
+
+    #[test]
+    fn padding_and_invalid_counts_are_not_breaches() {
+        assert!(!parse_breach_response("ABC:0\r\nDEF:12", "abc").is_breached);
+        assert!(!parse_breach_response("ABC:invalid", "abc").is_breached);
+        assert_eq!(parse_breach_response("DEF:1\r\nABC:42", "abc").breach_count, 42);
     }
 }
 

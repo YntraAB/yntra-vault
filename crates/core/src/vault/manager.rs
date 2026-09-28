@@ -28,6 +28,8 @@ pub use crate::vault::trash::{TrashedEntryPreview, VaultStorageMetrics};
 
 /// Active vault state — holds decrypted data + derived keys.
 pub struct VaultManager {
+    /// Process-local identity; never serialized or shared with peers.
+    pub(crate) session_id: Uuid,
     /// Path to the .vdb file
     pub path: PathBuf,
     /// Decrypted vault contents
@@ -41,6 +43,7 @@ pub struct VaultManager {
     /// Embedded hardware 2FA container block
     pub(crate) hardware2fa: Option<Vec<crate::crypto::hardware2fa::EmbeddedHardware2FaHeader>>,
     pub(crate) storage: Option<super::storage::StorageSession>,
+    pub(crate) disk_revision: Option<[u8; 32]>,
     /// In-memory Zero-Disclosure search index
     pub(crate) search_index: std::collections::HashMap<[u8; 8], Vec<Uuid>>,
 }
@@ -70,11 +73,24 @@ pub fn read_key_file_safely(path: &Path) -> crate::Result<crate::crypto::LockedB
     let raw_bytes = Zeroizing::new(fs::read(path).map_err(|e| {
         VaultError::VaultNotFound(format!("Key file error ({}): {}", path.display(), e))
     })?);
-    let locked = crate::crypto::LockedBuffer::new(&raw_bytes);
+    let locked = crate::crypto::LockedBuffer::new(&raw_bytes)?;
     Ok(locked)
 }
 
 impl VaultManager {
+    pub(crate) fn transactional_data_change<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> crate::Result<T>,
+    ) -> crate::Result<T> {
+        let data = self.data.clone();
+        let index = self.search_index.clone();
+        let result = operation(self);
+        if result.is_err() {
+            self.data = data;
+            self.search_index = index;
+        }
+        result
+    }
     /// Create a brand new vault with the given master password.
     pub fn create(name: &str, password: &str, path: &Path) -> crate::Result<Self> {
         Self::create_with_keyfile(name, password, None, path)
@@ -129,6 +145,7 @@ impl VaultManager {
         };
 
         let mut manager = VaultManager {
+            session_id: Uuid::new_v4(),
             path: path.to_path_buf(),
             data,
             keys: Some(subkeys),
@@ -136,6 +153,7 @@ impl VaultManager {
             biometric: None,
             hardware2fa: None,
             storage: None,
+            disk_revision: None,
             search_index: std::collections::HashMap::new(),
         };
 
@@ -170,7 +188,7 @@ impl VaultManager {
             let serial = super::storage::connected_serial(&header)?;
             let (session, keys) = super::storage::StorageSession::open(header, password, key_file_bytes, serial.as_deref())?;
             let inner = session.decrypt(&file_bytes)?;
-            let mut manager = Self::from_decrypted_vault_file(path, VaultFile::from_bytes(&inner)?, keys)?;
+            let mut manager = Self::from_decrypted_vault_file(path, VaultFile::from_bytes(&inner)?, keys, *blake3::hash(&file_bytes).as_bytes())?;
             manager.storage = Some(session);
             return Ok(manager);
         }
@@ -205,7 +223,7 @@ impl VaultManager {
             }
         }
 
-        Self::from_decrypted_vault_file(path, vault_file, subkeys)
+        Self::from_decrypted_vault_file(path, vault_file, subkeys, *blake3::hash(&file_bytes).as_bytes())
     }
 
     /// Common decryption and deserialization of vault payload from a VaultFile using SubKeys.
@@ -265,10 +283,12 @@ impl VaultManager {
         path: &Path,
         vault_file: VaultFile,
         subkeys: SubKeys,
+        disk_revision: [u8; 32],
     ) -> crate::Result<Self> {
         let data = Self::decrypt_vault_payload(&vault_file, &subkeys)?;
 
         let mut manager = VaultManager {
+            session_id: Uuid::new_v4(),
             path: path.to_path_buf(),
             data,
             keys: Some(subkeys),
@@ -276,6 +296,7 @@ impl VaultManager {
             biometric: vault_file.biometric,
             hardware2fa: vault_file.hardware2fa,
             storage: None,
+            disk_revision: Some(disk_revision),
             search_index: std::collections::HashMap::new(),
         };
         manager.rebuild_search_index();
@@ -290,6 +311,7 @@ impl VaultManager {
         let subkeys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
         let file_bytes = super::storage::read_bounded(&self.path)
             .map_err(|e| VaultError::VaultNotFound(format!("{}: {}", self.path.display(), e)))?;
+        let disk_revision = *blake3::hash(&file_bytes).as_bytes();
 
         let file_bytes = if let Some(session) = &self.storage {
             session.decrypt(&file_bytes)?
@@ -319,6 +341,7 @@ impl VaultManager {
         self.salt = vault_file.header.salt;
         self.biometric = vault_file.biometric;
         self.hardware2fa = vault_file.hardware2fa;
+        self.disk_revision = Some(disk_revision);
         self.rebuild_search_index();
 
         Ok(())
@@ -341,8 +364,8 @@ impl VaultManager {
         self.data.trash.retain(|t| t.deleted_at > cutoff);
 
         // Serialize vault data as MessagePack (self-describing)
-        let serialized = Zeroizing::new(rmp_serde::to_vec(&self.data)
-            .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {}", e)))?);
+        let serialized = super::storage::serialize_payload(&self.data)?;
+        super::storage::validate_payload_size(serialized.len())?;
 
         let mut flags = 0u16;
         if self.biometric.is_some() {
@@ -380,12 +403,23 @@ impl VaultManager {
         // Write to disk atomically (write to temp file, then rename)
         let inner = Zeroizing::new(vault_file.to_bytes()?);
         let file_bytes = if let Some(session) = &self.storage { session.seal(&inner)? } else { inner.to_vec() };
+        let _disk_lock = super::storage::lock_vault_path(&self.path)?;
+        let current_revision = if self.path.exists() {
+            Some(*blake3::hash(&super::storage::read_bounded(&self.path)?).as_bytes())
+        } else { None };
+        if create_new && current_revision.is_some() {
+            return Err(VaultError::VaultAlreadyExists(self.path.display().to_string()));
+        }
+        if current_revision != self.disk_revision {
+            return Err(VaultError::InvalidState("Vault changed in another session; reload or unlock again before saving".into()));
+        }
         if let Some(session) = &self.storage { session.check_disk_header(&self.path)?; }
         if create_new {
             super::storage::atomic_create(&self.path, &file_bytes)?;
         } else {
             super::storage::atomic_write(&self.path, &file_bytes)?;
         }
+        self.disk_revision = Some(*blake3::hash(&file_bytes).as_bytes());
         if let Some(session) = &mut self.storage { session.mark_persisted()?; }
 
         // Clean up any legacy sidecar files if present
@@ -492,6 +526,10 @@ impl VaultManager {
 
     /// Revokes authorization for a paired trusted device by ID and persists changes to disk.
     pub fn revoke_trusted_device(&mut self, device_id: Uuid) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.revoke_trusted_device_inner(device_id))
+    }
+
+    fn revoke_trusted_device_inner(&mut self, device_id: Uuid) -> crate::Result<()> {
         let initial_len = self.data.settings.trusted_devices.len();
         self.data.settings.trusted_devices.retain(|d| d.id != device_id);
         if self.data.settings.trusted_devices.len() != initial_len {
@@ -502,6 +540,10 @@ impl VaultManager {
 
     /// Registers or updates a paired trusted device and persists changes to disk, avoiding duplicates.
     pub fn register_trusted_device(&mut self, device: TrustedDevice) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.register_trusted_device_inner(device))
+    }
+
+    fn register_trusted_device_inner(&mut self, device: TrustedDevice) -> crate::Result<()> {
         self.data.settings.trusted_devices.retain(|d| {
             d.id != device.id && !(d.name.eq_ignore_ascii_case(&device.name) && d.os == device.os)
         });

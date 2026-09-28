@@ -1,24 +1,24 @@
 # Updates and preservation of application data
 
-Updated for the user-requested 0.2.4 reliability rebuild, 2026-09-27. The version number, application identity and permanent Android signing identity are retained.
-
-The replacement includes the import, USB/recovery interface and password-validation fixes listed in the [0.2.4 changelog](../../CHANGELOG.md). If 0.2.4 is already installed, download and install the replacement package manually over it: automatic checks intentionally do not offer the same version as an upgrade. Uninstalling or clearing application data is not part of this procedure.
+Updated for 0.2.5 (in preparation). The application identity and permanent Android signing identity are retained. No 0.2.5 packages have been published by this source change.
 
 ## Checking and installing
 
-Automatic checking is opt-in. When enabled, one check runs after app startup, including on the vault-selection/login screen. It no longer depends on opening Settings. Airgap mode suppresses the automatic check. A manual check is an explicit network action. No platform installs an update without the user's action.
+Automatic checking is opt-in. When enabled, one check runs after app startup, including on the vault-selection/login screen. It no longer depends on opening Settings. Closed System mode blocks manual and automatic network checks in the native engine. Automatic checks wait for settings to be applied. No platform installs an update without the user's action.
 
-The official channel fetches `latest.json` from the YntraAB/yntra-vault GitHub release, with the GitHub releases API as a fallback. Checks use HTTPS, a timeout and a bounded response. Package downloads are also time/size bounded. Stable installations are not offered prereleases. Invalid versions, mixed release/package versions, malformed checksums and asset URLs outside the versioned official release repository are rejected. A missing compatible asset is displayed as unavailable, not installed successfully.
+The official channel fetches `latest.json` and `latest.json.sig` from the YntraAB/yntra-vault GitHub release. Exact manifest bytes and validity timestamps are authenticated with Ed25519 using the public key embedded in the application. Missing, invalid or expired signatures are rejected; there is no unsigned GitHub API fallback. Custom endpoints require the same pinned identity. Checks use HTTPS, a timeout and a bounded response. Package downloads are also time/size bounded. Stable installations are not offered prereleases. Invalid versions, mixed release/package versions, malformed checksums and asset URLs outside the versioned official release repository are rejected. A missing compatible asset is displayed as unavailable, not installed successfully.
 
 | Platform | Update behavior and verification |
 | --- | --- |
 | Android | Re-fetch official metadata, download and verify SHA-256, atomically stage a content-addressed APK in private cache, recheck its digest, application ID, installed signing certificates, release version name and strictly greater versionCode, then ask Android's package installer to perform the update. Android enforces APK signing. |
 | Windows portable | Re-fetch official metadata, verify SHA-256, stage/flush the complete file, retain the old executable and replace in place with rollback if replacement fails. Restart is required. The portable filename determines this mode; renamed binaries can fall back to the ordinary download flow. |
-| Windows installer, Linux, macOS | Open the corresponding official release asset in the browser. The application does not claim that download opening proves package verification or successful installation. Use the downloaded installer/package to update the existing installation. |
+| Windows installer, Linux, macOS | Re-fetch signed official metadata, download and verify SHA-256, atomically stage a content-addressed package, and open that local installer/package. Opening it is not proof of installation; complete the platform installer and restart. |
 
 Checks and installation preparation cannot overlap in the shared UI. Native preparation also has its own exclusive guard. On Android, permitting installation from this source may require a trip to system settings and a retry. Errors remain visible in the update dialog. “APK ready” means that the system installer was opened; cancellation does not mean the update was installed. The next app launch reads the version of the actual running build.
 
-**Security boundary:** SHA-256 delivered through the same HTTPS release channel is integrity checking, not independent publisher authentication. Desktop/CLI/portable packages still lack detached updater signatures with a pinned verification key. Compromise of the release account/channel remains a desktop update risk. A stronger future channel requires a separately protected signing key, signatures over versioned package metadata, a pinned verification key in clients and an explicit key-rotation policy. The Android installer additionally requires the installed application's signing identity; Android key rotation would need a deliberately reviewed compatibility change because the current check requires the same signer set.
+**Security boundary:** the independent update-signing key is held separately from build jobs. Signatures cover the complete versioned metadata, including package hashes and URLs, and expire after at most 90 days. Clients reject future-dated, expired, malformed or changed metadata. This limits replay but does not detect a compromised signing service, malicious source already approved for signing, or a compromised operating system. An expired latest manifest produces a visible error until a fresh signed release is available. A new key must be delivered in an application authenticated by the previously trusted key; remote metadata cannot replace the pin.
+
+Older 0.2.4 clients do not gain signature enforcement retroactively. Until the first signed release is published, 0.2.5 checks against the existing unsigned release fail closed. Android additionally requires the installed application's signing identity; that permanent identity is unchanged.
 
 ## What is retained
 
@@ -32,7 +32,7 @@ The following metadata is additionally stored as `ui-metadata-v1.json` in Tauri'
 
 At first launch after upgrading, the app migrates the existing four localStorage keys without renaming them. Later launches restore native metadata before React providers read settings or choose a vault; native values win over stale browser values. Writes are serialized, bounded, flushed and atomically replaced under an operating-system file lock. Per-key updates prevent a settings save from overwriting a different instance's vault list; simultaneous edits to the same key remain last-writer-wins. An unreadable or unsupported metadata file is reported instead of overwritten with an empty first-run state. Failed writes remain queued and produce a notification; the app's update action retries pending saves and proceeds only if they succeed.
 
-This is a non-secret metadata file protected by the user's application-data permissions, not a second vault. It excludes master passwords, keyfile paths, recovery shares and session keys. Vault names/paths and ordinary settings are visible to software that can already read the user's application data. The encrypted vault files stay in their existing locations. Linked-device identity remains in its existing native `device-id` file; trusted-device records remain in the vault. Browser caches and temporary discovery addresses are not part of the four-key metadata store.
+This is a non-secret metadata file protected by the user's application-data permissions, not a second vault. It excludes master passwords, keyfile paths, recovery shares and session keys. Vault names/paths and ordinary settings are visible to software that can already read the user's application data. The encrypted vault files stay in their existing locations. Linked-device UUID remains in its existing native `device-id` file and 0.2.5 adds a hardware/OS-wrapped per-installation signing key; trusted-device records remain in the vault. Browser caches and temporary discovery addresses are not part of the four-key metadata store.
 
 Moving a vault or changing a removable drive's letter still requires selecting its new location. An update cannot restore a deleted vault, missing USB drive, erased app data or lost operating-system profile. Native metadata is an additional preservation mechanism, not a vault backup. A WebView cache reset before the first migration cannot be repaired from metadata that has not yet been created.
 
@@ -42,7 +42,9 @@ Android updates require compatible application ID/signing identity; see [Android
 
 An in-place update does not uninstall the app, clear storage or move vaults. Older installations signed with historical temporary keys cannot be upgraded in place using the permanent key. The updater refuses that mismatch and never uninstalls automatically. Export and verify encrypted vault backups before any deliberate migration. Android cloud backup/device transfer remains disabled for vault privacy; this is separate from preserving data during an in-place package update.
 
-## Verification and remaining device work
+## Historical verification and remaining device work
+
+The counts and release checks below describe 0.2.4, not 0.2.5. New source security behavior and validation limits are described in [0.2.5 security notes](SECURITY-0.2.5.md).
 
 Regression coverage includes WebView-to-native migration, restoration with empty/unavailable browser storage, exact vault-path retention, serialized writes, deleted-recent-entry retention, failed-read/write handling, exclusion of unlock factors, damaged/newer metadata preservation, startup checks, overlapping operations, installer errors/retry, missing checksums, official asset/version validation, immutable APK staging, and Android release identity checks. The frontend production build and Rust workspace tests are separate from a real package upgrade.
 

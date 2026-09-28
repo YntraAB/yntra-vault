@@ -499,6 +499,9 @@ struct ChangePasswordArgs {
     /// Path to new keyfile to bind
     #[arg(long)]
     new_keyfile: Option<PathBuf>,
+    /// Required when recovery is active: save the replacement kit to this directory
+    #[arg(long)]
+    recovery_output_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -576,6 +579,13 @@ async fn run(cli: Cli) -> Result<()> {
     };
 
     cleanup_old_binary_if_present();
+
+    if matches!(command, Commands::Sync(_)) {
+        let directory = dirs::config_local_dir().ok_or_else(|| VaultError::InvalidState("Local configuration directory unavailable".into()))?.join("yntra-vault-cli");
+        std::fs::create_dir_all(&directory)?;
+        yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&directory.join("device-id"))?;
+        yntra_vault_core::services::sync::pairing::initialize_local_signing_identity(&directory.join("device-signing-key"))?;
+    }
 
     if !matches!(command, Commands::Update(_) | Commands::Completions(_) | Commands::NativeHost(_) | Commands::GitCredential(_)) {
         maybe_print_update_tip().await;
@@ -1107,7 +1117,7 @@ async fn handle_totp(
         manager.get_entry(entry_id)?
     };
 
-    let totp_secret = entry.totp_secret.ok_or_else(|| {
+    let totp_secret = entry.totp_secret.as_deref().ok_or_else(|| {
         VaultError::InvalidFormat(format!("Entry '{}' does not have TOTP configured", entry.title))
     })?;
 
@@ -1460,7 +1470,7 @@ async fn handle_autotype(
     password: Option<String>,
     keyfile: Option<&Path>,
 ) -> Result<()> {
-    let entry = if let Some(IpcResponse::GetEntry(e)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await {
+    let mut entry = if let Some(IpcResponse::GetEntry(e)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await {
         e
     } else {
         let manager = open_vault(vault_path, password, keyfile)?;
@@ -1478,8 +1488,8 @@ async fn handle_autotype(
     println!();
 
     run_smart_autotype(
-        entry.username,
-        entry.password,
+        std::mem::take(&mut entry.username),
+        std::mem::take(&mut entry.password),
     )?;
 
     println!("{} Smart autotype executed!", "✓".green().bold());
@@ -1494,7 +1504,16 @@ fn handle_change_password(
 ) -> Result<()> {
     let mut manager = open_vault(vault_path, password.clone(), keyfile)?;
 
-    let current_pass = acquire_password(password)?;
+    let current_pass = Zeroizing::new(acquire_password(password)?);
+
+    // Reserve secure files before mutating the vault, so bad destinations fail early.
+    let mut share_files = Vec::new();
+    if manager.protection_info().recovery_enabled {
+        let directory = args.recovery_output_dir.as_ref().ok_or_else(|| VaultError::InvalidFormat(
+            "Recovery is active. Supply --recovery-output-dir to save replacement shares before changing the password.".into()))?;
+        std::fs::create_dir_all(directory)?;
+        for _ in 0..3 { share_files.push(tempfile::NamedTempFile::new_in(directory)?); }
+    }
 
     let new_pass = match args.new_password {
         Some(ref p) => p.clone(),
@@ -1510,10 +1529,27 @@ fn handle_change_password(
         }
     };
 
-    if keyfile.is_some() || args.new_keyfile.is_some() {
-        manager.change_master_password_with_keyfiles(&current_pass, keyfile, &new_pass, args.new_keyfile.as_deref())?;
+    let new_pass = Zeroizing::new(new_pass);
+    let kit = if keyfile.is_some() || args.new_keyfile.is_some() {
+        manager.change_master_password_with_keyfiles(&current_pass, keyfile, &new_pass, args.new_keyfile.as_deref())?
     } else {
-        manager.change_master_password(&current_pass, &new_pass)?;
+        manager.change_master_password(&current_pass, &new_pass)?
+    };
+    if let Some(kit) = kit {
+        let save = || -> Result<()> {
+            let directory = args.recovery_output_dir.as_ref().ok_or_else(|| VaultError::InvalidState("Recovery destination unavailable".into()))?;
+            for (share, mut file) in kit.shares.iter().zip(share_files) {
+                writeln!(file,"Yntra recovery v2 — {} — share {}\n\n{}\n\n{}",kit.vault_name,share.share_index,share.share_data,kit.document_markdown)?;
+                file.as_file().sync_all()?;
+                file.persist_noclobber(directory.join(format!("recovery-{}-share-{}.txt", kit.verification_hash, share.share_index)))
+                    .map_err(|e| VaultError::IoError(e.error))?;
+            }
+            Ok(())
+        };
+        if let Err(error) = save() {
+            return Err(VaultError::InvalidState(format!("Password changed, but replacement recovery files could not all be saved: {error}. Unlock with the new password and run recovery generate to replace the incomplete kit.")));
+        }
+        println!("Replacement recovery files saved. Store shares separately; old kits work only with old backups.");
     }
 
     println!("{} Master password changed successfully!", "✓".green().bold());

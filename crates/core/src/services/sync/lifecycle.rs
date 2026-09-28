@@ -36,17 +36,25 @@ impl Drop for OperationLease {
 
 /// Short socket waits preserve partially transferred frames while allowing
 /// cancellation on Windows, where shutdown of a cloned socket need not wake recv.
-pub struct CancellableStream { stream: TcpStream, cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant> }
+pub struct CancellableStream { stream: TcpStream, cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>, network_generation: u64 }
 impl CancellableStream {
     pub fn new(stream: TcpStream, cancel: Option<Arc<AtomicBool>>) -> io::Result<Self> {
+        let generation = crate::services::network::generation_token()
+            .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
+        Self::new_with_generation(stream, cancel, generation)
+    }
+    pub fn new_with_generation(stream: TcpStream, cancel: Option<Arc<AtomicBool>>, network_generation: u64) -> io::Result<Self> {
+        crate::services::network::ensure_generation(network_generation)
+            .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
         stream.set_read_timeout(Some(Duration::from_millis(200)))?;
         stream.set_write_timeout(Some(Duration::from_millis(200)))?;
-        Ok(Self { stream, cancel, deadline: None })
+        Ok(Self { stream, cancel, deadline: Some(Instant::now() + Duration::from_secs(90)), network_generation })
     }
     pub fn set_deadline(&mut self, deadline: Instant) { self.deadline = Some(deadline); }
     fn io<T>(&mut self, mut operation: impl FnMut(&mut TcpStream) -> io::Result<T>) -> io::Result<T> {
         let start = Instant::now();
         loop {
+            crate::services::network::ensure_generation(self.network_generation).map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied,e.to_string()))?;
             if self.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "Pairing session expired"));
             }
@@ -136,3 +144,5 @@ mod tests {
         worker.join().unwrap();
     }
 }
+
+

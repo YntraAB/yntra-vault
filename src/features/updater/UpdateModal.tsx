@@ -25,9 +25,8 @@ export function UpdateModal({
 
   if (!isOpen || !updateInfo) return null;
 
-  const nativeInstall = ['android', 'windows-portable'].includes(updateInfo.target_platform);
   const available = updateInfo.has_update && Boolean(updateInfo.download_url)
-    && (!nativeInstall || /^[a-fA-F0-9]{64}$/.test(updateInfo.sha256 || ''));
+    && /^[a-fA-F0-9]{64}$/.test(updateInfo.sha256 || '');
 
   const pubDate = updateInfo.pub_date
     ? new Date(updateInfo.pub_date).toLocaleDateString(undefined, {
@@ -125,8 +124,7 @@ export function UpdateModal({
           <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)] mb-5 bg-[var(--bg-base)]/50 p-2 rounded-md border border-[var(--border)]/50">
             <Info className="w-3.5 h-3.5 shrink-0" />
             <span>
-              {!available ? t('updater.platform_unavailable') : nativeInstall
-                ? t('updater.checksum_before_install') : t('updater.browser_download')}
+              {!available ? t('updater.platform_unavailable') : t('updater.checksum_before_install')}
             </span>
           </div>
 
@@ -156,7 +154,7 @@ export function UpdateModal({
               ) : (
                 <>
                   <Download className="w-3.5 h-3.5" />
-                  <span>{nativeInstall ? t('updater.download_install') : t('updater.download_button')}</span>
+                  <span>{t('updater.download_install')}</span>
                 </>
               )}
             </button>

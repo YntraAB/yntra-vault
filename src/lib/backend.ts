@@ -426,7 +426,7 @@ export interface YntraVaultBackend {
 
   // Security
   securityAudit(): Promise<SecurityAudit>;
-  changeMasterPassword(current: string, newPassword: string, currentKeyFile?: string, newKeyFile?: string): Promise<void>;
+  changeMasterPassword(current: string, newPassword: string, currentKeyFile?: string, newKeyFile?: string): Promise<EmergencyKit | null>;
 
   // Tags
   getTags(): Promise<Tag[]>;
@@ -448,6 +448,7 @@ export interface YntraVaultBackend {
   isAutostartEnabled(): Promise<boolean>;
   getFavicon(domain: string): Promise<string | null>;
   setExternalFaviconsEnabled(enabled: boolean): Promise<void>;
+  setNetworkAccess(enabled: boolean): Promise<void>;
   isExternalFaviconsEnabled(): Promise<boolean>;
   setMinimizeToTray(enabled: boolean): Promise<void>;
   setWindowCaptureProtection(enable: boolean): Promise<void>;
@@ -483,7 +484,7 @@ export interface YntraVaultBackend {
   generateEmergencyKit(masterPassword: string, keyFilePath?: string): Promise<EmergencyKit>;
   listUsbStorageDevices(): Promise<{id:string;name:string}[]>;
   getLocalProtection(): Promise<{protected:boolean;usb_bound:boolean;recovery_enabled:boolean}>;
-  setUsbBinding(password:string,keyFilePath?:string,usbId?:string):Promise<void>;
+  setUsbBinding(password:string,keyFilePath?:string,usbId?:string):Promise<EmergencyKit>;
   revokeRecovery(password:string,keyFilePath?:string):Promise<void>;
   recoverVault(path:string,shareA:string,shareB:string,newPassword:string):Promise<VaultInfo>;
   createProtectedVault(name:string,password:string,path:string,usbId:string,keyFilePath?:string):Promise<{info:VaultInfo;kit:EmergencyKit}>;
@@ -527,7 +528,7 @@ export interface YntraVaultBackend {
   copyEntryTotp(entryId: string, clearAfterSecs?: number): Promise<void>;
   createVaultBytes(name: string, passwordBytes: Uint8Array | number[], path: string, keyFilePath?: string): Promise<VaultInfo>;
   openVaultBytes(path: string, passwordBytes: Uint8Array | number[], keyFilePath?: string): Promise<VaultInfo>;
-  changeMasterPasswordBytes(currentBytes: Uint8Array | number[], newPasswordBytes: Uint8Array | number[], currentKeyFile?: string, newKeyFile?: string): Promise<void>;
+  changeMasterPasswordBytes(currentBytes: Uint8Array | number[], newPasswordBytes: Uint8Array | number[], currentKeyFile?: string, newKeyFile?: string): Promise<EmergencyKit | null>;
   autotypeEntryPassword(entryId: string, charDelayMs?: number, settleDelayMs?: number): Promise<void>;
   autotypeEntrySmart(entryId: string, launchBrowser?: boolean, charDelayMs?: number, fieldDelayMs?: number): Promise<void>;
   verifyBiometric2Fa(prompt?: string): Promise<void>;
@@ -553,6 +554,7 @@ export interface YntraVaultBackend {
   checkAppUpdate(customEndpoint?: string): Promise<CheckUpdateResult>;
   downloadAndInstallApk(apkUrl: string, expectedSha256?: string): Promise<string>;
   installPortableUpdate(url: string, expectedSha256?: string): Promise<void>;
+  installDesktopUpdate(url: string, expectedSha256: string): Promise<void>;
   getAppVersion(): Promise<string>;
 }
 

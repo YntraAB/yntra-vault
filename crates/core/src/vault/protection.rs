@@ -76,7 +76,7 @@ impl VaultManager {
         password: &str,
         keyfile: Option<&[u8]>,
         usb_id: Option<&str>,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<super::emergency::EmergencyKit> {
         if !self.verify_master_password_with_keyfile(password, keyfile)? {
             return Err(VaultError::InvalidPassword);
         }
@@ -84,6 +84,7 @@ impl VaultManager {
         let previous = self.storage.clone();
         let old_keys = self.keys.clone();
         let old_bio = self.biometric.clone();
+        let old_audit = self.data.settings.emergency_kit_audit.clone();
         let result = (|| {
             self.ensure_local_protection(password, keyfile)?;
             let current = self.storage.as_ref().ok_or(VaultError::VaultLocked)?;
@@ -94,15 +95,17 @@ impl VaultManager {
             }
             let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
             let mut session = StorageSession::new(password, keyfile, serial.as_deref(), keys)?;
-            // Preserve the same recovery secret while binding its new slot to the new replica header.
-            session.preserve_recovery(current, keys)?;
+            session.disk_header = current.disk_header;
             self.storage = Some(session);
-            self.save()
+            let kit = self.rotate_emergency_kit()?;
+            self.save()?;
+            Ok(kit)
         })();
         if result.is_err() {
             self.storage = previous;
             self.keys = old_keys;
             self.biometric = old_bio;
+            self.data.settings.emergency_kit_audit = old_audit;
         }
         result
     }
@@ -119,9 +122,7 @@ impl VaultManager {
             salt: self.salt,
             kdf_params: Default::default(),
         };
-        let plain = zeroize::Zeroizing::new(
-            rmp_serde::to_vec(&data).map_err(|e| VaultError::SerializationError(e.to_string()))?,
-        );
+        let plain = super::storage::serialize_payload(&data)?;
         let blob =
             crate::crypto::encrypt_vault_with_aad(&plain, &keys.vault_key, &header.aad_bytes()?)?;
         let mut payload = blob.nonce;
@@ -145,6 +146,7 @@ impl VaultManager {
     ) -> crate::Result<Self> {
         let storage = StorageSession::new(password, None, None, &keys)?;
         let mut manager = Self {
+            session_id: uuid::Uuid::new_v4(),
             path: path.to_owned(),
             data,
             keys: Some(keys),
@@ -152,6 +154,7 @@ impl VaultManager {
             biometric: None,
             hardware2fa: None,
             storage: Some(storage),
+            disk_revision: None,
             search_index: Default::default(),
         };
         manager.data.settings.emergency_kit_audit = None;

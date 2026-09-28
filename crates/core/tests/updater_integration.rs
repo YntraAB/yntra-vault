@@ -97,6 +97,7 @@ fn test_manifest_platform_asset_resolution() {
         "windows-x86_64".to_string(),
         PlatformUpdate {
             signature: "sig-win-setup".to_string(),
+            sha256: "a".repeat(64),
             url: "https://github.com/YntraAB/yntra-vault/releases/download/v0.2.3/Yntra.Vault_0.2.3_x64-setup.exe".to_string(),
         },
     );
@@ -104,6 +105,7 @@ fn test_manifest_platform_asset_resolution() {
         "linux-x86_64".to_string(),
         PlatformUpdate {
             signature: "sig-linux-appimage".to_string(),
+            sha256: "b".repeat(64),
             url: "https://github.com/YntraAB/yntra-vault/releases/download/v0.2.3/Yntra.Vault_0.2.3_amd64.AppImage".to_string(),
         },
     );

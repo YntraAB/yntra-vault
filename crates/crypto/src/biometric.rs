@@ -74,7 +74,7 @@ mod win_hello {
     }
 
     pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>) -> crate::Result<()> {
-        if cfg!(test) || std::env::var("YNTRA_TEST_MODE").is_ok() {
+        if cfg!(test) {
             return Ok(());
         }
         let prompt_str = prompt.to_string();
@@ -145,12 +145,14 @@ pub fn request_user_consent_with_hwnd(prompt: &str, hwnd_override: Option<isize>
     {
         let _ = prompt;
         let _ = hwnd_override;
-        if cfg!(test) || std::env::var("YNTRA_TEST_MODE").is_ok() {
+        if cfg!(test) {
             return Ok(());
         }
         #[cfg(target_os = "macos")]
         {
-            Ok(())
+            Err(VaultError::BiometricNotAvailable(
+                "macOS biometric verification is unavailable; unlock with the master password".into(),
+            ))
         }
         #[cfg(target_os = "android")]
         {
@@ -189,8 +191,8 @@ pub fn check_biometric_availability() -> BiometricInfo {
     #[cfg(target_os = "macos")]
     {
         BiometricInfo {
-            available: true,
-            biometric_type: "Touch ID / Apple Watch / Face ID".to_string(),
+            available: false,
+            biometric_type: "macOS biometric verification is unavailable; use the master password".to_string(),
         }
     }
 
@@ -266,7 +268,7 @@ pub fn unlock_from_embedded_header_with_hwnd(
     request_user_consent_with_hwnd("Unlock Yntra Vault", hwnd_override)?;
 
     // 2. Unwrap BIO_KEK via Hardware TPM 2.0 / Keychain / DPAPI
-    let bio_kek_raw = crate::tpm::hardware_unwrap_key(&bio_header.wrapped_kek)?;
+    let bio_kek_raw = Zeroizing::new(crate::tpm::hardware_unwrap_key(&bio_header.wrapped_kek)?);
     if bio_kek_raw.len() != 32 {
         return Err(VaultError::BiometricAuthFailed(
             "Invalid biometric key length retrieved from hardware storage".into(),
@@ -292,7 +294,7 @@ pub fn unlock_from_embedded_header_with_hwnd(
     );
 
     // 3. Page-lock and reconstruct SubKeys inside ProtectedSecret buffer
-    let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice());
+    let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice())?;
     let subkeys = SubKeys::from_bytes(locked_subkeys.as_slice())?;
 
     Ok(subkeys)

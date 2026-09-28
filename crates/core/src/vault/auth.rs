@@ -43,7 +43,7 @@ impl VaultManager {
             .ok_or_else(|| VaultError::BiometricNotAvailable("No biometric data in vault file".into()))?;
         let aad = vault_file.header.aad_bytes()?;
         let subkeys = crate::crypto::biometric::unlock_from_embedded_header_with_hwnd(bio_header, &aad, hwnd_override)?;
-        Self::from_decrypted_vault_file(path, vault_file, subkeys)
+        Self::from_decrypted_vault_file(path, vault_file, subkeys, *blake3::hash(&file_bytes).as_bytes())
     }
 
     /// Enroll biometrics for the current open vault (Embedded in single .vdb file).
@@ -137,7 +137,7 @@ impl VaultManager {
             derive_subkeys(&master_key)?
         };
 
-        Self::from_decrypted_vault_file(path, vault_file, subkeys)
+        Self::from_decrypted_vault_file(path, vault_file, subkeys, *blake3::hash(&file_bytes).as_bytes())
     }
 
     /// Enroll Hardware 2FA for the current open vault.

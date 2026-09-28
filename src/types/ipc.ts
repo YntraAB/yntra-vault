@@ -438,7 +438,7 @@ export interface IpcCommands {
   save_ui_metadata: { args: { values: Record<string, string>; initialize?: boolean }; return: void };
   list_usb_storage_devices: {args:undefined;return:{id:string;name:string}[]};
   get_local_protection: {args:undefined;return:{protected:boolean;usb_bound:boolean;recovery_enabled:boolean}};
-  set_usb_binding: {args:{password:string;keyFilePath?:string;usbId?:string};return:void};
+  set_usb_binding: {args:{password:string;keyFilePath?:string;usbId?:string};return:EmergencyKit};
   revoke_recovery: {args:{password:string;keyFilePath?:string};return:void};
   recover_vault: {args:{path:string;shareA:string;shareB:string;newPassword:string};return:VaultInfo};
   create_protected_vault: {args:{name:string;password:string;path:string;usbId:string;keyFilePath?:string};return:{info:VaultInfo;kit:EmergencyKit}};
@@ -680,7 +680,7 @@ export interface IpcCommands {
   };
   change_master_password: {
     args: { current: string; newPassword: string; currentKeyFile?: string | null; newKeyFile?: string | null };
-    return: void;
+    return: EmergencyKit | null;
   };
   generate_emergency_kit: {
     args: { masterPassword: string; keyFilePath?: string };
@@ -735,6 +735,10 @@ export interface IpcCommands {
     return: string | null;
   };
   set_external_favicons_enabled: {
+    args: { enabled: boolean };
+    return: void;
+  };
+  set_network_access: {
     args: { enabled: boolean };
     return: void;
   };
@@ -941,7 +945,7 @@ export interface IpcCommands {
   };
   change_master_password_bytes: {
     args: { currentBytes: number[]; newPasswordBytes: number[]; currentKeyFile?: string | null; newKeyFile?: string | null };
-    return: void;
+    return: EmergencyKit | null;
   };
   autotype_entry_password: {
     args: { entryId: string; charDelayMs?: number | null; settleDelayMs?: number | null };
@@ -977,6 +981,10 @@ export interface IpcCommands {
   };
   install_portable_update: {
     args: { url: string; expectedSha256?: string | null };
+    return: void;
+  };
+  install_desktop_update: {
+    args: { url: string; expectedSha256: string };
     return: void;
   };
   get_app_version: {

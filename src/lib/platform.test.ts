@@ -12,6 +12,9 @@ describe('runtime capabilities', () => {
     expect(capabilitiesFor('windows').usbBinding).toBe(true);
     expect(capabilitiesFor('linux').usbBinding).toBe(false);
     expect(capabilitiesFor('android').captureProtection).toBe(true);
+    expect(capabilitiesFor('windows').systemLock).toBe(true);
+    expect(capabilitiesFor('linux').systemLock).toBe(false);
+    expect(capabilitiesFor('macos').systemLock).toBe(false);
   });
   it('propagates a native clipboard failure without falling back to an unprotected copy', async () => {
     const original = Object.getOwnPropertyDescriptor(globalThis, 'window');

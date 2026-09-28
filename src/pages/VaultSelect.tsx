@@ -74,6 +74,51 @@ export default function VaultSelect() {
     initVaults();
   }, [manualSelect, navigate, setCurrentVault, setIsLocked]);
 
+  // A removable vault can become available again while this page is already open.
+  // Re-check only entries that were missing so reconnecting a USB drive does not
+  // require a browser refresh and does not add work for normal vaults.
+  useEffect(() => {
+    if (!isTauri() || missingVaults.size === 0 || recentVaults.length === 0) return;
+
+    let stopped = false;
+    const recheckMissingVaults = async () => {
+      try {
+        const backend = await getBackend();
+        const candidates = recentVaults.filter((vault) => missingVaults.has(vault.id));
+        const available = new Set<string>();
+
+        await Promise.all(
+          candidates.map(async (vault) => {
+            try {
+              if (await backend.checkVaultFileExists(vault.path)) {
+                available.add(vault.id);
+              }
+            } catch {
+              // The device may still be mounting; the next interval retries.
+            }
+          }),
+        );
+
+        if (!stopped && available.size > 0) {
+          setMissingVaults((current) => {
+            const next = new Set(current);
+            for (const id of available) next.delete(id);
+            return next;
+          });
+        }
+      } catch {
+        // Keep the missing state until the backend is available again.
+      }
+    };
+
+    void recheckMissingVaults();
+    const timer = window.setInterval(() => void recheckMissingVaults(), 1000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [missingVaults, recentVaults]);
+
   const handleSelect = (vault: Vault) => {
     setCurrentVault(vault);
     setIsLocked(true);
@@ -310,6 +355,5 @@ export default function VaultSelect() {
     </motion.div>
   );
 }
-
 
 

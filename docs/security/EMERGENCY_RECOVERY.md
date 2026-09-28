@@ -1,6 +1,6 @@
 # Emergency recovery specification: v2 and legacy compatibility
 
-Implementation: 0.2.4. Source: [emergency.rs](../../crates/core/src/vault/emergency.rs), [storage.rs](../../crates/core/src/vault/storage.rs), and [sharing.rs](../../crates/crypto/src/sharing.rs). For user steps and limits, see [USB binding and recovery](USB-RECOVERY.md).
+Implementation: 0.2.5. Source: [emergency.rs](../../crates/core/src/vault/emergency.rs), [storage.rs](../../crates/core/src/vault/storage.rs), and [sharing.rs](../../crates/crypto/src/sharing.rs). For user steps and limits, see [USB binding and recovery](USB-RECOVERY.md).
 
 ## What recovery restores
 
@@ -27,7 +27,8 @@ The generator reconstructs a share pair and compares it with the generated secre
 - Generation and revocation require verification of the current password and any selected keyfile. Invalid authentication aborts without mutating the kit.
 - First migration installs the authenticated `YNS2` local envelope, clears biometric enrollment and requires device re-pairing. Hardware-key enrollment and this recovery/USB mode cannot currently be combined.
 - Each replacement kit has a fresh generation UUID and rotates local storage protection. Revocation likewise changes local protection. Old shares stop opening the updated file but may still open old backups; offline snapshots cannot be revoked retroactively.
-- Ordinary password/USB changes preserve the active v2 kit. State transitions roll back in memory if saving fails; stale sessions cannot overwrite a newer recovery header.
+- Password/keyfile changes replace any active v2 kit; changing USB binding also replaces the kit. Save the replacement shares returned by the successful operation. This rotates both the local encryption key and recovery secret: an old file plus its old password must not unlock newly saved data through either old key. Old backups retain their original credentials and recovery kit.
+- State transitions roll back in memory if saving fails. A stable adjacent `.vdb.lock` sidecar serializes cooperating writers; a whole-file fingerprint rejects stale sessions before replacement. The sidecar contains no vault data or keys. External malicious rollback and non-cooperating file writers are outside this lock guarantee.
 - Recovery audit history lives encrypted in the vault. Its active `verification_hash`/fingerprint field contains the v2 kit UUID, not a hash of the master password. Local audit/wrapping records are omitted from sync snapshots.
 - GUI setup shows one share at a time and requires two distinct saved-share confirmations. Native export writes a selected share to a separate document and refuses existing content. Never keep all shares together with the vault or put real shares in documentation/tests/logs.
 

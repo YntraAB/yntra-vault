@@ -78,7 +78,7 @@ export function SecurityTab({
       </SettingRow>)}
 
       {/* System Lock & Focus Loss Auto-Lock */}
-      {capabilities.desktop && (<SettingRow
+      {capabilities.systemLock && (<SettingRow
         label={t('settings.lock_on_system_lock_label')}
         description={t('settings.lock_on_system_lock_desc')}
         tooltip={t('settings.tooltip_aggressive_autolock')}
@@ -147,7 +147,7 @@ export function SecurityTab({
         <div className="flex flex-wrap gap-2">
           {hwActive ? (
             <>
-              <button type="button" onClick={() => onOpenHwModal('enroll')} className="h-8 rounded-[3px] border border-[var(--border)] px-3 text-[12px]">
+              <button type="button" onClick={() => onOpenHwModal('enroll')} className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer">
                 {language === 'sv' ? 'Registrera igen' : 'Re-enroll'}
               </button>
               <button

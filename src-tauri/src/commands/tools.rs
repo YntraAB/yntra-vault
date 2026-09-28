@@ -13,12 +13,12 @@ use super::AppState;
 
 #[tauri::command]
 pub async fn generate_totp(mut secret: String) -> Result<TotpCode, String> {
-    let config = TotpConfig {
-        secret: secret.clone(),
+    let mut config = TotpConfig {
+        secret: std::mem::take(&mut secret),
         ..Default::default()
     };
     let res = totp::generate_totp(&config).map_err(|e| e.to_string());
-    secret.zeroize();
+    config.secret.zeroize();
     res
 }
 
@@ -321,6 +321,7 @@ pub async fn autotype(
     char_delay_ms: Option<u64>,
     settle_delay_ms: Option<u64>,
 ) -> Result<(), String> {
+    yntra_vault_core::services::autotype::begin_autotype();
     let secret = Zeroizing::new(text);
     let char_delay = char_delay_ms.unwrap_or(15);
     let settle_delay = settle_delay_ms.unwrap_or(0);
@@ -347,6 +348,7 @@ pub async fn run_smart_autotype(
     char_delay_ms: u64,
     field_delay_ms: u64,
 ) -> Result<(), String> {
+    yntra_vault_core::services::autotype::begin_autotype();
     yntra_vault_core::services::autotype::run_smart_autotype_with_delays(
         username,
         password,
@@ -374,8 +376,13 @@ pub async fn is_autostart_enabled() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn get_favicon(domain: String) -> Result<Option<String>, String> {
-    yntra_vault_core::services::favicon::get_favicon(&domain)
+pub async fn get_favicon(domain: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let generation = {
+        let vault = state.vault.lock().map_err(|_| "Vault state unavailable")?;
+        if vault.is_none() { return Ok(None); }
+        yntra_vault_core::services::favicon::cache_generation()
+    };
+    yntra_vault_core::services::favicon::get_favicon_for_session(&domain, generation)
         .await
         .map_err(|e| e.to_string())
 }

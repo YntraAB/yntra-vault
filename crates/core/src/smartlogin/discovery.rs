@@ -88,6 +88,9 @@ const AUTH_DOMAINS: &[(&str, &str)] = &[
     ("amazon.com", "www.amazon.com"),
     ("reddit.com", "www.reddit.com"),
     ("steampowered.com", "steamcommunity.com"),
+    ("store.steampowered.com", "steamcommunity.com"),
+    ("steampowered.com", "store.steampowered.com"),
+    ("steamcommunity.com", "store.steampowered.com"),
     ("steamcommunity.com", "steampowered.com"),
 ];
 
@@ -401,41 +404,24 @@ fn score_login_button_as_nav(button: &ButtonInfo) -> f64 {
     score.clamp(0.0, 1.0)
 }
 
-/// Check if a target URL is an allowed auth domain for the given entry URL.
-/// Supports known auth domain pairs and same-base-domain navigation.
-pub fn is_allowed_auth_domain(entry_url: &str, target_url: &str) -> bool {
-    if domains_match(entry_url, target_url) {
-        return true;
-    }
-
-    let entry_domain = match extract_domain(entry_url) {
-        Some(d) => d,
-        None => return false,
-    };
-    let target_domain = match extract_domain(target_url) {
-        Some(d) => d,
-        None => return false,
-    };
-
-    // Check known auth domain mappings with strict boundary checks
-    for (service, auth) in AUTH_DOMAINS {
-        let service_matches = entry_domain == *service || entry_domain.ends_with(&format!(".{}", service));
-        let auth_matches = target_domain == *auth || target_domain.ends_with(&format!(".{}", auth));
-        if service_matches && auth_matches {
-            return true;
-        }
-    }
-
-    // Allow same base domain (e.g., auth.example.com → example.com)
-    let entry_base = base_domain(&entry_domain);
-    let target_base = base_domain(&target_domain);
-    if !entry_base.is_empty() && entry_base == target_base {
-        return true;
-    }
-
-    false
+/// Parse the credential security boundary once, rejecting ambiguous authorities.
+/// Exact origins avoid public/private-suffix tenant confusion without heuristics.
+pub fn credential_url(value: &str) -> Option<url::Url> {
+    if value.contains('\\') || value.chars().any(|c| c.is_control()) { return None; }
+    let parsed = url::Url::parse(&normalize_url(value)).ok()?;
+    let local_http = parsed.scheme() == "http" && matches!(parsed.host_str(),Some("localhost"|"127.0.0.1"|"[::1]"));
+    if (parsed.scheme() != "https" && !local_http) || parsed.host_str().is_none()
+        || !parsed.username().is_empty() || parsed.password().is_some() { return None; }
+    Some(parsed)
 }
 
+pub fn is_allowed_auth_domain(entry_url: &str, target_url: &str) -> bool {
+    let (Some(entry), Some(target)) = (credential_url(entry_url),credential_url(target_url)) else { return false; };
+    if entry.origin() == target.origin() { return true; }
+    // SSO exceptions are exact hostname pairs on the standard HTTPS port only.
+    if entry.port_or_known_default() != Some(443) || target.port_or_known_default() != Some(443) { return false; }
+    AUTH_DOMAINS.iter().any(|(service,auth)| entry.host_str() == Some(*service) && target.host_str() == Some(*auth))
+}
 /// Get login probe URLs to try for a given entry URL.
 /// For known services, returns the direct login URL.
 /// For generic sites, tries common login paths on the same domain.
@@ -475,105 +461,17 @@ pub fn login_target_allowed(entry_url: &str, target_url: &str) -> bool {
     })
 }
 
-/// Extract the domain from a URL for comparison.
-pub fn extract_domain(url: &str) -> Option<String> {
-    let url = url.trim();
-    let without_proto = if let Some(pos) = url.find("://") {
-        &url[pos + 3..]
-    } else {
-        url
-    };
-    let domain = without_proto.split('/').next().unwrap_or(without_proto);
-    let domain = domain.split(':').next().unwrap_or(domain);
-    let domain = domain.strip_prefix("www.").unwrap_or(domain);
-
-    if domain.is_empty() {
-        None
-    } else {
-        Some(domain.to_lowercase())
-    }
+/// URL-parser host extraction; this function does not establish credential trust.
+pub fn extract_domain(value: &str) -> Option<String> {
+    credential_url(value)?.host_str().map(str::to_owned)
 }
 
-/// Known multi-part second-level domain suffixes (e.g. .co.uk, .com.au)
-const MULTIPART_SUFFIXES: &[&str] = &[
-    "co.uk", "gov.uk", "ac.uk", "org.uk", "net.uk", "ltd.uk", "me.uk", "plc.uk",
-    "com.au", "net.au", "org.au", "edu.au", "gov.au", "asn.au", "id.au",
-    "co.jp", "ne.jp", "or.jp", "go.jp", "ac.jp", "ed.jp", "ad.jp", "gr.jp",
-    "com.br", "net.br", "org.br", "gov.br", "edu.br",
-    "co.nz", "net.nz", "org.nz", "govt.nz", "ac.nz", "school.nz",
-    "co.za", "net.za", "org.za", "gov.za", "ac.za",
-    "com.mx", "org.mx", "edu.mx", "gob.mx", "net.mx",
-    "com.sg", "net.sg", "org.sg", "gov.sg", "edu.sg", "per.sg",
-    "com.ar", "net.ar", "org.ar", "gob.ar", "edu.ar",
-    "co.in", "net.in", "org.in", "gen.in", "firm.in", "ind.in", "ac.in", "edu.in", "res.in", "gov.in",
-    "co.kr", "ne.kr", "or.kr", "re.kr", "pe.kr", "go.kr", "mil.kr", "ac.kr",
-    "com.tw", "org.tw", "net.tw", "edu.tw", "gov.tw", "idv.tw",
-    "com.hk", "org.hk", "net.hk", "edu.hk", "gov.hk", "idv.hk",
-    "com.tr", "org.tr", "net.tr", "gov.tr", "edu.tr",
-    "com.pl", "org.pl", "net.pl",
-    "com.ru", "net.ru", "org.ru",
-    "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
-    "co.id", "web.id", "or.id", "ac.id", "go.id", "sch.id",
-    "com.ph", "net.ph", "org.ph", "gov.ph", "edu.ph",
-    "com.my", "net.my", "org.my", "gov.my", "edu.my",
-    "co.th", "ac.th", "go.th", "net.th", "or.th",
-    "com.vn", "net.vn", "org.vn", "edu.vn", "gov.vn",
-    "com.ua", "net.ua", "org.ua", "gov.ua", "edu.ua",
-    "com.co", "co.co", "net.co", "nom.co",
-    "com.pe", "net.pe", "org.pe", "nom.pe",
-    "com.ve", "net.ve", "org.ve",
-    "com.ng", "org.ng", "gov.ng", "edu.ng", "net.ng",
-    "com.eg", "edu.eg", "eun.eg", "gov.eg", "net.eg", "org.eg",
-    "com.sa", "net.sa", "org.sa", "gov.sa", "med.sa", "edu.sa",
-    "co.il", "org.il", "net.il", "ac.il", "gov.il", "muni.il",
-];
-
-/// Extract the registrable base domain (eTLD+1), handling multi-part country-code TLDs.
-fn base_domain(domain: &str) -> String {
-    let parts: Vec<&str> = domain.split('.').collect();
-    if parts.len() <= 1 {
-        return domain.to_string();
-    }
-
-    // Check if domain ends with a known multi-part suffix
-    if parts.len() >= 3 {
-        let last_two = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
-        let is_known_multipart = MULTIPART_SUFFIXES.iter().any(|&s| s.eq_ignore_ascii_case(&last_two));
-        
-        // Also check heuristic: 2-letter ccTLD with 2-3 letter generic second-level
-        let is_heuristic_cctld = parts[parts.len() - 1].len() == 2
-            && (parts[parts.len() - 2].len() <= 3 || parts[parts.len() - 2] == "govt" || parts[parts.len() - 2] == "school");
-
-        if is_known_multipart || is_heuristic_cctld {
-            return parts[parts.len() - 3..].join(".");
-        }
-    }
-
-    if parts.len() >= 2 {
-        parts[parts.len() - 2..].join(".")
-    } else {
-        domain.to_string()
-    }
-}
-
-/// Check if two URLs belong to the same domain (including subdomains).
 pub fn domains_match(url_a: &str, url_b: &str) -> bool {
-    let a = match extract_domain(url_a) {
-        Some(d) => d,
-        None => return false,
-    };
-    let b = match extract_domain(url_b) {
-        Some(d) => d,
-        None => return false,
-    };
-
-    if a == b {
-        return true;
+    match (credential_url(url_a),credential_url(url_b)) {
+        (Some(a),Some(b)) => a.origin() == b.origin(),
+        _ => false,
     }
-
-    a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}"))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,14 +488,14 @@ mod tests {
     #[test]
     fn test_extract_domain() {
         assert_eq!(extract_domain("https://github.com/login"), Some("github.com".into()));
-        assert_eq!(extract_domain("https://www.google.com"), Some("google.com".into()));
-        assert_eq!(extract_domain("http://example.com:8080/path"), Some("example.com".into()));
+        assert_eq!(extract_domain("https://www.google.com"), Some("www.google.com".into()));
+        assert_eq!(extract_domain("http://example.com:8080/path"), None);
     }
 
     #[test]
     fn test_domains_match() {
         assert!(domains_match("https://github.com", "https://github.com/login"));
-        assert!(domains_match("https://accounts.google.com", "https://google.com"));
+        assert!(!domains_match("https://accounts.google.com", "https://google.com"));
         assert!(!domains_match("https://github.com", "https://evil.com"));
     }
 
@@ -678,18 +576,20 @@ mod tests {
     }
 
     #[test]
-    fn test_base_domain_cctld_isolation() {
-        assert_eq!(base_domain("bank.co.uk"), "bank.co.uk");
-        assert_eq!(base_domain("auth.bank.co.uk"), "bank.co.uk");
-        assert_eq!(base_domain("evil.co.uk"), "evil.co.uk");
-        assert_ne!(base_domain("bank.co.uk"), base_domain("evil.co.uk"));
-
-        assert_eq!(base_domain("service.com.au"), "service.com.au");
-        assert_eq!(base_domain("login.service.com.au"), "service.com.au");
-        assert_eq!(base_domain("attacker.com.au"), "attacker.com.au");
-        assert_ne!(base_domain("service.com.au"), base_domain("attacker.com.au"));
-
-        assert!(!is_allowed_auth_domain("https://bank.co.uk", "https://attacker.co.uk"));
-        assert!(is_allowed_auth_domain("https://bank.co.uk", "https://auth.bank.co.uk"));
+    fn credential_origins_reject_cross_tenant_downgrades_userinfo_and_ports() {
+        for (entry,target) in [
+            ("https://victim.pages.dev","https://attacker.pages.dev/login"),
+            ("https://victim.github.io","https://attacker.github.io/login"),
+            ("https://bank.co.uk","https://attacker.co.uk"),
+            ("https://bank.co.uk","https://auth.bank.co.uk"),
+            ("https://bank.example","http://bank.example"),
+            ("https://bank.example","https://bank.example:password@attacker.example"),
+            ("https://bank.example","https://bank.example:8443"),
+            ("https://gmail.com","https://evil.accounts.google.com"),
+            ("https://tenant.google.com","https://accounts.google.com"),
+        ] { assert!(!is_allowed_auth_domain(entry,target),"{entry} -> {target}"); }
+        assert!(is_allowed_auth_domain("https://bank.example","https://bank.example/login"));
+        assert!(is_allowed_auth_domain("https://gmail.com","https://accounts.google.com/login"));
     }
 }
+

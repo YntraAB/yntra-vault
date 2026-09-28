@@ -5,6 +5,7 @@ use super::{DEFAULT_DISCOVERY_PORT, DISCOVERY_MULTICAST_ADDR, DISCOVERY_BEACON_M
 const QUERY_MAGIC: [u8; 4] = *b"YSQ2";
 
 pub(super) fn query(socket: &UdpSocket, id: &[u8; 32], local_ips: &[IpAddr]) {
+    if !crate::services::network::is_enabled() { return; }
     let mut packet = [0; 36];
     packet[..4].copy_from_slice(&QUERY_MAGIC);
     packet[4..].copy_from_slice(id);
@@ -20,6 +21,7 @@ pub(super) fn query(socket: &UdpSocket, id: &[u8; 32], local_ips: &[IpAddr]) {
 }
 
 pub(super) fn responder() -> Option<UdpSocket> {
+    if !crate::services::network::is_enabled() { return None; }
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT)).ok()?;
     socket.set_nonblocking(true).ok()?;
     let _ = socket.join_multicast_v4(&DISCOVERY_MULTICAST_ADDR.parse().ok()?, &Ipv4Addr::UNSPECIFIED);
@@ -27,6 +29,7 @@ pub(super) fn responder() -> Option<UdpSocket> {
 }
 
 pub(super) fn respond(socket: &UdpSocket, id: &[u8; 32], port: u16) {
+    if !crate::services::network::is_enabled() { return; }
     let mut packet = [0; 64];
     // Bound work per accept iteration; a UDP flood must not starve cancellation.
     for _ in 0..16 {
@@ -65,3 +68,4 @@ mod tests {
         assert_eq!(u16::from_be_bytes([response[36], response[37]]), 5678);
     }
 }
+

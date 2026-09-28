@@ -1,6 +1,6 @@
 [package]
 name = "yntra-cli"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 description = "Yntra Vault - Command line interface and session daemon"
 license = "MIT"
@@ -19,8 +19,8 @@ clap_complete = "4"
 rpassword = "7"
 comfy-table = "7"
 colored = "2"
-ratatui = "0.26"
-crossterm = "0.27"
+ratatui = "0.30.2"
+crossterm = "0.29"
 
 # Runtime & Async
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread", "net", "io-util"] }
@@ -37,3 +37,6 @@ data-encoding = "2.6"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"
+tempfile = "3"
+dirs = "6"

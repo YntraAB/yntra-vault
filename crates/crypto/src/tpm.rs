@@ -655,6 +655,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "writes and deletes the user's CLI session token; run only in a disposable profile"]
     fn test_session_token_handoff() {
         let original_token = "secure-session-handshake-token-123456";
         write_session_token(original_token).unwrap();

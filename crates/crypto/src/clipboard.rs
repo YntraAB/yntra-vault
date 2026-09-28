@@ -33,6 +33,8 @@ fn compute_text_hash(text: &str) -> u64 {
 
 /// Copy text to OS clipboard using SOTA platform defense flags to bypass clipboard history logging.
 pub fn copy_to_clipboard_defended(text: &str, is_sensitive: bool, clear_after_secs: Option<u64>) -> crate::Result<()> {
+    // Serialize app copies with timers and lock cleanup, including the OS write.
+    let mut active = ACTIVE_CLIPBOARD_STATE.lock().map_err(|_| VaultError::ClipboardError("Clipboard state unavailable".into()))?;
     let tx_id = CLIPBOARD_TX_COUNTER.fetch_add(1, Ordering::SeqCst);
     let hash = compute_text_hash(text);
 
@@ -61,24 +63,46 @@ pub fn copy_to_clipboard_defended(text: &str, is_sensitive: bool, clear_after_se
     }
 
     if is_sensitive {
-        if let Ok(mut lock) = ACTIVE_CLIPBOARD_STATE.lock() {
-            *lock = Some(ClipboardState { tx_id, hash });
-        }
+        *active = Some(ClipboardState { tx_id, hash });
 
         if let Some(secs) = clear_after_secs.filter(|&secs| secs > 0) {
             schedule_auto_clear(tx_id, hash, secs);
         }
-    }
+    } else { *active = None; }
 
     Ok(())
 }
 
-/// Clear OS clipboard contents immediately.
+/// Clear only a sensitive copy still owned by this process. A subsequent copy
+/// made by the user or another application is preserved.
 pub fn clear_clipboard() -> crate::Result<()> {
+    clear_owned_clipboard(None)
+}
+
+fn clear_owned_clipboard(expected: Option<ClipboardState>) -> crate::Result<()> {
+    let mut active = ACTIVE_CLIPBOARD_STATE.lock().map_err(|_| VaultError::ClipboardError("Clipboard state unavailable".into()))?;
+    clear_tracked_state(&mut active, expected, clear_matching_clipboard)
+}
+
+fn clear_tracked_state(
+    active: &mut Option<ClipboardState>, expected: Option<ClipboardState>,
+    clear_matching: impl FnOnce(u64) -> crate::Result<()>,
+) -> crate::Result<()> {
+    let Some(current) = *active else { return Ok(()); };
+    if expected.is_some_and(|wanted| wanted != current) { return Ok(()); }
+    clear_matching(current.hash)?;
+    *active = None;
+    Ok(())
+}
+
+fn clear_matching_clipboard(hash: u64) -> crate::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        clear_windows()?;
+        return clear_windows_if_matching(hash);
     }
+
+    #[cfg(not(target_os = "windows"))]
+    if !is_clipboard_matching_hash(hash) { return Ok(()); }
 
     #[cfg(target_os = "macos")]
     {
@@ -96,11 +120,7 @@ pub fn clear_clipboard() -> crate::Result<()> {
         copy_generic_fallback("")?;
     }
 
-    // Reset active tracked state
-    if let Ok(mut lock) = ACTIVE_CLIPBOARD_STATE.lock() {
-        *lock = None;
-    }
-
+    #[cfg(not(target_os = "windows"))]
     Ok(())
 }
 
@@ -109,26 +129,12 @@ pub fn schedule_auto_clear(tx_id: u64, hash: u64, timeout_secs: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(timeout_secs));
 
-        // Verify if active secret transaction ID and hash still match
-        let should_clear = match ACTIVE_CLIPBOARD_STATE.lock() {
-            Ok(lock) => *lock == Some(ClipboardState { tx_id, hash }),
-            Err(_) => false,
-        };
-
-        if should_clear {
-            // Re-check current clipboard content hash before clearing to avoid wiping user's manual copy
-            if is_clipboard_matching_hash(hash) {
-                let _ = clear_clipboard();
-            } else if let Ok(mut lock) = ACTIVE_CLIPBOARD_STATE.lock()
-                && *lock == Some(ClipboardState { tx_id, hash })
-            {
-                *lock = None;
-            }
-        }
+        let _ = clear_owned_clipboard(Some(ClipboardState { tx_id, hash }));
     });
 }
 
 /// Check if current clipboard content matches the specified hash.
+#[cfg(any(not(target_os = "windows"), test))]
 fn is_clipboard_matching_hash(expected_hash: u64) -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -137,13 +143,17 @@ fn is_clipboard_matching_hash(expected_hash: u64) -> bool {
         }
     }
     #[cfg(target_os = "macos")]
-    if let Ok(output) = std::process::Command::new("pbpaste").output() {
-        return output.status.success() && std::str::from_utf8(&output.stdout).is_ok_and(|s| compute_text_hash(s) == expected_hash);
+    if let Ok(mut output) = std::process::Command::new("pbpaste").output() {
+        let matches = output.status.success() && std::str::from_utf8(&output.stdout).is_ok_and(|s| compute_text_hash(s) == expected_hash);
+        output.stdout.zeroize();
+        return matches;
     }
     #[cfg(target_os = "linux")]
     for (command, args) in [("wl-paste", vec!["--no-newline"]), ("xclip", vec!["-selection", "clipboard", "-o"])] {
-        if let Ok(output) = std::process::Command::new(command).args(args).output() {
-            if output.status.success() { return std::str::from_utf8(&output.stdout).is_ok_and(|s| compute_text_hash(s) == expected_hash); }
+        if let Ok(mut output) = std::process::Command::new(command).args(args).output() {
+            let matches = std::str::from_utf8(&output.stdout).is_ok_and(|s| compute_text_hash(s) == expected_hash);
+            output.stdout.zeroize();
+            if output.status.success() { return matches; }
         }
     }
     false
@@ -293,63 +303,58 @@ fn copy_windows_plain(text: &str) -> crate::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn clear_windows() -> crate::Result<()> {
+fn clear_windows_if_matching(hash: u64) -> crate::Result<()> {
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard};
-
-    if open_clipboard_with_retry().is_ok() {
-        unsafe {
-            let _ = EmptyClipboard();
-            let _ = CloseClipboard();
-        }
+    open_clipboard_with_retry()?;
+    // Hold the OS lock across comparison and clearing.
+    unsafe {
+        let result = if get_windows_clipboard_hash_locked() == Ok(hash) {
+            EmptyClipboard().map_err(|e| VaultError::ClipboardError(format!("Clipboard clear failed: {e}")))
+        } else { Ok(()) };
+        let _ = CloseClipboard();
+        result
     }
-    Ok(())
+}
+
+#[cfg(all(target_os = "windows", test))]
+fn get_windows_clipboard_hash() -> Result<u64, ()> {
+    use windows::Win32::System::DataExchange::CloseClipboard;
+    open_clipboard_with_retry().map_err(|_| ())?;
+    let result = get_windows_clipboard_hash_locked();
+    unsafe { let _ = CloseClipboard(); }
+    result
 }
 
 #[cfg(target_os = "windows")]
-fn get_windows_clipboard_hash() -> Result<u64, ()> {
+fn get_windows_clipboard_hash_locked() -> Result<u64, ()> {
     use windows::Win32::Foundation::HGLOBAL;
-    use windows::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData,
-    };
-    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-
-    if open_clipboard_with_retry().is_err() {
-        return Err(());
-    }
-
+    use windows::Win32::System::DataExchange::GetClipboardData;
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
     unsafe {
-        let h_mem = GetClipboardData(CF_UNICODETEXT);
-        if h_mem.is_err() || h_mem.as_ref().unwrap().0.is_null() {
-            let _ = CloseClipboard();
-            return Err(());
-        }
-        let handle = HGLOBAL(h_mem.unwrap().0);
+        let data = GetClipboardData(CF_UNICODETEXT).map_err(|_| ())?;
+        if data.0.is_null() { return Err(()); }
+        let handle = HGLOBAL(data.0);
+        let units = GlobalSize(handle) / std::mem::size_of::<u16>();
+        if units == 0 { return Err(()); }
         let ptr = GlobalLock(handle) as *const u16;
-        if ptr.is_null() {
-            let _ = CloseClipboard();
+        if ptr.is_null() { return Err(()); }
+        // Other apps control this block; never scan beyond its allocation.
+        let block = std::slice::from_raw_parts(ptr, units);
+        let Some(len) = block.iter().position(|&unit| unit == 0) else {
+            let _ = GlobalUnlock(handle);
             return Err(());
-        }
-
-        let mut len = 0;
-        while *ptr.add(len) != 0 {
-            len += 1;
-        }
-        let slice = std::slice::from_raw_parts(ptr, len);
-
+        };
         let mut hash: u64 = 0xcbf29ce484222325;
         let mut utf8_buf = [0u8; 4];
-        for c in char::decode_utf16(slice.iter().copied()) {
+        for c in char::decode_utf16(block[..len].iter().copied()) {
             let ch = c.unwrap_or('\u{FFFD}');
-            let encoded = ch.encode_utf8(&mut utf8_buf);
-            for byte in encoded.bytes() {
+            for byte in ch.encode_utf8(&mut utf8_buf).bytes() {
                 hash ^= u64::from(byte);
                 hash = hash.wrapping_mul(0x100000001b3);
             }
         }
         utf8_buf.zeroize();
-
         let _ = GlobalUnlock(handle);
-        let _ = CloseClipboard();
         Ok(hash)
     }
 }
@@ -465,6 +470,25 @@ mod tests {
     static CLIPBOARD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
+    fn cleanup_ignores_stale_timers_and_untracked_copies() {
+        let current = ClipboardState { tx_id: 2, hash: 22 };
+        let mut state = Some(current);
+        clear_tracked_state(&mut state, Some(ClipboardState { tx_id: 1, hash: 11 }), |_| panic!("stale timer must not access clipboard")).unwrap();
+        assert_eq!(state, Some(current));
+        clear_tracked_state(&mut state, None, |hash| { assert_eq!(hash, 22); Ok(()) }).unwrap();
+        assert_eq!(state, None);
+        clear_tracked_state(&mut state, None, |_| panic!("untracked clipboard must not be touched")).unwrap();
+    }
+
+    #[test]
+    fn failed_cleanup_keeps_tracking_for_retry() {
+        let current = ClipboardState { tx_id: 2, hash: 22 };
+        let mut state = Some(current);
+        assert!(clear_tracked_state(&mut state, None, |_| Err(VaultError::ClipboardError("busy".into()))).is_err());
+        assert_eq!(state, Some(current));
+    }
+
+    #[test]
     fn test_text_hash_computation() {
         let h1 = compute_text_hash("secret_password_123");
         let h2 = compute_text_hash("secret_password_123");
@@ -482,6 +506,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires explicit access to the user's system clipboard"]
     fn test_clipboard_defended_roundtrip() {
         let _guard = CLIPBOARD_TEST_LOCK.lock().unwrap();
         let result = copy_to_clipboard_defended("TestSecretClipboard123", true, Some(10));
@@ -493,6 +518,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "windows")]
+    #[ignore = "requires explicit access to the user's system clipboard"]
     fn test_windows_clipboard_hash_matching() {
         let _guard = CLIPBOARD_TEST_LOCK.lock().unwrap();
         let secret = "Sensitive_Clipboard_Secret_999";
@@ -508,6 +534,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires explicit access to the user's system clipboard"]
     fn test_schedule_auto_clear_execution() {
         let _guard = CLIPBOARD_TEST_LOCK.lock().unwrap();
         let tx_id = CLIPBOARD_TX_COUNTER.fetch_add(1, Ordering::SeqCst);

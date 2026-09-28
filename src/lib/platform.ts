@@ -15,6 +15,7 @@ export function capabilitiesFor(os: RuntimePlatform) {
   return { os, desktop, mobile: os === 'android' || os === 'ios',
     automation: desktop, usbBinding: os === 'windows' || os === 'preview',
     captureProtection: os === 'windows' || os === 'android' || os === 'preview',
+    systemLock: os === 'windows' || os === 'preview',
     nativeAuthentication: desktop };
 }
 export function getCapabilities() { return capabilitiesFor(platform); }

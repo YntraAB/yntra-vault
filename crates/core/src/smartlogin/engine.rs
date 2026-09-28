@@ -70,6 +70,12 @@ impl SmartLoginEngine {
         totp_secret: Option<Zeroizing<String>>,
         browser_info: &browser::BrowserInfo,
     ) -> LoginResult {
+        if crate::services::network::ensure_allowed().is_err() {
+            return LoginResult::BrowserError("Network access is disabled".into());
+        }
+        if discovery::credential_url(url).is_none() {
+            return LoginResult::BrowserError("Smart Login requires a valid HTTPS website without URL credentials".into());
+        }
         self.logger.log(LoginState::Idle, "Starting Smart Login for the saved website");
 
         #[cfg(target_os = "windows")]
@@ -189,7 +195,7 @@ impl SmartLoginEngine {
         analyzer::wait_for_page_ready(page, 5000).await;
 
         // Fill the OTP field
-        let fill_result = self.direct_fill_otp(page, &totp_code).await;
+        let fill_result = self.direct_fill_otp(page, entry_url, &totp_code).await;
         if let Err(e) = fill_result {
             self.logger.log(
                 LoginState::Failed(format!("OTP fill failed: {e}")),
@@ -201,7 +207,7 @@ impl SmartLoginEngine {
         }
 
         self.logger.log(LoginState::SubmittingLogin, "Submitting TOTP code...");
-        self.direct_submit(page).await;
+        self.direct_submit(page, entry_url).await;
 
         let snapshot_url = page.evaluate("window.location.href").await
             .ok()
@@ -214,12 +220,26 @@ impl SmartLoginEngine {
         }
     }
 
+    async fn verify_fill_origin(&self, page: &Page, entry_url: &str) -> crate::Result<String> {
+        crate::services::network::ensure_allowed()?;
+        if self.is_cancelled() { return Err(crate::error::VaultError::SmartLoginError("Login cancelled".into())); }
+        let current = page.evaluate("window.location.href").await
+            .map_err(|_| crate::error::VaultError::SmartLoginError("Cannot verify website before typing".into()))?
+            .into_value::<String>().map_err(|_| crate::error::VaultError::SmartLoginError("Invalid website address".into()))?;
+        if !discovery::is_allowed_auth_domain(entry_url, &current) {
+            return Err(crate::error::VaultError::SmartLoginError("Website changed before typing; sign-in stopped".into()));
+        }
+        Ok(current)
+    }
     /// Fill a TOTP/OTP input field visually (simulating human typing).
     async fn direct_fill_otp(
         &self,
         page: &Page,
+        entry_url: &str,
         code: &Zeroizing<String>,
     ) -> crate::Result<()> {
+        let expected_url = self.verify_fill_origin(page, entry_url).await?;
+        let expected_origin = serde_json::to_string(&discovery::credential_url(&expected_url).unwrap().origin().ascii_serialization()).unwrap();
         let focus_js = r#"
         (() => {
             // Strategy 1: Multi-box input (e.g. 6 separate inputs)
@@ -285,12 +305,14 @@ impl SmartLoginEngine {
         // Type character by character into document.activeElement using JS 
         // to avoid Chromium CDP "Lost Focus" pseudo-class issues when the site auto-advances.
         for ch in code.chars() {
+            self.verify_fill_origin(page, entry_url).await?;
             let ch_json = serde_json::to_string(&ch.to_string()).unwrap_or_else(|_| "\"\"".into());
             let type_js = format!(
                 r#"
                 (() => {{
+                    if (location.origin !== {expected_origin}) return false;
                     const el = document.activeElement;
-                    if (el && el.tagName === 'INPUT') {{
+                    if (el && el.tagName === 'INPUT' && !el.disabled && !el.readOnly && el.getClientRects().length) {{
                         const val = {ch_json};
                         // Append character to value if it's a single box, or set it if it's a multi-box
                         if (el.maxLength === 1) {{
@@ -552,19 +574,19 @@ impl SmartLoginEngine {
             // Single-step form: both identifier AND password on same page
             if has_identifier_input && has_password_input {
                 self.logger.log(LoginState::FillingIdentifier, "Filling identifier...");
-                let fill_result = self.direct_fill_field(page, "identifier", &identifier).await;
+                let fill_result = self.direct_fill_field(page, entry_url, "identifier", &identifier).await;
                 if let Err(e) = fill_result {
                     return LoginResult::BrowserError(format!("Identifier fill failed: {e}"));
                 }
 
                 self.logger.log(LoginState::FillingPassword, "Filling password...");
-                let fill_result = self.direct_fill_field(page, "password", &password).await;
+                let fill_result = self.direct_fill_field(page, entry_url, "password", &password).await;
                 if let Err(e) = fill_result {
                     return LoginResult::BrowserError(format!("Password fill failed: {e}"));
                 }
 
                 self.logger.log(LoginState::SubmittingLogin, "Submitting...");
-                self.direct_submit(page).await;
+                self.direct_submit(page, entry_url).await;
 
                 return match verifier::verify_login_result(page, &snapshot.url, entry_url, identifier, false, &self.cancel_flag, &self.logger).await {
                     Ok(result) => result,
@@ -575,13 +597,13 @@ impl SmartLoginEngine {
             // Multi-step second page: password only (identifier already submitted)
             if has_password_input {
                 self.logger.log(LoginState::FillingPassword, "Filling password...");
-                let fill_result = self.direct_fill_field(page, "password", &password).await;
+                let fill_result = self.direct_fill_field(page, entry_url, "password", &password).await;
                 if let Err(e) = fill_result {
                     return LoginResult::BrowserError(format!("Password fill failed: {e}"));
                 }
 
                 self.logger.log(LoginState::SubmittingLogin, "Submitting...");
-                self.direct_submit(page).await;
+                self.direct_submit(page, entry_url).await;
 
                 return match verifier::verify_login_result(page, &snapshot.url, entry_url, identifier, false, &self.cancel_flag, &self.logger).await {
                     Ok(result) => result,
@@ -592,13 +614,13 @@ impl SmartLoginEngine {
             // Multi-step first page: identifier only → click Next
             if has_identifier_input {
                 self.logger.log(LoginState::FillingIdentifier, "Filling identifier...");
-                let fill_result = self.direct_fill_field(page, "identifier", &identifier).await;
+                let fill_result = self.direct_fill_field(page, entry_url, "identifier", &identifier).await;
                 if let Err(e) = fill_result {
                     return LoginResult::BrowserError(format!("Identifier fill failed: {e}"));
                 }
 
                 self.logger.log(LoginState::SubmittingIdentifier, "Clicking Next...");
-                self.direct_submit(page).await;
+                self.direct_submit(page, entry_url).await;
 
                 self.logger.log(LoginState::WaitingForPasswordStep, "Waiting for password step...");
                 tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
@@ -643,9 +665,12 @@ impl SmartLoginEngine {
     async fn direct_fill_field(
         &self,
         page: &Page,
+        entry_url: &str,
         field_type: &str,
         value: &Zeroizing<String>,
     ) -> crate::Result<()> {
+        let expected_url = self.verify_fill_origin(page, entry_url).await?;
+        let expected_origin = serde_json::to_string(&discovery::credential_url(&expected_url).unwrap().origin().ascii_serialization()).unwrap();
         // A hidden password input must never leave the identifier focused while
         // the engine proceeds to type a password (Google includes such a decoy).
         let find_js = format!("({})({})", include_str!("select_field.js"), serde_json::to_string(field_type).unwrap());
@@ -658,7 +683,7 @@ impl SmartLoginEngine {
         }
         #[cfg(target_os = "windows")]
         if field_type == "identifier" || field_type == "password" {
-            return self.type_credential_on_windows(page, value, field_type == "password").await;
+            return self.type_credential_on_windows(page, entry_url, value, field_type == "password").await;
         }
 
         // Keep the selected node, not whichever input happens to gain focus next.
@@ -667,7 +692,7 @@ impl SmartLoginEngine {
         })?;
         let expected_password = field_type == "password";
         let guard_js = format!(r#"function() {{
-            return this === document.activeElement && this.isConnected &&
+            return location.origin === {expected_origin} && this === document.activeElement && this.isConnected &&
                 !this.disabled && !this.readOnly && !this.matches(':disabled') &&
                 (this.type === 'password') === {expected_password} &&
                 this.getClientRects().length > 0 &&
@@ -736,6 +761,7 @@ impl SmartLoginEngine {
     async fn type_credential_on_windows(
         &self,
         page: &Page,
+        entry_url: &str,
         value: &Zeroizing<String>,
         is_password: bool,
     ) -> crate::Result<()> {
@@ -772,8 +798,7 @@ impl SmartLoginEngine {
             return Err(crate::error::VaultError::SmartLoginError("Login cancelled".into()));
         }
         let text = value.clone();
-        let expected_url = page.url().await.map_err(|_| crate::error::VaultError::SmartLoginError("Cannot verify page address".into()))?
-            .ok_or_else(|| crate::error::VaultError::SmartLoginError("Missing page address".into()))?;
+        let expected_url = self.verify_fill_origin(page, entry_url).await?;
         let char_delay_ms = self.config.keystroke_delay_range_ms.0;
         let cancelled = self.cancel_flag.clone();
         tokio::task::spawn_blocking(move || {
@@ -798,7 +823,8 @@ impl SmartLoginEngine {
 
     /// Click the most likely submit/next/continue button on the page.
     /// Scopes to the form containing the focused input first.
-    async fn direct_submit(&self, page: &Page) {
+    async fn direct_submit(&self, page: &Page, entry_url: &str) {
+        if self.verify_fill_origin(page, entry_url).await.is_err() { return; }
         #[cfg(target_os = "windows")]
         {
             use crate::services::autotype::{foreground_browser_token, send_enter_guarded, verify_browser_submit};
@@ -965,3 +991,5 @@ impl SmartLoginEngine {
         self.cancel_flag.load(Ordering::Relaxed)
     }
 }
+
+

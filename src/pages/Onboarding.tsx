@@ -7,7 +7,6 @@ import { useTranslation } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings } from '@/features/settings';
 import { ImportModal } from '@/features/sync';
-import { isTauri, getBackend } from '@/lib/backend';
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -65,11 +64,6 @@ export default function Onboarding() {
       operationMode,
       externalFaviconsEnabled,
     });
-    if (isTauri()) {
-      getBackend().then((b) => {
-        b.setExternalFaviconsEnabled(externalFaviconsEnabled).catch(() => {});
-      }).catch(() => {});
-    }
     appMetadata.setItem('yntra-vault-setup-completed', 'true');
     navigate('/');
   };

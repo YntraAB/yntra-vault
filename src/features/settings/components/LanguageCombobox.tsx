@@ -62,7 +62,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
           setSearch('');
         }}
         className={cn(
-          'flex h-10 w-full items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 outline-none ring-0 cursor-pointer select-none'
+          'flex h-8 w-full items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 py-2 text-[12px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 outline-none ring-0 cursor-pointer select-none'
         )}
       >
         <div className="flex items-center gap-2 truncate">
@@ -76,7 +76,7 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-[320px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-surface)] shadow-xl overflow-hidden focus:outline-none focus:ring-0 outline-none ring-0 animate-in fade-in-0 zoom-in-95 select-none">
+        <div className="absolute left-0 top-full z-50 mt-1 w-full overflow-hidden rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 shadow-xl outline-none ring-0 animate-in fade-in-0 zoom-in-95 select-none focus:outline-none focus:ring-0">
           <div className="flex items-center px-3 border-b border-[var(--border)]">
             <Search className="mr-2 h-4 w-4 shrink-0 opacity-50 text-[var(--text-secondary)]" />
             <input
@@ -85,17 +85,17 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('settings.language_search')}
-              className="h-10 w-full bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none outline-none border-none ring-0"
+              className="h-8 w-full rounded-[3px] bg-[var(--bg-base)] text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none outline-none border-none ring-0"
             />
           </div>
 
-          <div className="max-h-[260px] overflow-y-auto p-1">
+          <div className="max-h-[260px] overflow-y-auto pt-2">
             {filteredLanguages.length === 0 ? (
               <div className="py-6 text-center text-xs text-[var(--text-secondary)]">
                 {t('settings.language_not_found')}
               </div>
             ) : (
-              <div className="space-y-0.5">
+              <div className="grid grid-cols-2 gap-2">
                 {filteredLanguages.map((lang) => {
                   const isSelected = lang.code.toLowerCase() === language.toLowerCase();
                   return (
@@ -107,24 +107,24 @@ export function LanguageCombobox({ className }: LanguageComboboxProps) {
                         setOpen(false);
                       }}
                       className={cn(
-                        'w-full flex items-center justify-between px-3 py-2 text-sm rounded-[3px] cursor-pointer transition-colors text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
-                        isSelected && 'bg-[var(--accent-bg)] font-medium text-[var(--accent)]'
+                        'w-full flex items-center justify-between rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] cursor-pointer transition-colors hover:bg-[var(--bg-hover)]',
+                        isSelected && 'border-[var(--border-focus)] bg-[var(--bg-active)] font-medium'
                       )}
                     >
                       <div className="flex items-center gap-2.5 truncate">
-                        <span className="text-base leading-none">{lang.flag}</span>
+                        <span className="text-[16px] leading-none">{lang.flag}</span>
                         <div className="flex flex-col truncate">
-                          <span title={lang.nativeName} className="text-sm leading-tight text-[var(--text-primary)] truncate">
+                            <span title={lang.nativeName} className="text-[12px] leading-tight text-[var(--text-primary)] truncate">
                             {lang.nativeName}
                           </span>
                           {lang.name !== lang.nativeName && (
-                            <span title={lang.name} className="text-[11px] text-[var(--text-secondary)] truncate">
+                            <span title={lang.name} className="text-[10px] text-[var(--text-tertiary)] truncate">
                               {lang.name}
                             </span>
                           )}
                         </div>
                       </div>
-                      {isSelected && <Check className="h-4 w-4 shrink-0 text-[var(--accent)]" />}
+                      {isSelected && <Check className="h-4 w-4 shrink-0 text-[var(--text-primary)]" />}
                     </button>
                   );
                 })}

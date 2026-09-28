@@ -29,6 +29,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Mutates the user's global CLI session-token store; run explicitly in an isolated test profile"]
     fn test_cli_session_token_hardware_protected() {
         let test_token = "cli-test-hardware-bound-token-xyz-789";
         store_session_token(test_token).unwrap();

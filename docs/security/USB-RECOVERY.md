@@ -1,6 +1,6 @@
 # USB binding and recovery v2
 
-Implemented in 0.2.4. Existing vaults remain in their original format until recovery v2 is enabled. This is a local file protection feature, not protection against a compromised operating system.
+Implemented in 0.2.4; security behavior updated for 0.2.5. Existing vaults remain in their original format until recovery v2 is enabled. This is a local file protection feature, not protection against a compromised operating system.
 
 ## What USB binding does
 
@@ -20,7 +20,9 @@ The serial participates in password-key derivation and authenticated encryption;
 
 A real non-exportable hardware factor requires a compatible security token and a separately designed hardware-backed unlock protocol. USB serial binding is not equivalent to such a token.
 
-Removing the stick does not erase keys from an already unlocked session or automatically lock it. Use the vault's normal lock controls. Recovery shares and unlocked linked devices are intentionally other routes to the data; protect them accordingly.
+Removing the stick does not erase keys from an already unlocked process, but 0.2.5 locks a protected desktop session when the bound device disappears. Recovery shares and unlocked linked devices are intentionally other routes to the data; protect them accordingly.
+
+While a protected vault is unlocked, the desktop checks the bound USB presence once per second. If the matching hardware serial disappears, the native session is locked, in-memory vault state, network operations and active autotype input are cleared, and the UI returns to the locked state. The same watcher locks when the vault file itself disappears, is moved, or its removable drive is disconnected. A short grace period covers an atomic save replacement; a leftover temporary file is never treated as a valid vault. Reconnect the device or file and unlock again. The vault picker re-checks missing recent paths automatically and re-enables the vault when it is available again; no page refresh is required. This does not close the application or erase the vault.
 
 ## One recovery system
 
@@ -32,7 +34,9 @@ Replacing or revoking a kit cannot revoke it for old file copies or backups. Kee
 
 To recover, choose recovery at login, enter two shares and choose a new password of at least 12 characters. Recovery removes the USB/key-file requirement and consumes that kit for the rewritten file. Create a new kit and explicitly enroll the USB again. It never displays the old master password.
 
-Password changes and USB replacement/removal preserve the current v2 kit. Each newly paired replica creates its own kit if desired. Legacy plaintext-password shares are accepted for legacy password-only vaults; legacy key-file/hardware factors still need their original unlock flow. Legacy shares cannot recover a migrated v2 vault.
+From 0.2.5, password changes and USB enrollment/replacement/removal rotate the local storage key and replace the v2 kit. Save the newly shown shares before completing the operation. Old shares only apply to old file copies. Each newly paired replica creates its own kit if desired. Legacy plaintext-password shares are accepted for legacy password-only vaults; legacy key-file/hardware factors still need their original unlock flow. Legacy shares cannot recover a migrated v2 vault.
+
+The recovery-share screen can be closed with its X button, Escape or Cancel. It warns when the newly generated shares have not been saved. Closing after the factor change has already committed does not undo that change; reopen Security → Access and recovery to generate and save a replacement kit.
 
 ## Linking and synchronization
 
@@ -59,10 +63,12 @@ The `YNS2` outer layer uses XChaCha20-Poly1305 with authenticated framing and bo
 
 Shamir multiplication uses fixed rounds without secret-indexed lookup tables and samples the full coefficient field, including zero. Parsing rejects oversized, malformed, duplicate and mixed-kit shares. Recovery rotation changes the outer payload key, preventing old recovery material from opening a new payload by substituting its old header.
 
-Regression coverage includes wrong factors, tampering, malformed framing, recovery replacement/consumption, failed-save rollback, independent replica sync in both directions, decrypted entry contents after cross-vault pairing, and separate share export confirmation. A real connected Windows USB was tested non-destructively with a disposable vault: enrollment, lock/reopen, rename/copy to the computer and back, password change retaining binding, and recovery with the original kit passed. No existing user vault was opened or changed. Formatting, unplug/replug, Windows reinstallation, other physical computers and firmware changes were not exercised. Automated tests do not constitute an independent cryptographic audit.
+Regression coverage includes wrong factors, tampering, malformed framing, recovery replacement/consumption, failed-save rollback, independent replica sync in both directions, decrypted entry contents after cross-vault pairing, and separate share export confirmation. A real connected Windows USB was tested non-destructively with a disposable vault: enrollment, lock/reopen, rename/copy to the computer and back, password change retaining binding, and recovery with the original kit passed under the historical 0.2.4 behavior. Version 0.2.5 deliberately replaces that kit on password/USB changes. No existing user vault was opened or changed. Formatting, unplug/replug, Windows reinstallation, other physical computers and firmware changes were not exercised. Automated tests do not constitute an independent cryptographic audit.
 
-Windows validation including the subsequent reliability/UI fixes: 285 Rust workspace tests passed (nine opt-in tests ignored), 127 frontend tests passed, and the TypeScript/Vite production build passed. The live USB probe passed during the recovery implementation. These counts record that implementation milestone; later update checks are described in [Updates and application data](UPDATES.md). Real phone-PC synchronization and platform-specific device behavior still need device testing.
+Earlier Windows validation including the reliability/UI implementation milestone recorded 285 Rust workspace tests passed (nine opt-in tests ignored), 127 frontend tests passed, and a passing TypeScript/Vite production build. The live USB probe passed during the recovery implementation. The final integrated 0.2.5 counts are kept in the private maintainer handoff; those recorded runs predate the user's later UI edits and must be rerun before release. Real phone-PC synchronization and platform-specific device behavior still need device testing.
 
-The 2026-09-27 follow-up passed 156 frontend/tooling tests and 308 debug Rust tests (nine opt-in tests ignored), with additional coverage for password validation, duplicate submissions, stale USB selections, failed exports, import completeness and non-overwriting creation. Its compact dialogs were checked using synthetic fixture screens. No additional physical USB or phone test was performed for that follow-up.
+The 2026-09-27 follow-up passed 156 frontend/tooling tests and 308 debug Rust tests (nine opt-in tests ignored), with additional coverage for password validation, duplicate submissions, stale USB selections, failed exports, import completeness and non-overwriting creation. Its compact dialogs were checked using synthetic fixture screens. These are historical focused runs; the aggregate 0.2.5 record supersedes them for the integrated source counts. No additional physical USB or phone test was performed for that follow-up.
+
+CLI password changes with active recovery require `change-password --recovery-output-dir <directory>`. The destination is checked before changing the vault. If a later disk failure prevents share output, the error explicitly says that the password has changed; unlock with the new password and generate a replacement kit.
 
 CLI usage: `yntra --path <file> recovery generate --output-dir <directory>`, `recovery revoke`, and `recovery restore --share-a-file <file> --share-b-file <file>`. Password prompts are hidden. Move generated share files to separate safe locations. The old `shamir` diagnostic command produces legacy hash shares and is not a v2 recovery kit.

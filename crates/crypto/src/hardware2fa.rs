@@ -270,17 +270,20 @@ mod non_win_detection {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 static MOCK_HARDWARE_2FA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Enable or disable mock hardware 2FA challenge-response for integration testing.
+#[cfg(any(test, feature = "test-support"))]
 pub fn set_hardware2fa_mock(enabled: bool) {
     MOCK_HARDWARE_2FA.store(enabled, std::sync::atomic::Ordering::Relaxed);
 }
 
 fn is_hardware2fa_mock_enabled() -> bool {
-    cfg!(test)
-        || MOCK_HARDWARE_2FA.load(std::sync::atomic::Ordering::Relaxed)
-        || std::env::var("YNTRA_TEST_MODE").is_ok()
+    #[cfg(any(test, feature = "test-support"))]
+    { cfg!(test) || MOCK_HARDWARE_2FA.load(std::sync::atomic::Ordering::Relaxed) }
+    #[cfg(not(any(test, feature = "test-support")))]
+    { false }
 }
 
 /// Perform a hardware challenge-response on a connected hardware key.
@@ -970,7 +973,7 @@ pub fn unlock_from_embedded_hardware2fa_headers(
 
                 if let Ok(decrypted_bytes) = cipher.decrypt(nonce, payload) {
                     let decrypted_bytes = Zeroizing::new(decrypted_bytes);
-                    let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice());
+                    let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice())?;
                     if let Ok(subkeys) = SubKeys::from_bytes(locked_subkeys.as_slice()) {
                         return Ok(subkeys);
                     }
@@ -1005,7 +1008,7 @@ pub fn unlock_from_embedded_hardware2fa_headers(
 
             if let Ok(decrypted_bytes) = cipher.decrypt(nonce, payload) {
                 let decrypted_bytes = Zeroizing::new(decrypted_bytes);
-                let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice());
+                let locked_subkeys = LockedBuffer::new(decrypted_bytes.as_slice())?;
                 if let Ok(subkeys) = SubKeys::from_bytes(locked_subkeys.as_slice()) {
                     return Ok(subkeys);
                 }

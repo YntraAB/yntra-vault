@@ -40,6 +40,9 @@ fn is_target_window_active(target_hwnd: HWND) -> bool {
 }
 
 fn check_target_window_active(target_hwnd: HWND) -> crate::Result<()> {
+    if super::is_cancelled() {
+        return Err(crate::error::VaultError::AutoTypeError("Autotype cancelled by vault lock".into()));
+    }
     if !is_target_window_active(target_hwnd) {
         return Err(crate::error::VaultError::AutoTypeError(
             "Target window lost active focus during autotype execution".into(),
@@ -883,6 +886,7 @@ fn poll_until_login_context_ready(
 ) -> bool {
     let steps = max_timeout_ms / 50;
     for _ in 0..steps {
+        if super::is_cancelled() { return false; }
         let hwnd = unsafe { GetForegroundWindow() };
         if !hwnd.is_invalid() {
             let title = get_window_title(hwnd);
@@ -1964,4 +1968,3 @@ mod tests {
         assert_eq!(extract_domain_token("https://sub.domain.se"), "domain");
     }
 }
-

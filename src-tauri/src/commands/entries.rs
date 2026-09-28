@@ -316,7 +316,7 @@ pub fn extract_entry_autotype_smart(
             field.value.zeroize();
         }
     }
-    Ok((entry.username, password, totp_sec, entry.url))
+    Ok((std::mem::take(&mut entry.username), password, totp_sec, std::mem::take(&mut entry.url)))
 }
 
 #[tauri::command]
@@ -350,7 +350,7 @@ pub async fn copy_entry_username(
                 field.value.zeroize();
             }
         }
-        entry.username
+        zeroize::Zeroizing::new(std::mem::take(&mut entry.username))
     };
     super::platform::copy(&app, &username, false, None)
 }
@@ -373,15 +373,14 @@ pub async fn copy_entry_totp(
                 field.value.zeroize();
             }
         }
-        let secret = entry.totp_secret.ok_or("No TOTP secret for this entry")?;
-        let config = TotpConfig {
-            secret: secret.clone(),
+        let secret = zeroize::Zeroizing::new(entry.totp_secret.take().ok_or("No TOTP secret for this entry")?);
+        let mut config = TotpConfig {
+            secret: secret.to_string(),
             ..Default::default()
         };
-        let code = totp::generate_totp(&config).map_err(|e| e.to_string())?;
-        let mut mut_secret = secret;
-        mut_secret.zeroize();
-        code
+        let result = totp::generate_totp(&config).map_err(|e| e.to_string());
+        config.secret.zeroize();
+        result?
     };
     super::platform::copy(&app, &code.code, true, clear_after_secs)
 }

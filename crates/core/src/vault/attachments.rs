@@ -12,6 +12,13 @@ use crate::vault::types::{AttachmentInfo, FieldScope, FileAttachment};
 /// Maximum allowed file attachment size (25 MB) to prevent out-of-memory errors during vault MessagePack serialization.
 pub const MAX_ATTACHMENT_SIZE: usize = 25 * 1024 * 1024;
 
+pub(crate) fn validate_attachment_size(size: usize) -> crate::Result<()> {
+    if size > MAX_ATTACHMENT_SIZE {
+        return Err(VaultError::InvalidFormat("Attachment exceeds the 25 MiB size limit".into()));
+    }
+    Ok(())
+}
+
 impl VaultManager {
     /// Decrypt and return the raw byte payload of a file attachment.
     pub fn get_attachment_data(&self, entry_id: Uuid, attachment_id: Uuid) -> crate::Result<Vec<u8>> {
@@ -49,6 +56,10 @@ impl VaultManager {
         mime_type: &str,
         data: &[u8],
     ) -> crate::Result<AttachmentInfo> {
+        self.transactional_data_change(|manager| manager.add_attachment_inner(entry_id, name, mime_type, data))
+    }
+
+    fn add_attachment_inner(&mut self, entry_id: Uuid, name: &str, mime_type: &str, data: &[u8]) -> crate::Result<AttachmentInfo> {
         if data.len() > MAX_ATTACHMENT_SIZE {
             return Err(VaultError::InvalidFormat(format!(
                 "Attachment size ({} bytes) exceeds maximum allowed limit of {} bytes (25 MB)",
@@ -103,6 +114,10 @@ impl VaultManager {
 
     /// Delete an attachment from an existing unlocked entry.
     pub fn delete_attachment(&mut self, entry_id: Uuid, attachment_id: Uuid) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.delete_attachment_inner(entry_id, attachment_id))
+    }
+
+    fn delete_attachment_inner(&mut self, entry_id: Uuid, attachment_id: Uuid) -> crate::Result<()> {
         let entry = self
             .data
             .entries
@@ -128,6 +143,25 @@ impl VaultManager {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn staged_attachment_limits_reject_before_mutating_or_saving() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("staged.vdb");
+        let mut manager = VaultManager::create("Fixture", "synthetic password 2026", &path).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let result = manager.add_entry(super::super::NewEntry {
+            title: "Oversized".into(), username: String::new(), password: "fixture".into(),
+            url: String::new(), email: String::new(), notes: String::new(), tags: vec![],
+            totp_secret: None, custom_fields: vec![], entry_type: None, generate_passkey: None,
+            attachments: Some(vec![super::super::NewAttachment {
+                name: "large.bin".into(), mime_type: "application/octet-stream".into(), data: vec![0; MAX_ATTACHMENT_SIZE + 1],
+            }]),
+        });
+        assert!(result.is_err());
+        assert!(manager.data.entries.is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
 
     #[test]
     fn test_attachment_max_size_enforcement() {

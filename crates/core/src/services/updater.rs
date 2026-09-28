@@ -1,7 +1,7 @@
 //! Cross-Platform Updater Engine for Yntra Vault
 //!
 //! Provides HTTPS update checks, semantic version comparisons,
-//! manifest fetching (with GitHub Releases API fallback), SHA-256 integrity verification,
+//! independently signed manifest fetching, SHA-256 package verification,
 //! and asset resolution for Desktop, Android, and CLI distributions.
 
 use std::collections::HashMap;
@@ -14,8 +14,6 @@ use crate::{Result, VaultError};
 
 pub const DEFAULT_UPDATE_ENDPOINT: &str =
     "https://github.com/YntraAB/yntra-vault/releases/latest/download/latest.json";
-pub const GITHUB_RELEASES_API: &str =
-    "https://api.github.com/repos/YntraAB/yntra-vault/releases/latest";
 
 /// Platform update information formatted for Tauri v2 updater
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -23,6 +21,8 @@ pub struct PlatformUpdate {
     #[serde(default)]
     pub signature: String,
     pub url: String,
+    #[serde(default)]
+    pub sha256: String,
 }
 
 /// Android APK metadata
@@ -141,6 +141,10 @@ fn build_download_http_client() -> Result<reqwest::Client> {
 
 /// Fetch and parse `UpdateManifest` from URL
 pub async fn fetch_manifest(endpoint: &str) -> Result<UpdateManifest> {
+    super::network::run(fetch_signed_manifest(endpoint)).await
+}
+
+async fn fetch_signed_manifest(endpoint: &str) -> Result<UpdateManifest> {
     validate_update_url(endpoint)?;
     let client = build_manifest_http_client()?;
     let resp = client.get(endpoint).send().await.map_err(VaultError::NetworkError)?;
@@ -153,11 +157,17 @@ pub async fn fetch_manifest(endpoint: &str) -> Result<UpdateManifest> {
     }
 
     let bytes = read_limited_response(resp, 1024 * 1024).await?;
+    let mut signature_url = url::Url::parse(endpoint).map_err(|_| VaultError::UpdateError("Invalid update URL".into()))?;
+    signature_url.set_path(&format!("{}.sig", signature_url.path()));
+    let signature_response = client.get(signature_url).send().await?.error_for_status()?;
+    let signature_bytes = read_limited_response(signature_response, 16 * 1024).await?;
+    super::update_signature::verify(&bytes, &signature_bytes)?;
     let manifest: UpdateManifest = serde_json::from_slice(&bytes).map_err(VaultError::JsonError)?;
     Ok(manifest)
 }
 
-/// GitHub Release API structure (used as fallback if `latest.json` is unavailable)
+/// Historical parser fixture: never accepted as authenticated update metadata.
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct GhAsset {
     name: String,
@@ -166,6 +176,7 @@ struct GhAsset {
     digest: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct GhRelease {
     tag_name: String,
@@ -174,28 +185,8 @@ struct GhRelease {
     assets: Vec<GhAsset>,
 }
 
-/// Fallback to GitHub Release API
-pub async fn fetch_from_github_api() -> Result<UpdateManifest> {
-    let client = build_manifest_http_client()?;
-    let resp = client
-        .get(GITHUB_RELEASES_API)
-        .header("Accept", "application/vnd.github.v3+json")
-        .send()
-        .await
-        .map_err(VaultError::NetworkError)?;
 
-    if !resp.status().is_success() {
-        return Err(VaultError::UpdateError(format!(
-            "GitHub API request failed with HTTP {}",
-            resp.status()
-        )));
-    }
-
-    let bytes = read_limited_response(resp, 1024 * 1024).await?;
-    let gh_rel: GhRelease = serde_json::from_slice(&bytes).map_err(VaultError::JsonError)?;
-    Ok(manifest_from_github_release(gh_rel))
-}
-
+#[cfg(test)]
 fn manifest_from_github_release(gh_rel: GhRelease) -> UpdateManifest {
     let ver = gh_rel.tag_name.trim_start_matches('v').to_string();
 
@@ -250,7 +241,7 @@ fn manifest_from_github_release(gh_rel: GhRelease) -> UpdateManifest {
                 Some("darwin-x86_64")
             } else { None };
             if let Some(platform) = platform {
-                manifest.platforms.insert(platform.into(), PlatformUpdate { url: asset.browser_download_url, signature: String::new() });
+                manifest.platforms.insert(platform.into(), PlatformUpdate { url: asset.browser_download_url, signature: String::new(), sha256 });
             }
         }
     }
@@ -269,15 +260,8 @@ pub async fn check_for_updates(
 
     validate_update_url(endpoint)?;
 
-    // 1. Try to fetch manifest from latest.json
-    let manifest = match fetch_manifest(endpoint).await {
-        Ok(m) => m,
-        Err(error) if custom_endpoint.is_some() => return Err(error),
-        Err(_) => {
-            // Fallback to GitHub Release API
-            fetch_from_github_api().await?
-        }
-    };
+    // A download-channel digest cannot substitute for publisher authentication.
+    let manifest = fetch_manifest(endpoint).await?;
 
     resolve_update(current_version, target_platform, manifest, custom_endpoint.is_none())
 }
@@ -345,6 +329,7 @@ fn resolve_update(current_version: &str, target_platform: &str, manifest: Update
             if let Some(p) = manifest.platforms.get(platform) {
                 download_url = Some(p.url.clone());
                 signature = Some(p.signature.clone());
+                sha256 = Some(p.sha256.clone());
             }
         }
     }
@@ -352,6 +337,9 @@ fn resolve_update(current_version: &str, target_platform: &str, manifest: Update
     if let Some(url) = download_url.as_deref() {
         validate_update_url(url)?;
         if official { validate_official_asset_url(url, &latest_ver)?; }
+    }
+    if download_url.is_some() && sha256.is_none() {
+        return Err(VaultError::UpdateError("Missing release checksum".into()));
     }
     if let Some(hash) = sha256.as_deref()
         && (hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit())) {
@@ -394,6 +382,10 @@ fn validate_official_asset_url(raw: &str, version: &str) -> Result<()> {
 
 /// Download binary file payload into memory
 pub async fn download_file(url: &str) -> Result<Vec<u8>> {
+    super::network::run(download_file_allowed(url)).await
+}
+
+async fn download_file_allowed(url: &str) -> Result<Vec<u8>> {
     let clean_url = url.trim();
     validate_update_url(clean_url)?;
 

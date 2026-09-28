@@ -1,6 +1,6 @@
 [package]
 name = "yntra-crypto"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 description = "Yntra Vault - Auditable core cryptographic and memory protection engine"
 license = "MIT"
@@ -34,6 +34,7 @@ windows-core = "0.58"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
+    "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_System_Registry",
     "Win32_Security_Cryptography",
@@ -64,3 +65,7 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+default = []
+test-support = []

@@ -2,13 +2,15 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 static FAVICON_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static EXTERNAL_FAVICONS_ENABLED: AtomicBool = AtomicBool::new(false);
+static CACHE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static CACHE_INVALIDATED: tokio::sync::Notify = tokio::sync::Notify::const_new();
 static FETCH_SEMAPHORE: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
 
 /// Check whether external network resolution of favicons is enabled.
@@ -19,9 +21,7 @@ pub fn is_external_favicons_enabled() -> bool {
 /// Enable or disable external network resolution of favicons.
 pub fn set_external_favicons_enabled(enabled: bool) {
     EXTERNAL_FAVICONS_ENABLED.store(enabled, Ordering::Relaxed);
-    if !enabled {
-        clear_favicon_cache();
-    }
+    clear_favicon_cache();
 }
 
 /// Returns the local on-disk cache directory for favicons.
@@ -32,7 +32,6 @@ fn get_favicon_disk_dir() -> Option<PathBuf> {
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::temp_dir());
         let dir = base.join("Yntra Vault").join("cache").join("favicons");
-        let _ = std::fs::create_dir_all(&dir);
         Some(dir)
     }
     #[cfg(not(target_os = "windows"))]
@@ -42,7 +41,6 @@ fn get_favicon_disk_dir() -> Option<PathBuf> {
             path.push(".cache");
             path.push("yntra-vault");
             path.push("favicons");
-            let _ = std::fs::create_dir_all(&path);
             Some(path)
         } else {
             None
@@ -52,13 +50,18 @@ fn get_favicon_disk_dir() -> Option<PathBuf> {
 
 /// Clears in-memory and on-disk favicon cache.
 pub fn clear_favicon_cache() {
+    CACHE_GENERATION.fetch_add(1, Ordering::AcqRel);
+    CACHE_INVALIDATED.notify_waiters();
     if let Ok(mut guard) = get_cache().lock() {
         guard.clear();
     }
     if let Some(dir) = get_favicon_disk_dir() {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
-                let _ = std::fs::remove_file(entry.path());
+                // Remove only files produced by the legacy cache, never directories.
+                if entry.file_type().is_ok_and(|t| t.is_file()) && entry.path().extension().is_some_and(|e| e == "dat") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
             }
         }
     }
@@ -187,6 +190,30 @@ async fn try_fetch_candidate(client: &reqwest::Client, url: &str) -> Option<Stri
 /// Fetches a favicon for the specified domain.
 /// Returns `Ok(Some(data_uri))` on success, or `Ok(None)` if not found / invalid / error.
 pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
+    get_favicon_for_session(domain, cache_generation()).await
+}
+
+pub fn cache_generation() -> u64 { CACHE_GENERATION.load(Ordering::Acquire) }
+
+/// Native callers capture this generation while holding the unlocked-vault guard.
+pub async fn get_favicon_for_session(domain: &str, generation: u64) -> crate::Result<Option<String>> {
+    if !super::network::is_enabled() { return Ok(None); }
+    let invalidated = CACHE_INVALIDATED.notified();
+    tokio::pin!(invalidated);
+    invalidated.as_mut().enable();
+    if CACHE_GENERATION.load(Ordering::Acquire) != generation { return Ok(None); }
+    super::network::run(async {
+        tokio::select! {
+            biased;
+            _ = &mut invalidated => Ok(None),
+            result = get_favicon_allowed(domain, generation) => {
+                if CACHE_GENERATION.load(Ordering::Acquire) != generation { Ok(None) } else { result }
+            }
+        }
+    }).await
+}
+
+async fn get_favicon_allowed(domain: &str, generation: u64) -> crate::Result<Option<String>> {
     let clean_domain = domain
         .trim()
         .trim_start_matches("https://")
@@ -235,37 +262,6 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
         }
     }
 
-    // 2. Check local on-disk cache (persisted across restarts)
-    if let Some(dir) = get_favicon_disk_dir() {
-        let hash = blake3::hash(clean_domain.as_bytes()).to_hex();
-        let cache_file = dir.join(format!("{hash}.dat"));
-        let target_file = if cache_file.is_file() {
-            Some(cache_file)
-        } else {
-            let safe_filename: String = clean_domain
-                .chars()
-                .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
-                .collect();
-            let legacy_file = dir.join(format!("{safe_filename}.dat"));
-            if legacy_file.is_file() {
-                Some(legacy_file)
-            } else {
-                None
-            }
-        };
-
-        if let Some(file) = target_file {
-            if let Ok(data_uri) = std::fs::read_to_string(&file) {
-                if data_uri.starts_with("data:") {
-                    if let Ok(mut guard) = get_cache().lock() {
-                        guard.insert(clean_domain.clone(), data_uri.clone());
-                    }
-                    return Ok(Some(data_uri));
-                }
-            }
-        }
-    }
-
     // 3. Rate-limited / bounded concurrent network resolution (max 6 parallel fetches)
     let _permit = get_semaphore().acquire().await.ok();
     if !is_external_favicons_enabled() { return Ok(None); }
@@ -309,25 +305,45 @@ pub async fn get_favicon(domain: &str) -> crate::Result<Option<String>> {
     }
 
     if !is_external_favicons_enabled() { return Ok(None); }
-    // 4. If successful, persist to both memory and disk caches
+    // 4. Keep a bounded session-only cache; never persist browsing metadata.
     if let Some(ref data_uri) = result {
         if let Ok(mut guard) = get_cache().lock() {
+            if CACHE_GENERATION.load(Ordering::Acquire) != generation { return Ok(None); }
+            if guard.len() >= 256 { guard.clear(); }
             guard.insert(clean_domain.clone(), data_uri.clone());
         }
-        if let Some(dir) = get_favicon_disk_dir() {
-            let hash = blake3::hash(clean_domain.as_bytes()).to_hex();
-            let cache_file = dir.join(format!("{hash}.dat"));
-            let _ = std::fs::write(&cache_file, data_uri);
-        }
+
     }
 
     // Never cache `None` permanently so temporary network drops or timeouts can recover
+    if CACHE_GENERATION.load(Ordering::Acquire) != generation { return Ok(None); }
     Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn locking_cancels_queued_fetches_without_any_network_request() {
+        set_external_favicons_enabled(true);
+        let permits = get_semaphore().acquire_many(6).await.unwrap();
+        let request = get_favicon("synthetic.invalid");
+        let lock = async { tokio::task::yield_now().await; clear_favicon_cache(); };
+        let (result, _) = tokio::join!(tokio::time::timeout(Duration::from_millis(500), request), lock);
+        assert_eq!(result.unwrap().unwrap(), None);
+        drop(permits);
+        set_external_favicons_enabled(false);
+    }
+
+    #[tokio::test]
+    async fn requests_dispatched_after_their_session_ended_are_rejected() {
+        set_external_favicons_enabled(true);
+        let generation = cache_generation();
+        clear_favicon_cache();
+        assert_eq!(get_favicon_for_session("synthetic.invalid", generation).await.unwrap(), None);
+        set_external_favicons_enabled(false);
+    }
 
     #[tokio::test]
     #[ignore = "Requires internet access; run separately from the offline toggle tests"]

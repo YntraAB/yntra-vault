@@ -81,6 +81,9 @@ pub struct VaultFile {
 impl VaultFile {
     /// Serialize the vault file to bytes for writing to disk.
     pub fn to_bytes(&self) -> crate::Result<Vec<u8>> {
+        if self.encrypted_payload.len() > MAX_PAYLOAD_LEN {
+            return Err(VaultError::InvalidFormat("Vault exceeds the supported payload size".into()));
+        }
         let mut buf = Vec::with_capacity(256 + self.encrypted_payload.len());
 
         let mut flags = self.header.flags;
@@ -131,6 +134,9 @@ impl VaultFile {
         if let Some(ref bio) = self.biometric {
             let bio_bytes = bincode::serialize(bio)
                 .map_err(|e| VaultError::SerializationError(format!("Biometric serialize: {}", e)))?;
+            if bio_bytes.len() > MAX_BIOMETRIC_BLOCK_LEN {
+                return Err(VaultError::InvalidFormat("Biometric block exceeds the supported size".into()));
+            }
             let bio_len = bio_bytes.len() as u32;
             buf.write_all(&bio_len.to_le_bytes())
                 .map_err(|e| VaultError::SerializationError(e.to_string()))?;
@@ -142,6 +148,9 @@ impl VaultFile {
         if let Some(ref hw) = self.hardware2fa {
             let hw_bytes = bincode::serialize(hw)
                 .map_err(|e| VaultError::SerializationError(format!("Hardware 2FA serialize: {}", e)))?;
+            if hw_bytes.len() > MAX_HARDWARE2FA_BLOCK_LEN {
+                return Err(VaultError::InvalidFormat("Hardware key block exceeds the supported size".into()));
+            }
             let hw_len = hw_bytes.len() as u32;
             buf.write_all(&hw_len.to_le_bytes())
                 .map_err(|e| VaultError::SerializationError(e.to_string()))?;

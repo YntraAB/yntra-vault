@@ -301,7 +301,7 @@ fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
             Constraint::Min(10),
             Constraint::Length(3),
         ].as_ref())
-        .split(f.size());
+        .split(f.area());
 
     // 1. Header
     let header_text = vec![
@@ -404,7 +404,7 @@ fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
 
     // Modal delete confirmation dialog
     if state.mode == Mode::ConfirmDelete {
-        let area = centered_rect(50, 25, f.size());
+        let area = centered_rect(50, 25, f.area());
         f.render_widget(Clear, area);
 
         let title_name = state.active_decrypted.as_ref().map(|e| e.title.as_str()).unwrap_or("Entry");
@@ -423,7 +423,7 @@ fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
 
     // Modal creation dialog if Creating mode
     if state.mode == Mode::Creating {
-        let area = centered_rect(60, 50, f.size());
+        let area = centered_rect(60, 50, f.area());
         f.render_widget(Clear, area);
 
         let form_block = Block::default()

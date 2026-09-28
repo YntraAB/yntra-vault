@@ -177,8 +177,12 @@ pub async fn run_p2p_sync_listener(
     db_path: String,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::MergeStats, String> {
+    // Reserve the operation before reading or saving a snapshot. Lock cleanup
+    // can then cancel this lease before any worker owns vault bytes.
+    let operation = std::sync::Arc::new(state.sync_listener_operation.begin()?);
     let (subkeys, path, salt) = {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
         let manager = vault.as_mut().ok_or("Vault is locked")?;
         manager.save().map_err(|e| e.to_string())?;
         (manager.get_subkeys().map_err(|e| e.to_string())?.clone(), manager.path.clone(), manager.salt())
@@ -188,7 +192,6 @@ pub async fn run_p2p_sync_listener(
         return Err("Synchronization is restricted to the active vault".into());
     }
     let target_path = path.clone();
-    let operation = std::sync::Arc::new(state.sync_listener_operation.begin()?);
     let worker_operation = operation.clone();
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
@@ -213,6 +216,7 @@ pub async fn run_p2p_sync_listener(
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
+    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
     apply_p2p_result(&state, &path, &salt, merged_data)?;
 
     Ok(stats)
@@ -225,8 +229,12 @@ pub async fn run_p2p_sync_client(
     device_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::MergeStats, String> {
+    // Start the lease before snapshotting. A concurrent lock/network-policy
+    // change must be able to cancel the operation before it reads the vault.
+    let operation = std::sync::Arc::new(state.sync_client_operation.begin()?);
     let (subkeys, path, salt, snapshot) = {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
         let manager = vault.as_mut().ok_or("Vault is locked")?;
         manager.save().map_err(|e| e.to_string())?;
         let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(manager).map_err(|e| e.to_string())?;
@@ -239,18 +247,21 @@ pub async fn run_p2p_sync_client(
     let _ = device_id; // Kept for IPC compatibility; identity is resolved locally.
     let dev_uuid = None;
 
+    let cancel = operation.cancel.clone();
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::sync::run_p2p_sync_client_with_device(
+        yntra_vault_core::services::sync::run_p2p_sync_client_cancellable(
             &server_addr,
             &subkeys,
             &snapshot.path(),
             dev_uuid,
+            Some(cancel),
         )
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
+    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
     apply_p2p_result(&state, &path, &salt, merged_data)?;
 
     Ok(stats)
@@ -336,14 +347,15 @@ pub async fn start_pairing_host(
     device_name: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
     let host_db_path = {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         let manager = vault.as_mut().ok_or("Vault is locked")?;
         manager.save().map_err(|e| e.to_string())?;
         manager.path.clone()
     };
 
-    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
     let worker_operation = operation.clone();
     let cancel_flag = operation.cancel.clone();
 
@@ -365,8 +377,14 @@ pub async fn start_pairing_host(
 
     {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         if let Some(manager) = vault.as_mut() {
             if manager.is_unlocked() && manager.data.metadata.id == merged_data.metadata.id {
+                // Pairing saved through a separate manager. Refresh the disk revision
+                // before merging any UI edits made while the operation was running.
+                let in_memory = manager.data.clone();
+                manager.reload().map_err(|e| e.to_string())?;
+                yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, in_memory);
                 let trusted_devices = merged_data.settings.trusted_devices.clone();
                 yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, merged_data);
                 manager.data.settings.trusted_devices = trusted_devices;
@@ -397,6 +415,7 @@ pub async fn start_pairing_client(
     use yntra_vault_core::services::sync::pairing::ClientPairingMode;
 
     let vault_dir = super::auth::vault_storage_dir(&app)?;
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
 
     // CRITICAL SECURITY INVARIANT:
     // A client can only transmit and merge an existing local vault if that vault is
@@ -407,6 +426,7 @@ pub async fn start_pairing_client(
     // remote vault into a dedicated, collision-free file.
     let active_vault_path = {
         let vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         vault_guard.as_ref().map(|m| m.path.clone())
     };
 
@@ -425,7 +445,6 @@ pub async fn start_pairing_client(
         }
     };
 
-    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
     let worker_operation = operation.clone();
     let pass_clone = zeroize::Zeroizing::new(password.clone());
     let (stats, _merged_data) = tokio::task::spawn_blocking(move || {
@@ -455,6 +474,10 @@ pub async fn start_pairing_client(
         let manager = yntra_vault_core::vault::VaultManager::open(&saved_path, &password).map_err(|e| e.to_string())?;
         if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         *vault = Some(manager);
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) {
+            if let Some(mut manager) = vault.take() { manager.lock(); }
+            return Err("Pairing cancelled".into());
+        }
     }
 
     Ok(stats)
@@ -485,6 +508,13 @@ pub fn generate_qr_pairing_session(
     device_name: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::QrSessionInfo, String> {
+    let operation = state.pairing_operation.begin()?;
+    // Serialize generation with native lock cleanup so a late QR cannot restore
+    // a pairing secret after that cleanup cleared the session.
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    if !vault.as_ref().is_some_and(|manager| manager.is_unlocked()) {
+        return Err("Vault is locked".into());
+    }
     let local_ips: Vec<String> = yntra_vault_core::services::sync::get_local_lan_ips()
         .into_iter()
         .filter_map(|ip| {
@@ -500,6 +530,7 @@ pub fn generate_qr_pairing_session(
         })
         .collect();
 
+    yntra_vault_core::services::network::ensure_allowed().map_err(|e| e.to_string())?;
     // Reserve before showing the QR: an advertised code always has a bound socket.
     let listener = std::net::TcpListener::bind("0.0.0.0:5324")
         .or_else(|_| std::net::TcpListener::bind("0.0.0.0:0"))
@@ -513,6 +544,8 @@ pub fn generate_qr_pairing_session(
 
     session.listener = Some(std::sync::Arc::new(listener));
     let mut guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
+    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
+    yntra_vault_core::services::network::ensure_allowed().map_err(|e| e.to_string())?;
     *guard = Some(session);
 
     Ok(info)
@@ -525,19 +558,19 @@ pub async fn start_qr_pairing_host(
     device_name: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
-    let session = {
-        let mut guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
-        guard.take().ok_or("Ingen aktiv QR-parningssession hittades. Generera en QR-kod först.")?
-    };
-
-    let host_db_path = {
+    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
+    // Keep the lock order vault -> QR session, matching native cleanup. This
+    // prevents a lock/QR callback from deadlocking while this operation starts.
+    let (session, host_db_path) = {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         let manager = vault.as_mut().ok_or("Valvet är låst")?;
         manager.save().map_err(|e| e.to_string())?;
-        manager.path.clone()
+        let mut guard = state.qr_pairing_session.lock().map_err(|e| e.to_string())?;
+        let session = guard.take().ok_or("Ingen aktiv QR-parningssession hittades. Generera en QR-kod först.")?;
+        (session, manager.path.clone())
     };
 
-    let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
     let worker_operation = operation.clone();
     let cancel_flag = operation.cancel.clone();
 
@@ -559,8 +592,14 @@ pub async fn start_qr_pairing_host(
 
     {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         if let Some(manager) = vault.as_mut() {
             if manager.is_unlocked() && manager.data.metadata.id == merged_data.metadata.id {
+                // Pairing saved through a separate manager. Refresh the disk revision
+                // before merging any UI edits made while the operation was running.
+                let in_memory = manager.data.clone();
+                manager.reload().map_err(|e| e.to_string())?;
+                yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, in_memory);
                 let trusted_devices = merged_data.settings.trusted_devices.clone();
                 yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, merged_data);
                 manager.data.settings.trusted_devices = trusted_devices;
@@ -604,7 +643,10 @@ pub async fn start_qr_pairing_client(
     let worker_operation = operation.clone();
     let cancel = operation.cancel.clone();
     let worker_cancel = cancel.clone();
-    let initial_path = state.vault.lock().map_err(|e| e.to_string())?.as_ref().map(|m| m.path.clone());
+    let (initial_path, initial_identity) = {
+        let vault = state.vault.lock().map_err(|e| e.to_string())?;
+        (vault.as_ref().map(|m| m.path.clone()), vault.as_ref().map(|m| m.data.metadata.id))
+    };
     let mut res = tokio::task::spawn_blocking(move || {
         let _operation = worker_operation;
         yntra_vault_core::services::sync::pairing::run_p2p_qr_pairing_client_cancellable(
@@ -625,7 +667,11 @@ pub async fn start_qr_pairing_client(
     // A late result must neither unlock after cancellation nor replace a different active vault.
     if let (Some(saved_path), Some(pwd)) = (&res.stats.vault_path, received_password.as_ref()) {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-        if vault.as_ref().map(|m| m.path.clone()) != initial_path { return Err("Active vault changed during pairing".into()); }
+        if vault.as_ref().map(|m| m.path.clone()) != initial_path
+            || vault.as_ref().map(|m| m.data.metadata.id) != initial_identity {
+            return Err("Active vault changed during pairing".into());
+        }
+        if cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         let manager = yntra_vault_core::vault::VaultManager::open(std::path::Path::new(saved_path), pwd)
             .map_err(|e| e.to_string())?;
         if cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
@@ -652,6 +698,10 @@ pub async fn complete_adopted_vault(
 ) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
     let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
     let worker_operation = operation.clone();
+    let (initial_path, initial_identity) = {
+        let vault = state.vault.lock().map_err(|e| e.to_string())?;
+        (vault.as_ref().map(|m| m.path.clone()), vault.as_ref().map(|m| m.data.metadata.id))
+    };
     let pending = {
         let mut guard = state.pending_adopted_vault.lock().map_err(|e| e.to_string())?;
         guard.take().ok_or("Ingen väntande valvadoption hittades.")?
@@ -670,8 +720,9 @@ pub async fn complete_adopted_vault(
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string());
     if let Err(error) = result {
+        let mut guard = state.pending_adopted_vault.lock().map_err(|e| e.to_string())?;
         if !operation.cancel.load(std::sync::atomic::Ordering::Acquire) {
-            *state.pending_adopted_vault.lock().map_err(|e| e.to_string())? = Some(retry_pending);
+            *guard = Some(retry_pending);
         }
         return Err(error);
     }
@@ -679,10 +730,19 @@ pub async fn complete_adopted_vault(
 
     {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+        if vault.as_ref().map(|m| m.path.clone()) != initial_path
+            || vault.as_ref().map(|m| m.data.metadata.id) != initial_identity {
+            return Err("Active vault changed during pairing".into());
+        }
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         let manager = yntra_vault_core::vault::manager::VaultManager::open(&dest_path, &password)
             .map_err(|e| e.to_string())?;
         if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         *vault = Some(manager);
+        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) {
+            if let Some(mut manager) = vault.take() { manager.lock(); }
+            return Err("Pairing cancelled".into());
+        }
     }
 
     Ok(yntra_vault_core::services::sync::PairingStats {
@@ -695,4 +755,5 @@ pub async fn complete_adopted_vault(
         peer_addr: None,
     })
 }
+
 

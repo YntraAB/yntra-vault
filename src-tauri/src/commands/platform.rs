@@ -8,6 +8,20 @@ pub fn get_runtime_platform() -> &'static str {
     std::env::consts::OS
 }
 
+#[tauri::command]
+pub fn set_network_access(enabled: bool, state: tauri::State<'_, super::AppState>) {
+    yntra_vault_core::services::network::set_enabled(enabled);
+    if !enabled {
+        state.cancel_network_work();
+        yntra_vault_core::services::favicon::clear_favicon_cache();
+    }
+}
+
+pub fn lock_session(app: &AppHandle, state: &super::AppState) -> Result<(), String> {
+    state.clear_session()?;
+    clear(app)
+}
+
 pub struct AutoLockState(std::sync::Mutex<(u64, std::time::Instant)>);
 impl Default for AutoLockState {
     fn default() -> Self {

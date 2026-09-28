@@ -5,6 +5,37 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-09-28
+
+Security and bug fixes take priority over new features.
+
+### Security
+- Rotate local storage keys and recovery secrets when changing a protected vault's password or USB factor. Completing the recovery wizard requires two saved-share confirmations; closing early warns that the change is already applied and the new shares will no longer be shown. Old shares remain valid only for old backups.
+- Authenticate linked devices individually and use fresh encrypted sessions. Removed peers cannot impersonate a remaining device using the old shared sync key; legacy peers must update and re-pair. Trust lists remain local.
+- Restrict Git credential selection and Smart Login to validated origins and accounts; refuse ambiguous Git matches, cross-tenant domains and insecure remote redirects. Remove the browser's unsandboxed fallback.
+- Require an independent Ed25519 publisher signature over update metadata and verify downloaded package hashes before opening desktop installers. Reject missing, expired or changed signatures with no unsigned fallback.
+- Enforce Closed System mode in the native engine, cancel ongoing network work when it is enabled, and block automatic update startup until privacy settings are applied.
+- Prevent late entry/tag responses and failed-operation rollbacks from restoring plaintext after locking. Keep sensitive entry details out of list previews; remove persistent website-icon caches.
+- Respect native memory page sizes, fail safely when protected-memory setup fails, clear temporary secrets on drop, and restrict test-only authentication mocks to test builds.
+- Reduce release-workflow permissions, pin third-party actions and separate package building from protected signing jobs. Refresh dependencies with security fixes.
+- Update rustls, ratatui/lru and frontend dependencies; include a documented upstream glib security backport. Track remaining unmaintained dependencies and platform verification limits in the security notes.
+
+### Fixed
+- Prevent plaintext exports from overwriting the open vault, including filesystem aliases; serialize competing saves and reject stale writers.
+- Apply reader-compatible size limits when writing vaults and enforce the attachment limit for staged imports.
+- Clear pending pairing/adoption data on every native lock path; preserve unrelated clipboard contents when the app no longer owns them.
+- Lock an unlocked protected session when its bound USB device or vault file disappears; cancel active network/autotype work, revalidate the exact session after removable-storage checks and keep the application on the lock screen for safe reconnect.
+- Automatically re-check recently used vault paths while the vault picker is open, so reconnecting a USB drive re-enables its vault without requiring an app or page refresh.
+- Display OS screen-lock integration only where supported; report unavailable biometric consent instead of silently succeeding.
+- Bound and pad breach-check requests, ignore padding records, and refresh previously checked passwords after the configured age.
+- Add regression coverage for recovery rotation, wrong-origin credentials, revoked peers, asynchronous locking, privacy toggles and update signatures. Live clipboard, device and network tests require explicit opt-in.
+- Allow setup and recovery-share dialogs to be cancelled through the close button, Escape or Cancel with a warning when newly generated shares have not been saved. Standardize security, hardware-key and language popups with the startup card visual style. Harmonize Settings access and recovery rows with the standard settings layout, streamline the USB Protection flow into a clean two-step verification and selection dialog with smooth vertical slide transitions, and automatically pre-select the primary connected USB drive.
+
+### Changed
+- Protected-vault CLI password changes require `--recovery-output-dir` when recovery is enabled. Store the replacement shares separately.
+- Device removal revokes future authenticated P2P sessions on that replica; it cannot erase old files, secrets already shared, or access retained through an independent WebDAV account.
+- See [security notes](docs/security/SECURITY-0.2.5.md), [USB/recovery](docs/security/USB-RECOVERY.md) and [updates](docs/security/UPDATES.md) for migration and verification limits.
+
 ## [0.2.4] - 2026-09-26
 
 ### Reliability follow-up rebuilt at user request — 2026-09-27
@@ -20,7 +51,7 @@ This rebuild retains version 0.2.4. Install it manually over an existing 0.2.4 i
 
 #### USB and recovery interface
 - Replace verbose settings with compact USB protection and Recovery keys rows and focused dialogs matching the rest of the app. Move technical USB details into an expandable explanation while keeping biometric removal/re-pairing consequences visible.
-- Align recovery setup with the shared compact three-step dialog. Preserve one visible share at a time, individual exports, two distinct saved-share confirmations and keyboard focus containment; unfinished recovery setup cannot be dismissed.
+- Align recovery setup with the shared compact three-step dialog. Preserve one visible share at a time, individual exports, two distinct saved-share confirmations and keyboard focus containment. The 0.2.4 flow guarded active writes and did not dismiss unfinished recovery setup.
 - Clear stale/disconnected USB selections after refresh or discovery failure, ignore obsolete responses and late keyfile selections, disable actions after status-load failure and offer retry. Disable incompatible hardware-key/local-protection setup.
 - Guard duplicate creation, password changes and share exports; block dismissal during active writes and never report a cancelled export as saved. Damaged or unavailable optional recent-vault history cannot hide a newly created recovery kit. Fit path/keyfile controls on narrow screens.
 

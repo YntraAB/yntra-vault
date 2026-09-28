@@ -11,7 +11,7 @@ Yntra Vault bundles all vault contents, attachments, folders, tags, and soft-del
 To ensure minimal file size on disk and optimal cryptographic operation:
 1. **Encrypted Attachments**: Encrypted file blobs are serialized within the entry tree.
 2. **Soft Deletions**: Deleting an entry moves it to the `trash` tombstone list, allowing immediate user recovery without data loss.
-3. **Atomic Writing**: Every disk save writes to a sibling temporary file (`.vdb.tmp`) and executes an atomic OS rename.
+3. **Atomic Writing**: Every disk save stages and flushes a uniquely named sibling temporary file before atomic replacement. A stable adjacent `.vdb.lock` sidecar serializes cooperating writers; a whole-file fingerprint rejects stale sessions while the OS lock is held. This sidecar contains no secrets and is not needed in backups. The writer bounds encoded data to the reader limits before replacement; entry and attachment operations restore in-memory state on save failure.
 
 ---
 

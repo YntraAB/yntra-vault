@@ -9,15 +9,43 @@ static EPHEMERAL_KEY: OnceLock<LockedBuffer> = OnceLock::new();
 
 /// Retrieve or lazily initialize the master ephemeral in-memory encryption key.
 /// The 256-bit key is pinned inside a page-locked LockedBuffer in physical RAM.
-fn get_ephemeral_key() -> &'static [u8] {
-    let locked_key = EPHEMERAL_KEY.get_or_init(|| {
+fn get_ephemeral_key() -> crate::Result<&'static [u8]> {
+    if EPHEMERAL_KEY.get().is_none() {
         let mut key = [0u8; 32];
         rand::rng().fill(&mut key);
         let locked = LockedBuffer::new(&key);
         key.zeroize();
-        locked
-    });
-    locked_key.as_slice()
+        let _ = EPHEMERAL_KEY.set(locked?);
+    }
+    EPHEMERAL_KEY.get().map(|key| key.as_slice()).ok_or_else(|| memory_error("Cannot initialize protected memory"))
+}
+
+fn memory_error(message: &str) -> crate::error::VaultError {
+    crate::error::VaultError::MemoryLockError(message.into())
+}
+
+fn system_page_size() -> crate::Result<usize> {
+    #[cfg(windows)]
+    let size = unsafe {
+        let mut info = windows::Win32::System::SystemInformation::SYSTEM_INFO::default();
+        windows::Win32::System::SystemInformation::GetSystemInfo(&mut info);
+        info.dwPageSize as usize
+    };
+    #[cfg(not(windows))]
+    let size = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) })
+        .map_err(|_| memory_error("Cannot determine OS page size"))?;
+    if size == 0 || !size.is_power_of_two() { return Err(memory_error("Invalid OS page size")); }
+    Ok(size)
+}
+
+fn allocation_layout(len: usize, page_size: usize) -> crate::Result<(usize, usize)> {
+    if page_size == 0 || !page_size.is_power_of_two() { return Err(memory_error("Invalid OS page size")); }
+    let payload = len.max(1).checked_add(page_size - 1)
+        .map(|bytes| bytes / page_size).and_then(|pages| pages.checked_mul(page_size))
+        .ok_or_else(|| memory_error("Protected memory allocation is too large"))?;
+    let total = page_size.checked_mul(2).and_then(|guards| payload.checked_add(guards))
+        .ok_or_else(|| memory_error("Protected memory allocation is too large"))?;
+    Ok((payload, total))
 }
 
 /// A heap-allocated string container that scrambles string content in memory
@@ -32,9 +60,10 @@ pub struct ScrambledString {
 
 impl ScrambledString {
     /// Encrypt a plaintext string into a ScrambledString.
-    pub fn new(plaintext: &str) -> Self {
-        let key = get_ephemeral_key();
-        let cipher = XChaCha20Poly1305::new_from_slice(key).unwrap();
+    pub fn new(plaintext: &str) -> crate::Result<Self> {
+        let key = get_ephemeral_key()?;
+        let cipher = XChaCha20Poly1305::new_from_slice(key)
+            .map_err(|_| crate::error::VaultError::MemoryLockError("Ephemeral key initialization failed".into()))?;
 
         let mut nonce_bytes = [0u8; 24];
         rand::rng().fill(&mut nonce_bytes);
@@ -42,12 +71,12 @@ impl ScrambledString {
 
         let ciphertext = cipher
             .encrypt(nonce, plaintext.as_bytes())
-            .expect("Encryption of scrambled heap string failed");
+            .map_err(|_| crate::error::VaultError::EncryptionError("Scrambled heap string encryption failed".into()))?;
 
-        Self {
+        Ok(Self {
             ciphertext,
             nonce: nonce_bytes,
-        }
+        })
     }
 
     /// Decrypt directly into a pre-allocated, pre-locked RAM buffer (`LockedBuffer`).
@@ -56,7 +85,7 @@ impl ScrambledString {
     /// and decrypted in-place using `AeadInPlace::decrypt_in_place_detached`.
     /// Plaintext is NEVER created or held in unpinned heap memory.
     pub fn decrypt_to_locked(&self) -> crate::Result<LockedBuffer> {
-        let key = get_ephemeral_key();
+        let key = get_ephemeral_key()?;
         let cipher = XChaCha20Poly1305::new_from_slice(key)
             .map_err(|e| crate::error::VaultError::DecryptionError(format!("Ephemeral key init: {}", e)))?;
         let nonce = XNonce::from_slice(&self.nonce);
@@ -68,7 +97,7 @@ impl ScrambledString {
         let plaintext_len = self.ciphertext.len() - 16;
 
         // 1. Allocate a zeroed LockedBuffer PRE-LOCKED in physical RAM
-        let mut locked = LockedBuffer::zeroed(self.ciphertext.len());
+        let mut locked = LockedBuffer::zeroed(self.ciphertext.len())?;
 
         // 2. Copy ciphertext + tag into the pre-locked RAM page
         locked.as_mut_slice().copy_from_slice(&self.ciphertext);
@@ -132,111 +161,73 @@ unsafe impl Send for LockedBuffer {}
 unsafe impl Sync for LockedBuffer {}
 
 impl LockedBuffer {
-    /// Create a new pre-locked, page-aligned zeroed buffer protected by leading and trailing guard pages.
-    pub fn zeroed(len: usize) -> Self {
-        let page_size = 4096;
-        let payload_pages = if len == 0 { 1 } else { len.div_ceil(page_size) };
-        let payload_alloc_size = payload_pages * page_size;
-        let total_pages = 1 + payload_pages + 1; // Leading guard + payload pages + trailing guard
-        let total_size = total_pages * page_size;
-
+    /// Allocate OS-page-aligned guards and fail if physical locking is unavailable.
+    pub fn zeroed(len: usize) -> crate::Result<Self> {
+        let page_size = system_page_size()?;
+        let (payload_alloc_size, total_size) = allocation_layout(len, page_size)?;
         #[cfg(target_os = "windows")]
         unsafe {
-            use windows::Win32::System::Memory::{
-                VirtualAlloc, VirtualProtect, VirtualLock,
-                MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS,
-            };
+            use windows::Win32::System::Memory::{VirtualAlloc, VirtualProtect, VirtualLock, VirtualFree,
+                MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_READWRITE, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS};
             use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
-
-            // 1. Allocate virtual pages
             let base_ptr = VirtualAlloc(None, total_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) as *mut u8;
-            if base_ptr.is_null() {
-                panic!("Failed VirtualAlloc for Guarded LockedBuffer");
-            }
-
+            if base_ptr.is_null() { return Err(memory_error("Cannot allocate protected memory")); }
             let payload_ptr = base_ptr.add(page_size);
-            let trailing_guard_ptr = base_ptr.add((1 + payload_pages) * page_size);
-
-            // 2. Protect leading and trailing guard pages with PAGE_NOACCESS
+            let trailing_guard_ptr = payload_ptr.add(payload_alloc_size);
             let mut old_prot = PAGE_PROTECTION_FLAGS::default();
-            let _ = VirtualProtect(base_ptr as *const std::ffi::c_void, page_size, PAGE_NOACCESS, &mut old_prot);
-            let _ = VirtualProtect(trailing_guard_ptr as *const std::ffi::c_void, page_size, PAGE_NOACCESS, &mut old_prot);
-
-            // 3. Lock payload pages in physical RAM
-            if VirtualLock(payload_ptr as *const std::ffi::c_void, payload_alloc_size).is_err() {
-                let process = GetCurrentProcess();
-                let _ = SetProcessWorkingSetSize(process, payload_alloc_size + 65536, payload_alloc_size + 1048576);
-                let _ = VirtualLock(payload_ptr as *const std::ffi::c_void, payload_alloc_size);
+            if VirtualProtect(base_ptr.cast(), page_size, PAGE_NOACCESS, &mut old_prot).is_err()
+                || VirtualProtect(trailing_guard_ptr.cast(), page_size, PAGE_NOACCESS, &mut old_prot).is_err() {
+                let _ = VirtualFree(base_ptr.cast(), 0, MEM_RELEASE);
+                return Err(memory_error("Cannot protect secret-memory guard pages"));
             }
-
-            Self {
-                base_ptr,
-                payload_ptr,
-                total_size,
-                payload_alloc_size,
-                len,
-            }
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        unsafe {
-            let base_ptr = libc::mmap(
-                std::ptr::null_mut(),
-                total_size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                -1,
-                0,
-            ) as *mut u8;
-
-            if base_ptr == libc::MAP_FAILED as *mut u8 {
-                panic!("Failed mmap for Guarded LockedBuffer");
-            }
-
-            let payload_ptr = base_ptr.add(page_size);
-            let trailing_guard_ptr = base_ptr.add((1 + payload_pages) * page_size);
-
-            // Protect leading and trailing guard pages with PROT_NONE
-            let _ = libc::mprotect(base_ptr as *mut std::ffi::c_void, page_size, libc::PROT_NONE);
-            let _ = libc::mprotect(trailing_guard_ptr as *mut std::ffi::c_void, page_size, libc::PROT_NONE);
-
-            // Lock payload pages in physical RAM
-            if libc::mlock(payload_ptr as *const std::ffi::c_void, payload_alloc_size) != 0 {
-                let mut rlim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-                if libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut rlim) == 0 {
-                    let new_limit = (rlim.rlim_cur.saturating_add(payload_alloc_size as libc::rlim_t).saturating_add(65536 as libc::rlim_t)).min(rlim.rlim_max);
-                    rlim.rlim_cur = new_limit;
-                    let _ = libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim);
-                    let _ = libc::mlock(payload_ptr as *const std::ffi::c_void, payload_alloc_size);
+            if VirtualLock(payload_ptr.cast(), payload_alloc_size).is_err() {
+                let _ = SetProcessWorkingSetSize(GetCurrentProcess(), payload_alloc_size.saturating_add(65536), payload_alloc_size.saturating_add(1048576));
+                if VirtualLock(payload_ptr.cast(), payload_alloc_size).is_err() {
+                    let _ = VirtualFree(base_ptr.cast(), 0, MEM_RELEASE);
+                    return Err(memory_error("Cannot lock secret memory; reduce memory pressure and retry"));
                 }
             }
-
-            #[cfg(target_os = "linux")]
-            {
-                let _ = libc::madvise(payload_ptr as *mut std::ffi::c_void, payload_alloc_size, libc::MADV_DONTDUMP);
+            Ok(Self { base_ptr, payload_ptr, total_size, payload_alloc_size, len })
+        }
+        #[cfg(not(target_os = "windows"))]
+        unsafe {
+            let base_ptr = libc::mmap(std::ptr::null_mut(), total_size, libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0) as *mut u8;
+            if base_ptr == libc::MAP_FAILED as *mut u8 { return Err(memory_error("Cannot allocate protected memory")); }
+            let payload_ptr = base_ptr.add(page_size);
+            let trailing_guard_ptr = payload_ptr.add(payload_alloc_size);
+            if libc::mprotect(base_ptr.cast(), page_size, libc::PROT_NONE) != 0
+                || libc::mprotect(trailing_guard_ptr.cast(), page_size, libc::PROT_NONE) != 0 {
+                let _ = libc::munmap(base_ptr.cast(), total_size);
+                return Err(memory_error("Cannot protect secret-memory guard pages"));
             }
-
-            Self {
-                base_ptr,
-                payload_ptr,
-                total_size,
-                payload_alloc_size,
-                len,
+            if libc::mlock(payload_ptr.cast(), payload_alloc_size) != 0 {
+                let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+                if libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut limit) == 0 {
+                    limit.rlim_cur = limit.rlim_cur.saturating_add(payload_alloc_size as libc::rlim_t)
+                        .saturating_add(65536).min(limit.rlim_max);
+                    let _ = libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit);
+                }
+                if libc::mlock(payload_ptr.cast(), payload_alloc_size) != 0 {
+                    let _ = libc::munmap(base_ptr.cast(), total_size);
+                    return Err(memory_error("Cannot lock secret memory; increase the process memory-lock limit"));
+                }
             }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            if libc::madvise(payload_ptr.cast(), payload_alloc_size, libc::MADV_DONTDUMP) != 0 {
+                let _ = libc::munlock(payload_ptr.cast(), payload_alloc_size);
+                let _ = libc::munmap(base_ptr.cast(), total_size);
+                return Err(memory_error("Cannot exclude secret memory from dumps"));
+            }
+            Ok(Self { base_ptr, payload_ptr, total_size, payload_alloc_size, len })
         }
     }
 
-    /// Create a new page-aligned LockedBuffer from raw bytes and attempt to lock it.
-    pub fn new(bytes: &[u8]) -> Self {
-        let buffer = Self::zeroed(bytes.len());
-        if !bytes.is_empty() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer.payload_ptr, bytes.len());
-            }
-        }
-        buffer
+    pub fn new(bytes: &[u8]) -> crate::Result<Self> {
+        let mut buffer = Self::zeroed(bytes.len())?;
+        buffer.as_mut_slice().copy_from_slice(bytes);
+        Ok(buffer)
     }
-
     /// Access the underlying locked bytes as a slice.
     pub fn as_slice(&self) -> &[u8] {
         if self.len == 0 || self.payload_ptr.is_null() {
@@ -311,10 +302,10 @@ pub struct ProtectedSecret {
 
 impl ProtectedSecret {
     /// Create a new ProtectedSecret from a plaintext string.
-    pub fn new(secret: &str) -> Self {
-        Self {
-            scrambled: ScrambledString::new(secret),
-        }
+    pub fn new(secret: &str) -> crate::Result<Self> {
+        Ok(Self {
+            scrambled: ScrambledString::new(secret)?,
+        })
     }
 
     /// Execute a closure with access to the decrypted secret inside a pre-locked buffer.
@@ -472,9 +463,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn guard_layout_supports_large_os_pages_and_rejects_overflow() {
+        for page in [4096, 16384, 65536] {
+            let (payload, total) = allocation_layout(32, page).unwrap();
+            assert_eq!(payload, page);
+            assert_eq!(total, 3 * page);
+            assert_eq!(allocation_layout(page + 1, page).unwrap(), (2 * page, 4 * page));
+        }
+        assert!(allocation_layout(usize::MAX, 4096).is_err());
+        assert!(allocation_layout(1, 0).is_err());
+        assert!(allocation_layout(1, 17).is_err());
+    }
+
+    #[test]
+    fn protected_memory_uses_actual_os_page_alignment() {
+        let page = system_page_size().unwrap();
+        let mut buffer = LockedBuffer::zeroed(page + 1).unwrap();
+        assert_eq!((buffer.payload_ptr as usize) % page, 0);
+        assert_eq!(buffer.payload_alloc_size, 2 * page);
+        buffer.as_mut_slice()[0] = 7;
+        buffer.as_mut_slice()[page] = 9;
+        assert_eq!(buffer.as_slice()[page], 9);
+    }
+
+    #[test]
     fn test_scrambled_string_roundtrip() {
         let secret = "SuperSecretPassword123!";
-        let scrambled = ScrambledString::new(secret);
+        let scrambled = ScrambledString::new(secret).unwrap();
         assert_ne!(secret.as_bytes(), scrambled.ciphertext.as_slice());
 
         let decrypted = scrambled.decrypt().unwrap();
@@ -484,14 +499,14 @@ mod tests {
     #[test]
     fn test_locked_buffer_lifecycle() {
         let bytes = vec![1, 2, 3, 4, 5];
-        let locked = LockedBuffer::new(&bytes);
+        let locked = LockedBuffer::new(&bytes).unwrap();
         assert_eq!(locked.as_slice(), &[1, 2, 3, 4, 5]);
     }
 
     #[test]
     fn test_protected_secret_scope() {
         let secret = "MySotaSecretKey2026!";
-        let protected = ProtectedSecret::new(secret);
+        let protected = ProtectedSecret::new(secret).unwrap();
 
         let result = protected.with_secret(|val| {
             assert_eq!(val, secret);
@@ -504,7 +519,7 @@ mod tests {
     #[test]
     fn test_direct_in_place_locked_decryption() {
         let secret = "ZeroAllocationPlaintext123456";
-        let scrambled = ScrambledString::new(secret);
+        let scrambled = ScrambledString::new(secret).unwrap();
 
         // Decrypt directly into pre-locked memory
         let locked = scrambled.decrypt_to_locked().unwrap();
@@ -513,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_ephemeral_key_pinning() {
-        let key_slice = get_ephemeral_key();
+        let key_slice = get_ephemeral_key().unwrap();
         assert_eq!(key_slice.len(), 32);
         assert_ne!(key_slice, &[0u8; 32]);
     }

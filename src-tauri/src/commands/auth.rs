@@ -21,8 +21,8 @@ pub async fn create_protected_vault(name:String,password:String,path:String,usb_
     let kf=key_file_path.as_ref().map(PathBuf::from);
     let raw=kf.as_ref().map(|p|yntra_vault_core::vault::manager::read_key_file_safely(p)).transpose().map_err(|e|e.to_string())?;
     let mut manager=VaultManager::create_with_keyfile(&name,&password,kf.as_deref(),&temporary.path().join("new.vdb")).map_err(|e|e.to_string())?;
-    let kit=manager.generate_emergency_kit_with_keyfile(&password,raw.as_ref().map(|b|b.as_slice())).map_err(|e|e.to_string())?;
-    manager.set_usb_binding(&password,raw.as_ref().map(|b|b.as_slice()),Some(&usb_id)).map_err(|e|e.to_string())?;
+    manager.generate_emergency_kit_with_keyfile(&password,raw.as_ref().map(|b|b.as_slice())).map_err(|e|e.to_string())?;
+    let kit=manager.set_usb_binding(&password,raw.as_ref().map(|b|b.as_slice()),Some(&usb_id)).map_err(|e|e.to_string())?;
     let mut staged=tempfile::NamedTempFile::new_in(parent).map_err(|e|e.to_string())?;
     use std::io::Write;
     staged.write_all(&std::fs::read(&manager.path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
@@ -55,7 +55,7 @@ pub fn get_local_protection(state: State<'_,AppState>) -> Result<yntra_vault_cor
 }
 
 #[tauri::command]
-pub async fn set_usb_binding(app: tauri::AppHandle,password: String,key_file_path: Option<String>,usb_id: Option<String>,state: State<'_,AppState>) -> Result<(),String> {
+pub async fn set_usb_binding(app: tauri::AppHandle,password: String,key_file_path: Option<String>,usb_id: Option<String>,state: State<'_,AppState>) -> Result<yntra_vault_core::vault::EmergencyKit,String> {
     let password=Zeroizing::new(password);
     let keyfile=key_file_path.as_deref().map(|p|super::documents::read_keyfile(&app,p)).transpose()?;
     let mut vault=state.vault.lock().map_err(|e|e.to_string())?;
@@ -372,18 +372,7 @@ pub async fn generate_key_file(app: tauri::AppHandle, path: String) -> Result<()
 
 #[tauri::command]
 pub async fn lock_vault(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    state.pairing_operation.cancel();
-    state.sync_listener_operation.cancel();
-    state.smart_login_cancel.store(true, std::sync::atomic::Ordering::Release);
-    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-    if let Some(ref mut manager) = *vault {
-        manager.lock();
-    }
-    *vault = None;
-    if let Ok(mut session) = state.qr_pairing_session.lock() { *session = None; }
-    if let Ok(mut pending) = state.pending_adopted_vault.lock() { *pending = None; }
-    let _ = super::platform::clear(&app);
-    Ok(())
+    super::platform::lock_session(&app, &state)
 }
 
 #[tauri::command]
@@ -399,7 +388,7 @@ pub async fn change_master_password(
     current_key_file: Option<String>,
     new_key_file: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<Option<yntra_vault_core::vault::EmergencyKit>, String> {
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
     let cur_kf = current_key_file.as_ref().map(PathBuf::from);
@@ -514,7 +503,7 @@ pub async fn change_master_password_bytes(
     current_key_file: Option<String>,
     new_key_file: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<Option<yntra_vault_core::vault::EmergencyKit>, String> {
     let current_bytes = Zeroizing::new(current_bytes);
     let new_password_bytes = Zeroizing::new(new_password_bytes);
     let current = decode_password_bytes(current_bytes)?;

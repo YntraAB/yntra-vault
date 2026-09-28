@@ -20,7 +20,8 @@ export interface BackupTabProps {
 export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   const { currentVault } = useAuth();
   const { refreshEntries, refreshTags, setSelectedEntry, toggleP2pListener } = useEntries();
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, networkAccessReady } = useSettings();
+  const networkBlocked = settings.operationMode === 'airgap' || !networkAccessReady;
   const { addToast } = useToast();
   const { t } = useTranslation();
   const { backend } = useBackend();
@@ -186,6 +187,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       </SettingSection>
 
       {/* WebDAV Cloud Sync */}
+      <fieldset disabled={networkBlocked} className="contents">
       <SettingSection
         label={t('settings.cloud_sync')}
         tooltip={t('settings.tooltip_cloud_sync')}
@@ -334,6 +336,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       </SettingSection>
 
       {/* Unified Trusted Devices (Kopplade enheter) */}
+      </fieldset>
       <SettingSection
         label={t('settings.trusted_devices_title')}
         tooltip={t('settings.trusted_devices_desc')}
@@ -352,6 +355,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
           </div>
           <button
             type="button"
+            disabled={networkBlocked}
             onClick={() => setShowPairingWizard(true)}
             className="flex h-8 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-3 text-[12px] font-semibold text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer shrink-0"
           >
@@ -422,7 +426,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        disabled={syncingDeviceId !== null}
+                        disabled={networkBlocked || syncingDeviceId !== null}
                         onClick={() => handleSyncDevice(device)}
                         className="flex h-7.5 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-2.5 text-[11px] font-medium text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
                         title={t('settings.sync_now_btn')}
@@ -461,7 +465,8 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               </span>
             </div>
             <Toggle
-              checked={Boolean(settings.p2pAutoSyncWifi && settings.p2pAutoListen)}
+              checked={!networkBlocked && Boolean(settings.p2pAutoSyncWifi && settings.p2pAutoListen)}
+              disabled={networkBlocked}
               onChange={(v) => {
                 updateSettings({ p2pAutoSyncWifi: v, p2pAutoListen: v });
                 toggleP2pListener(v);

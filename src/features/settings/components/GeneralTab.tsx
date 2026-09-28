@@ -36,7 +36,8 @@ export interface GeneralTabProps {
 export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps) {
   const navigate = useNavigate();
   const { currentVault, lockVault, setCurrentVault } = useAuth();
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, networkAccessReady } = useSettings();
+  const closedSystem = settings.operationMode === 'airgap';
   const { addToast } = useToast();
   const capabilities = useCapabilities();
   const { t } = useTranslation();
@@ -132,13 +133,18 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </select>
       </SettingSection>
 
+      <SettingRow label={t('onboarding.mode_airgap_title')} description={t('onboarding.mode_airgap_desc')}>
+        <Toggle checked={closedSystem} onChange={(enabled) => updateSettings({ operationMode: enabled ? 'airgap' : 'standard' })}/>
+      </SettingRow>
+
       <SettingRow
         label={t('settings.breach_label')}
         description={t('settings.breach_desc')}
         tooltip={t('settings.tooltip_breach')}
       >
         <Toggle
-          checked={settings.autoBreachCheck}
+          checked={!closedSystem && settings.autoBreachCheck}
+          disabled={closedSystem}
           onChange={(v) => updateSettings({ autoBreachCheck: v })}
         />
       </SettingRow>
@@ -177,7 +183,8 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         tooltip={t('settings.tooltip_favicons')}
       >
         <Toggle
-          checked={settings.externalFaviconsEnabled === true}
+          checked={!closedSystem && settings.externalFaviconsEnabled === true}
+          disabled={closedSystem}
           onChange={(v) => updateSettings({ externalFaviconsEnabled: v })}
         />
       </SettingRow>
@@ -311,7 +318,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
             <button
               type="button"
               onClick={() => checkForUpdates(false)}
-              disabled={updaterStatus === 'checking' || isDownloading}
+              disabled={!networkAccessReady || closedSystem || updaterStatus === 'checking' || isDownloading}
               className="h-7 px-3 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
             >
               {updaterStatus === 'checking' ? (
@@ -361,7 +368,8 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         tooltip={t('settings.tooltip_auto_update') || 'Checks GitHub release manifest on launch. No telemetry or user data is ever sent.'}
       >
         <Toggle
-          checked={settings.autoCheckUpdates === true}
+          checked={!closedSystem && settings.autoCheckUpdates === true}
+          disabled={closedSystem}
           onChange={(v) => updateSettings({ autoCheckUpdates: v })}
         />
       </SettingRow>

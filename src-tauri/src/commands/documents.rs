@@ -45,7 +45,7 @@ pub fn read_keyfile(
     if bytes.is_empty() {
         return Err("Key file is empty".into());
     }
-    Ok(yntra_vault_core::crypto::LockedBuffer::new(&bytes))
+    yntra_vault_core::crypto::LockedBuffer::new(&bytes).map_err(|e| e.to_string())
 }
 
 pub fn write(app: &tauri::AppHandle, path: &str, bytes: &[u8]) -> Result<(), String> {

@@ -87,6 +87,17 @@ pub struct DecryptedEntry {
     pub attachments: Vec<AttachmentInfo>,
 }
 
+impl Drop for DecryptedEntry {
+    fn drop(&mut self) {
+        self.password.zeroize();
+        self.totp_secret.zeroize();
+        self.notes.zeroize();
+        self.username.zeroize();
+        self.email.zeroize();
+        for field in &mut self.custom_fields { field.value.zeroize(); }
+    }
+}
+
 impl VaultManager {
     /// Get all entry previews (no password decryption needed).
     pub fn list_entries(&self) -> crate::Result<Vec<EntryPreview>> {
@@ -331,6 +342,16 @@ impl VaultManager {
 
     /// Add a new entry to the vault.
     pub fn add_entry(&mut self, new: NewEntry) -> crate::Result<Uuid> {
+        self.transactional_data_change(|manager| manager.add_entry_inner(new))
+    }
+
+    fn add_entry_inner(&mut self, mut new: NewEntry) -> crate::Result<Uuid> {
+        let password = Zeroizing::new(std::mem::take(&mut new.password));
+        let totp_secret = Zeroizing::new(new.totp_secret.take());
+        let mut notes = Zeroizing::new(std::mem::take(&mut new.notes));
+        if let Some(attachments) = &new.attachments {
+            for attachment in attachments { super::attachments::validate_attachment_size(attachment.data.len())?; }
+        }
         crate::vault::validation::validate_display_name(&new.title)?;
         for field in &new.custom_fields {
             crate::vault::validation::validate_display_name(&field.name)?;
@@ -342,14 +363,14 @@ impl VaultManager {
 
         // Encrypt password (Layer 2: XChaCha20-Poly1305 with per-entry key + AAD)
         let encrypted_password = Self::encrypt_entry_field(
-            new.password.as_bytes(),
+            password.as_bytes(),
             &keys.entry_key,
             &id,
             FieldScope::Password,
         )?;
 
         // Encrypt TOTP secret if provided
-        let encrypted_totp = if let Some(ref secret) = new.totp_secret {
+        let encrypted_totp = if let Some(secret) = totp_secret.as_ref() {
             Some(Self::encrypt_entry_field(
                 secret.as_bytes(),
                 &keys.entry_key,
@@ -375,9 +396,9 @@ impl VaultManager {
                 )?;
                 attachments.push(FileAttachment {
                     id: att_id,
-                    name: att.name,
+                    name: att.name.clone(),
                     size: att.data.len() as u64,
-                    mime_type: att.mime_type,
+                    mime_type: att.mime_type.clone(),
                     created_at: now,
                     encrypted_blob,
                 });
@@ -391,7 +412,7 @@ impl VaultManager {
             encrypted_password,
             url: new.url,
             email: new.email,
-            notes: new.notes,
+            notes: std::mem::take(&mut *notes),
             tags: new.tags,
             favorite: false,
             pinned: false,
@@ -402,10 +423,10 @@ impl VaultManager {
             updated_at: now,
             password_history: Vec::new(),
             breach_status: BreachStatus::Unknown,
-            strength_score: if new.password.is_empty() {
+            strength_score: if password.is_empty() {
                 None
             } else {
-                Some(crate::breach::strength::analyze_password(&new.password))
+                Some(crate::breach::strength::analyze_password(&password))
             },
             password_changed_at: now,
             encrypted_passkey: None,
@@ -442,10 +463,16 @@ impl VaultManager {
     /// Update an existing entry. Tracks password history.
     /// Does not update `updated_at` or trigger disk write if only non-content metadata (e.g. breach status) changed.
     pub fn update_entry(&mut self, id: Uuid, update: UpdateEntry) -> crate::Result<()> {
-        self.update_entry_inner(id, update, true)
+        self.transactional_data_change(|manager| manager.update_entry_inner(id, update, true))
     }
 
-    pub(crate) fn update_entry_inner(&mut self, id: Uuid, update: UpdateEntry, persist: bool) -> crate::Result<()> {
+    pub(crate) fn update_entry_inner(&mut self, id: Uuid, mut update: UpdateEntry, persist: bool) -> crate::Result<()> {
+        let password = Zeroizing::new(update.password.take());
+        let totp_secret = Zeroizing::new(update.totp_secret.take());
+        let mut notes = Zeroizing::new(update.notes.take());
+        if let Some(attachments) = &update.new_attachments {
+            for attachment in attachments { super::attachments::validate_attachment_size(attachment.data.len())?; }
+        }
         let entry_key = self.keys.as_ref().ok_or(VaultError::VaultLocked)?.entry_key.clone();
         let now = Utc::now();
         let mut content_changed = false;
@@ -473,7 +500,7 @@ impl VaultManager {
                     }
                 }
             }
-            if let Some(ref new_password) = update.password {
+            if let Some(new_password) = password.as_ref() {
                 let old_password_bytes = Self::decrypt_entry_field(
                     &entry.encrypted_password,
                     &entry_key,
@@ -540,11 +567,14 @@ impl VaultManager {
                     content_changed = true;
                     search_index_changed = true;
                 }
-            if let Some(notes) = update.notes
-                && entry.notes != notes {
-                    entry.notes = notes;
+            if let Some(mut notes) = notes.take() {
+                if entry.notes != notes {
+                    entry.notes.zeroize();
+                    entry.notes = std::mem::take(&mut notes);
                     content_changed = true;
                 }
+                notes.zeroize();
+            }
             if let Some(tags) = update.tags
                 && entry.tags != tags {
                     entry.tags = tags;
@@ -572,14 +602,14 @@ impl VaultManager {
             }
 
             // Update TOTP secret
-            if let Some(ref totp_secret) = update.totp_secret {
+            if let Some(totp_secret) = totp_secret.as_ref() {
                 let is_different = match &entry.encrypted_totp_secret {
                     None => !totp_secret.is_empty(),
                     Some(blob) => {
-                        let old_totp = Self::decrypt_entry_field(blob, &entry_key, &id, FieldScope::Totp)
+                        let old_totp = Zeroizing::new(Self::decrypt_entry_field(blob, &entry_key, &id, FieldScope::Totp)
                             .map(|b| String::from_utf8_lossy(&b).to_string())
-                            .unwrap_or_default();
-                        &old_totp != totp_secret
+                            .unwrap_or_default());
+                        old_totp.as_str() != totp_secret
                     }
                 };
                 if is_different {
@@ -647,9 +677,9 @@ impl VaultManager {
                         )?;
                         entry.attachments.push(FileAttachment {
                             id: att_id,
-                            name: att.name,
+                            name: att.name.clone(),
                             size: att.data.len() as u64,
-                            mime_type: att.mime_type,
+                            mime_type: att.mime_type.clone(),
                             created_at: now,
                             encrypted_blob,
                         });

@@ -18,11 +18,12 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/contexts/ToastContext';
 import { useTranslation } from '@/contexts/LanguageContext';
-import { isTauri, getBackend, openFileDialog, saveFileDialog, type StrengthScore, type StrengthLevel } from '@/lib/backend';
+import { isTauri, getBackend, openFileDialog, saveFileDialog, type StrengthScore, type StrengthLevel, type EmergencyKit } from '@/lib/backend';
 import { useBackend } from '@/lib/useBackend';
 import { ActionTooltip } from '@/components/ui/tooltip';
 import { SecureSecretInput, type SecureSecretInputRef } from '@/components/ui';
 import { isValidNewMasterPassword } from '@/lib/masterPassword';
+import { RecoveryKitDialog } from './RecoveryKitWizard';
 
 export interface ChangeMasterPasswordModalProps {
   open: boolean;
@@ -32,7 +33,7 @@ export interface ChangeMasterPasswordModalProps {
 const STRENGTH_LEVELS: StrengthLevel[] = ['Critical', 'Weak', 'Fair', 'Strong', 'Excellent'];
 
 export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswordModalProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { addToast } = useToast();
   const { backend } = useBackend();
 
@@ -57,8 +58,26 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
   const [generateNewKeyFile, setGenerateNewKeyFile] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [replacementKit, setReplacementKit] = useState<EmergencyKit | null>(null);
+  const replacementPending = useRef(false);
   const submitting = useRef(false);
-  const requestClose = () => { if (!submitting.current) onClose(); };
+  const requestClose = () => { if (!submitting.current && !replacementPending.current) onClose(); };
+  const cancelReplacementKit = () => {
+    if (!replacementKit) return;
+    const confirmed = typeof window.confirm !== 'function' || window.confirm(language === 'sv'
+      ? 'De nya återställningsnycklarna har inte sparats. Vill du stänga ändå? Du kan skapa ett nytt kit från säkerhetsinställningarna.'
+      : 'The new recovery shares have not been saved. Close anyway? You can create a new kit from the security settings.');
+    if (!confirmed) return;
+    replacementPending.current = false;
+    setReplacementKit(null);
+    addToast({
+      message: language === 'sv'
+        ? 'Lösenordet ändrades, men de nya återställningsnycklarna sparades inte.'
+        : 'The password changed, but the new recovery shares were not saved.',
+      type: 'info',
+    });
+    onClose();
+  };
   const [error, setError] = useState<string | null>(null);
   const [strengthScore, setStrengthScore] = useState<StrengthScore | null>(null);
 
@@ -78,6 +97,8 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
       setNewKeyFile('');
       setGenerateNewKeyFile(false);
       setStrengthScore(null);
+      setReplacementKit(null);
+      replacementPending.current = false;
     }
     return () => {
       setCurrentPassword('');
@@ -92,7 +113,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open && !submitting.current) onClose();
+      if (e.key === 'Escape' && open && !submitting.current && !replacementPending.current) onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -236,12 +257,17 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
           await be.generateKeyFile(newKeyFile.trim());
         }
 
-        await be.changeMasterPasswordBytes(
+        const nextKit = await be.changeMasterPasswordBytes(
           curBytes,
           newBytes,
           useCurrentKeyFile && currentKeyFile.trim() ? currentKeyFile.trim() : undefined,
           useNewKeyFile && newKeyFile.trim() ? newKeyFile.trim() : undefined,
         );
+        if (nextKit) {
+          replacementPending.current = true;
+          setReplacementKit(nextKit);
+          return;
+        }
       }
       addToast({ message: t('toast.master_password_changed') || 'Master password changed successfully', type: 'success' });
       onClose();
@@ -272,6 +298,13 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
   const currentLevelIdx = strengthScore
     ? STRENGTH_LEVELS.indexOf(strengthScore.level)
     : -1;
+
+  if (open && replacementKit) return <RecoveryKitDialog kit={replacementKit} onDone={() => {
+    replacementPending.current = false;
+    setReplacementKit(null);
+    addToast({ message: t('toast.master_password_changed') || 'Master password changed successfully', type: 'success' });
+    onClose();
+  }} onCancel={cancelReplacementKit}/>;
 
   return (
     <AnimatePresence>
@@ -364,6 +397,9 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
                         {t('cmp.current_pass_desc') || 'Enter your current master password to verify authorization before re-encrypting the vault.'}
                       </span>
                     </div>
+                    <p className="text-[11px] text-[var(--text-secondary)]">{language === 'sv'
+                      ? 'Om återställning är aktiverad får du nya nycklar att spara. De gamla gäller bara äldre säkerhetskopior.'
+                      : 'If recovery is enabled, you will receive replacement shares to save. The old shares remain valid only for older backups.'}</p>
 
                     {/* Current Password Field */}
                     <div className="flex flex-col gap-1">

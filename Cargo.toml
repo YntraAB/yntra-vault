@@ -7,6 +7,7 @@ members = [
 ]
 exclude = [
     "fuzz",
+    "vendor/glib",
 ]
 resolver = "2"
 
@@ -19,3 +20,7 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[patch.crates-io]
+# GTK3 currently requires GLib 0.18; documented upstream soundness backport.
+glib = { path = "vendor/glib" }

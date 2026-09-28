@@ -10,7 +10,7 @@ use zeroize::Zeroizing;
 
 pub const MAGIC: &[u8; 4] = b"YNS2";
 const MAX_HEADER: usize = 16384;
-const MAX_FILE: usize = 520 * 1024 * 1024;
+pub(crate) const MAX_FILE: usize = 520 * 1024 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RecoverySlot {
@@ -39,6 +39,67 @@ pub(crate) struct StorageSession {
 
 pub fn is_protected(bytes: &[u8]) -> bool {
     bytes.starts_with(MAGIC)
+}
+
+pub(crate) fn validate_payload_size(plaintext_len: usize) -> crate::Result<()> {
+    if plaintext_len.checked_add(40).is_none_or(|len| len > super::format::MAX_PAYLOAD_LEN) {
+        return Err(VaultError::InvalidFormat("Vault exceeds the supported payload size; remove attachments or use another vault".into()));
+    }
+    Ok(())
+}
+
+pub(crate) fn serialize_payload(data: &super::types::VaultData) -> crate::Result<Zeroizing<Vec<u8>>> {
+    serialize_with_limit(data, super::format::MAX_PAYLOAD_LEN - 40)
+}
+
+fn serialize_with_limit(data: &impl Serialize, limit: usize) -> crate::Result<Zeroizing<Vec<u8>>> {
+    struct Writer { bytes: Zeroizing<Vec<u8>>, limit: usize }
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Vault exceeds the supported payload size"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    let mut writer = Writer { bytes: Zeroizing::new(Vec::new()), limit };
+    data.serialize(&mut rmp_serde::Serializer::new(&mut writer))
+        .map_err(|e| VaultError::SerializationError(format!("Vault serialize: {e}")))?;
+    Ok(writer.bytes)
+}
+
+/// Keep a stable sidecar inode locked across checking and atomic replacement.
+pub(crate) fn lock_vault_path(path: &std::path::Path) -> crate::Result<std::fs::File> {
+    let canonical = if path.exists() {
+        if !path.is_file() {
+            return Err(VaultError::InvalidState("Vault path is not a regular file".into()));
+        }
+        path.canonicalize()?
+    } else {
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+        parent.canonicalize()?.join(path.file_name().ok_or_else(invalid)?)
+    };
+    let mut name = canonical.as_os_str().to_owned();
+    name.push(".lock");
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(false).read(true).write(true);
+    #[cfg(unix)]
+    { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    let file = options.open(std::path::PathBuf::from(name))?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        loop {
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 { break; }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted { return Err(error.into()); }
+        }
+    }
+    #[cfg(not(unix))]
+    file.lock()?;
+    Ok(file)
 }
 
 pub(crate) fn read_bounded(path: &std::path::Path) -> crate::Result<Vec<u8>> {
@@ -272,6 +333,11 @@ impl StorageSession {
     ) -> crate::Result<()> {
         let serial = connected_serial(&self.header)?;
         self.unlock_key = unlock_key(&self.header, password, keyfile, serial.as_deref())?;
+        self.key = VaultKey { bytes: crate::crypto::kdf::generate_salt() };
+        // The password slot also contains recovery material; callers must issue
+        // a fresh kit before saving if the old slot had a recovery key.
+        self.header.recovery = None;
+        self.recovery_key = None;
         self.wrap_password(keys)
     }
 
@@ -279,6 +345,9 @@ impl StorageSession {
         let header = serde_json::to_vec(&self.header).map_err(|_| invalid())?;
         if header.len() > MAX_HEADER {
             return Err(invalid());
+        }
+        if inner.len().checked_add(header.len() + 48).is_none_or(|len| len > MAX_FILE) {
+            return Err(VaultError::InvalidFormat("Vault exceeds the supported file size".into()));
         }
         let mut out = MAGIC.to_vec();
         out.extend_from_slice(&(header.len() as u32).to_le_bytes());
@@ -461,6 +530,36 @@ mod tests {
     use super::*;
     fn keys() -> SubKeys {
         SubKeys::from_bytes(&[42u8; 160]).unwrap()
+    }
+
+    #[test]
+    fn writer_rejects_lengths_that_the_reader_cannot_open() {
+        assert!(validate_payload_size(super::super::format::MAX_PAYLOAD_LEN - 40).is_ok());
+        assert!(validate_payload_size(super::super::format::MAX_PAYLOAD_LEN - 39).is_err());
+        assert!(validate_payload_size(usize::MAX).is_err());
+        assert!(serialize_with_limit(&"synthetic data", 2).is_err());
+        assert_eq!(*serialize_with_limit(&"synthetic data", 32).unwrap(), rmp_serde::to_vec(&"synthetic data").unwrap());
+    }
+
+    #[test]
+    fn concurrent_saves_cannot_overwrite_a_newer_revision() {
+        use super::super::VaultManager;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("concurrent.vdb");
+        let first = VaultManager::create("Fixture", "synthetic password 2026", &path).unwrap();
+        let second = VaultManager::open(&path, "synthetic password 2026").unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = [first, second].into_iter().enumerate().map(|(index, mut manager)| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                manager.data.metadata.name = format!("Session {index}");
+                barrier.wait();
+                manager.save().is_ok()
+            })
+        }).collect();
+        let successes = handles.into_iter().map(|handle| handle.join().unwrap()).filter(|success| *success).count();
+        assert_eq!(successes, 1);
+        assert!(VaultManager::open(&path, "synthetic password 2026").is_ok());
     }
     #[test]
     fn binding_is_cryptographic_and_recovery_survives_binding() {

@@ -251,8 +251,8 @@ export const en = {
   'settings.tooltip_group_by_date': 'Toggle date section grouping in the entry list',
 
   'settings.favicons_label': 'Fetch website icons (Favicons)',
-  'settings.favicons_desc': 'Automatically retrieves website logos and icons. Disable for a completely closed, offline air-gapped system.',
-  'settings.tooltip_favicons': 'Control automatic website favicon fetching',
+  'settings.favicons_desc': 'Requests account domains from DuckDuckGo, with Google as a fallback. Icons stay in memory until the vault locks.',
+  'settings.tooltip_favicons': 'Icon providers receive the requested domain and your IP address. Closed System blocks these requests.',
 
   'settings.updates_title': "App Updates & Version",
   'settings.current_version': "Installed Version",

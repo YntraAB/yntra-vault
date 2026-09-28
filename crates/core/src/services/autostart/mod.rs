@@ -293,6 +293,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "modifies the user's OS startup registration"]
     fn test_autostart_toggle_roundtrip() {
         // Save initial state
         let initial = is_autostart_enabled().unwrap();

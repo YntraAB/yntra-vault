@@ -1,6 +1,6 @@
 [package]
 name = "yntra-vault-core"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 description = "Yntra Vault - Core cryptographic engine"
 license = "MIT"
@@ -32,6 +32,7 @@ data-encoding = "2.6"       # Base32 decode for TOTP secrets
 # Security
 zeroize = { version = "1", features = ["derive", "serde"] }
 subtle = "2.6"
+ed25519-dalek = "2"
 rand = "0.9"
 
 # Serialization
@@ -48,11 +49,12 @@ thiserror = "2"
 url = "2"
 semver = "1"
 tempfile = "3"
+same-file = "1"
 
 # HTTP client for HIBP breach checking
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+p256 = { version = "0.13", features = ["ecdsa", "ecdh", "pkcs8"] }
 
 # Smart Login — CDP browser automation
 chromiumoxide = { version = "0.9", default-features = false }
@@ -93,6 +95,7 @@ security-framework = "3"
 libc = "0.2"
 
 [dev-dependencies]
+yntra-crypto = { path = "../crypto", features = ["test-support"] }
 rpassword = "7"
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 tempfile = "3"

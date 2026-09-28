@@ -256,7 +256,7 @@ export class TauriBackend implements YntraVaultBackend {
     newPassword: string,
     currentKeyFile?: string,
     newKeyFile?: string,
-  ): Promise<void> {
+  ): Promise<EmergencyKit | null> {
     return invoke('change_master_password', {
       current,
       newPassword,
@@ -326,6 +326,10 @@ export class TauriBackend implements YntraVaultBackend {
 
   async setExternalFaviconsEnabled(enabled: boolean): Promise<void> {
     return invoke('set_external_favicons_enabled', { enabled });
+  }
+
+  async setNetworkAccess(enabled: boolean): Promise<void> {
+    return invoke('set_network_access', { enabled });
   }
 
   async isExternalFaviconsEnabled(): Promise<boolean> {
@@ -630,7 +634,7 @@ export class TauriBackend implements YntraVaultBackend {
     });
   }
 
-  async changeMasterPasswordBytes(currentBytes: Uint8Array | number[], newPasswordBytes: Uint8Array | number[], currentKeyFile?: string, newKeyFile?: string): Promise<void> {
+  async changeMasterPasswordBytes(currentBytes: Uint8Array | number[], newPasswordBytes: Uint8Array | number[], currentKeyFile?: string, newKeyFile?: string): Promise<EmergencyKit | null> {
     return invoke('change_master_password_bytes', {
       currentBytes: Array.from(currentBytes),
       newPasswordBytes: Array.from(newPasswordBytes),
@@ -716,6 +720,10 @@ export class TauriBackend implements YntraVaultBackend {
 
   async installPortableUpdate(url: string, expectedSha256?: string): Promise<void> {
     return invoke('install_portable_update', { url, expectedSha256 });
+  }
+
+  async installDesktopUpdate(url: string, expectedSha256: string): Promise<void> {
+    return invoke('install_desktop_update', { url, expectedSha256 });
   }
 
   async getAppVersion(): Promise<string> {

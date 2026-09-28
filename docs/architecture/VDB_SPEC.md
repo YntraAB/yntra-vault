@@ -1,6 +1,6 @@
 # Yntra Vault Database Format Specification (`YNTR` v4/v5 and `YNS2` v2)
 
-**Document Version**: 1.1 (0.2.4 working tree)
+**Document Version**: 1.2 (0.2.5 security remediation working tree; unpublished)
 
 **Target Formats**: ordinary `YNTR` v4, hardware-bound `YNTR` v5, local-protection `YNS2` v2
 **Classification**: Public Specification  
@@ -10,7 +10,7 @@
 
 ## 0. Current format boundaries
 
-| Framing | Role in 0.2.4 | Key distinction |
+| Framing | Role in 0.2.5 | Key distinction |
 | --- | --- | --- |
 | `YNTR`, version 4 | Ordinary vault representation and encrypted sync snapshots | Existing format remains supported; transport snapshots omit local factor/recovery records. |
 | `YNTR`, version 5 | Newly enrolled/re-enrolled hardware security-key vaults | Random payload key wrapped with the password/hardware factor; local encrypted `hardware_password_key` supports deliberate factor removal. Older readers must reject v5. |
@@ -18,7 +18,7 @@
 
 The layout and password-derived key diagram below describe ordinary `YNTR` storage. They must not be used to implement password-only opening of hardware v5 or to treat `YNS2` as a renamed v4 header. USB binding is based on a public/spoofable device serial; it is not a non-exportable hardware key. Recovery v2 and hardware-key enrollment are currently separate incompatible protection modes. See [USB/recovery](../security/USB-RECOVERY.md) and [recovery specification](../security/EMERGENCY_RECOVERY.md).
 
-`YNS2` framing is magic, a little-endian u32 JSON-header length, the bounded versioned header, and nonce/ciphertext/tag. Its header and wrapping context are authenticated; verify before deserializing inner vault content. Current limits and exact domain strings live in `storage.rs`; preserve them for already-written version-2 files. Local wrapper policy is never copied from a synchronization peer. Atomic local saves use staged/flushed files and stale-header checks.
+`YNS2` framing is magic, a little-endian u32 JSON-header length, the bounded versioned header, and nonce/ciphertext/tag. Its header and wrapping context are authenticated; verify before deserializing inner vault content. Current limits and exact domain strings live in `storage.rs`; preserve them for already-written version-2 files. Local wrapper policy is never copied from a synchronization peer. Atomic local saves use a staged/flushed sibling file and a whole-file revision check under an adjacent OS write lock. The `.vdb.lock` sidecar contains no vault contents or keys. Protected password/keyfile changes rotate the outer key and replace any active recovery kit; USB-binding changes also return replacement shares. Old snapshots retain their previous credentials.
 
 ## 1. Overview & Architectural Principles
 

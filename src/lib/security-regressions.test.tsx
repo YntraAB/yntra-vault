@@ -96,6 +96,77 @@ describe('secret and synchronization lifecycle', () => {
     expect(closed).toBe(1);
   });
 
+  it('requires saving replacement recovery shares after changing the password', async () => {
+    const { ChangeMasterPasswordModal } = await import('@/features/auth/components/ChangeMasterPasswordModal');
+    const { frameSteps, frameData } = await import('motion-dom');
+    (await import('framer-motion')).MotionGlobalConfig.skipAnimations = true;
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend(); let closed = 0;
+    const kit = { vault_id:'fixture',vault_name:'Synthetic',created_at:'2026-09-27',generated_at:'2026-09-27',format_version:2,total_entries:1,verification_hash:'replacement-kit',document_markdown:'',shares:[1,2,3].map(i=>({share_index:i,label:`Share ${i}`,share_data:`synthetic-replacement-${i}`})) };
+    Object.assign(backend, { changeMasterPasswordBytes: async () => kit });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<ToastProvider><ChangeMasterPasswordModal open onClose={() => { closed++; }} /></ToastProvider>); });
+    const button = (label: string) => [...dom.document.querySelectorAll('button')].find(b => b.textContent?.trim() === label)!;
+    await fillInput(container.querySelector<HTMLInputElement>('input[type=password]')!, 'current-fixture-password');
+    await act(async () => button('Next').click());
+    for (let tick = 0; tick < 4; tick++) await act(async () => { frameData.timestamp = Math.max(frameData.timestamp, performance.now()) + 500; for (const step of Object.values(frameSteps)) step.process(frameData); });
+    for (const input of container.querySelectorAll<HTMLInputElement>('input[type=password]')) await fillInput(input, 'new-valid-fixture-password');
+    await act(async () => button('Change Master Password').click());
+    expect(closed).toBe(0);
+    expect(dom.document.querySelector('[aria-label="Save recovery shares"]')).not.toBeNull();
+    await act(async () => button('Start saving').click());
+    expect(button('Continue').disabled).toBe(true);
+    await act(async () => dom.document.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+    expect(button('Continue').disabled).toBe(true);
+    await act(async () => button('Next share').click());
+    await act(async () => dom.document.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+    await act(async () => button('Continue').click());
+    expect(closed).toBe(0);
+    await act(async () => button('Done').click());
+    expect(closed).toBe(1);
+  });
+
+  it('allows cancelling the replacement recovery-share dialog with a warning', async () => {
+    const { ChangeMasterPasswordModal } = await import('@/features/auth/components/ChangeMasterPasswordModal');
+    const { frameSteps, frameData } = await import('motion-dom');
+    (await import('framer-motion')).MotionGlobalConfig.skipAnimations = true;
+    Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
+    const backend = await getBackend(); let closed = 0;
+    const kit = { vault_id:'fixture',vault_name:'Synthetic',created_at:'2026-09-27',generated_at:'2026-09-27',format_version:2,total_entries:1,verification_hash:'cancel-kit',document_markdown:'',shares:[1,2,3].map(i=>({share_index:i,label:`Share ${i}`,share_data:`synthetic-cancel-${i}`})) };
+    Object.assign(backend, { changeMasterPasswordBytes: async () => kit });
+    const container = dom.document.createElement('div'); dom.document.body.append(container);
+    await act(async () => { root = mount(container as unknown as Element); root.render(<ToastProvider><ChangeMasterPasswordModal open onClose={() => { closed++; }} /></ToastProvider>); });
+    const button = (label: string) => [...dom.document.querySelectorAll('button')].find(b => b.textContent?.trim() === label)!;
+    await fillInput(container.querySelector<HTMLInputElement>('input[type=password]')!, 'current-fixture-password');
+    await act(async () => button('Next').click());
+    for (let tick = 0; tick < 4; tick++) await act(async () => { frameData.timestamp = Math.max(frameData.timestamp, performance.now()) + 500; for (const step of Object.values(frameSteps)) step.process(frameData); });
+    for (const input of container.querySelectorAll<HTMLInputElement>('input[type=password]')) await fillInput(input, 'new-valid-fixture-password');
+    await act(async () => button('Change Master Password').click());
+    expect(dom.document.querySelector('[aria-label="Save recovery shares"]')).not.toBeNull();
+    await act(async () => dom.document.dispatchEvent(new dom.KeyboardEvent('keydown', { bubbles:true,key:'Escape' })));
+    expect(closed).toBe(1);
+    expect(dom.document.querySelector('[aria-label="Save recovery shares"]')).toBeNull();
+  });
+
+  it('shows the replacement recovery kit when USB protection changes', async () => {
+    const { LocalProtectionSettings } = await import('@/features/auth/components/LocalProtection');
+    const { initializePlatform } = await import('@/lib/platform');
+    Object.assign(dom,{__TAURI_INTERNALS__:{invoke:async(command:string)=>command==='get_runtime_platform'?'windows':null}});
+    await initializePlatform(); const backend=await getBackend();let bindings=0;
+    const kit={vault_id:'fixture',vault_name:'Synthetic',created_at:'2026-09-27',generated_at:'2026-09-27',format_version:2,total_entries:1,verification_hash:'usb-replacement-kit',document_markdown:'',shares:[1,2,3].map(i=>({share_index:i,label:`Share ${i}`,share_data:`synthetic-usb-replacement-${i}`}))};
+    Object.assign(backend,{getLocalProtection:async()=>({protected:true,usb_bound:true,recovery_enabled:true}),listUsbStorageDevices:async()=>[{id:'fixture-drive',name:'Synthetic USB'}],setUsbBinding:async()=>{bindings++;return kit;}});
+    const container=dom.document.createElement('div');dom.document.body.append(container);
+    await act(async()=>{root=mount(container as unknown as Element);root.render(<LocalProtectionSettings/>);});
+    await act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent?.trim()==='Manage')!.click());
+    await fillInput(dom.document.querySelector<HTMLInputElement>('input[type=password]')!,'current-fixture-password');
+    await act(async()=>[...dom.document.querySelectorAll('button')].find(b=>b.textContent?.trim()==='Disable USB protection')!.click());
+    expect(bindings).toBe(1);expect(dom.document.querySelector('[aria-label="Save recovery shares"]')).not.toBeNull();
+    expect(dom.document.body.textContent).toContain('Start saving');
+    const closeKit = dom.document.querySelector<HTMLButtonElement>('[role="dialog"] header button')!;
+    await act(async()=>closeKit.click());
+    expect(dom.document.querySelector('[aria-label="Save recovery shares"]')).toBeNull();
+  });
+
   it('rejects invalid new-vault credentials before any path dialog or backend creation', async () => {
     const { CreateVaultModal } = await import('@/features/auth/components/CreateVaultModal');
     Object.assign(dom, { __TAURI_INTERNALS__: { invoke: async () => null } });
@@ -548,15 +619,15 @@ describe('secret and synchronization lifecycle', () => {
       root.render(<UpdateModal isOpen onClose={() => {}} updateInfo={info} currentVersion="0.2.2" isDownloading={false} onInstall={() => {}} />);
     });
     await render(update);
-    expect(container.textContent).toContain('download opens in your browser');
-    expect(container.textContent).not.toContain('Ed25519');
+    expect(container.textContent).toContain('No download is available');
+    expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Download & Install')?.disabled).toBe(true);
     await render({ ...update, target_platform: 'windows-portable', sha256: 'a'.repeat(64) });
     expect(container.textContent).toContain('checksum is checked before installation');
     await render({ ...update, target_platform: 'android', sha256: null });
     expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Download & Install')?.disabled).toBe(true);
     await render({ ...update, download_url: null });
     expect(container.textContent).toContain('No download is available');
-    expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Download')?.disabled).toBe(true);
+    expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Download & Install')?.disabled).toBe(true);
   });
 
   it('checks once at app startup when opted in, without opening settings', async () => {
@@ -617,6 +688,23 @@ describe('secret and synchronization lifecycle', () => {
     expect(installs).toBe(2);
     expect(updater.status).toBe('ready');
     expect(updater.isModalOpen).toBe(false);
+  });
+
+  it('uses the verified native desktop update path instead of opening a remote download', async () => {
+    const { UpdaterProvider, useUpdater } = await import('@/features/updater/useUpdater');
+    const calls: Array<{command:string;args:any}> = [];
+    Object.assign(dom,{__TAURI_INTERNALS__:{invoke:async(command:string,args:any)=>{calls.push({command,args});return null;}}});
+    const backend=await getBackend();
+    Object.assign(backend,{getAppVersion:async()=>'0.2.3',checkAppUpdate:async()=>({current_version:'0.2.3',latest_version:'0.2.4',has_update:true,target_platform:'windows-x86_64',download_url:'https://github.com/YntraAB/yntra-vault/releases/download/v0.2.4/app.exe',sha256:'a'.repeat(64),signature:null,release_notes:null,pub_date:null})});
+    let updater!:ReturnType<typeof useUpdater>;
+    function Probe(){updater=useUpdater();return null;}
+    const container=dom.document.createElement('div');dom.document.body.append(container);
+    await act(async()=>{root=mount(container as unknown as Element);root.render(<SettingsProvider><ToastProvider><UpdaterProvider><Probe/></UpdaterProvider></ToastProvider></SettingsProvider>);});
+    await act(async()=>{await updater.checkForUpdates();});
+    await act(async()=>{await updater.installUpdate();});
+    expect(calls.find(call=>call.command==='install_desktop_update')?.args).toEqual({url:'https://github.com/YntraAB/yntra-vault/releases/download/v0.2.4/app.exe',expectedSha256:'a'.repeat(64)});
+    expect(calls.some(call=>call.command.includes('shell'))).toBe(false);
+    expect(updater.status).toBe('ready');
   });
 
   it('keeps the newest result and performs no automatic network breach check', async () => {

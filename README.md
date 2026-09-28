@@ -11,12 +11,12 @@ An offline-first, zero-knowledge desktop password manager engineered with Rust, 
 
 All credentials remain fully local on your device. Yntra Vault operates with zero cloud servers, zero telemetry, and zero mandatory third-party network connections. Full binary format specification is available in [VDB_SPEC.md](docs/architecture/VDB_SPEC.md).
 
-For current source behavior, see [USB binding and recovery v2](docs/security/USB-RECOVERY.md) and [updates and preserved application data](docs/security/UPDATES.md). See the 0.2.4 changelog for the source changes; published packages are listed on GitHub Releases. Android implementation, device verification and independently signed desktop updates are separate milestones; see those guides for what remains unverified or unimplemented.
+For current source behavior, see [USB binding and recovery v2](docs/security/USB-RECOVERY.md) and [updates and preserved application data](docs/security/UPDATES.md). See the 0.2.5 changelog for the source changes; published packages are listed separately on GitHub Releases. Implementation, package publication, and real-device verification are distinct; see those guides for the verified scope and remaining limits.
 
 ---
 
 > [!WARNING]
-> **Pre-Audit Security Notice**: Yntra Vault is currently in active development. While built using multi-layer defense-in-depth cryptography and strict memory zeroization, the codebase **has not yet undergone an independent third-party security audit**. It is provided for community evaluation and testing. Please review [SECURITY.md](SECURITY.md) for vulnerability disclosure and [docs/security/cryptographic-proofs.md](docs/security/cryptographic-proofs.md) for formal proofs and security invariants.
+> **Pre-Audit Security Notice**: Yntra Vault is currently in active development. While built using multi-layer defense-in-depth cryptography and strict memory zeroization, the codebase **has not yet undergone an independent third-party security audit**. It is provided for community evaluation and testing. Please review [SECURITY.md](SECURITY.md) for vulnerability disclosure and [docs/security/cryptographic-proofs.md](docs/security/cryptographic-proofs.md) for design arguments and intended security invariants, not formal verification.
 
 ---
 
@@ -30,12 +30,12 @@ graph TD
     ARG --> HKDF["HKDF-SHA512"]
     HKDF --> VK["Vault Key<br/>(XChaCha20-Poly1305 + Header AAD)"]
     HKDF --> EK["Entry Key<br/>(XChaCha20-Poly1305 / AES-256-GCM)"]
-    HKDF --> HK["P2P Auth Key<br/>(HMAC-SHA512)"]
+    HKDF --> HK["Vault Membership Key<br/>(HMAC-SHA512)"]
     HKDF --> SK["Search Key<br/>(Encrypted Index)"]
 ```
 
 * **Single-Pass Authenticated Header**: Header metadata (magic, version, salt, KDF params) is bound as AAD into `XChaCha20-Poly1305`, authenticating header and payload before deserialization.
-* **Zero-Knowledge P2P LAN Sync & Optical QR Device Pairing**: Direct local network synchronization over dedicated port 5324 using air-gapped optical QR pairing (`YQR2`) with out-of-band Short Authentication String (SAS) visual verification, dynamic session AAD binding, and zero-IPC credential isolation, alongside 6-digit PIN pairing with ephemeral Argon2id-derived transit subkeys, active UDP query-response discovery (`YQRY`), mutual HMAC challenge-response pre-authentication, strict adopt mode isolation, progressive two-step pairing wizard, and native desktop notifications.
+* **Local network sync and device pairing**: PIN or QR pairing explicitly enrolls a separate signing key for each device. Protocol v3 authenticates both devices and uses fresh ECDH transfer keys. Smart Login and the Git credential helper enforce parsed exact HTTPS origins; Smart Login permits only explicitly listed SSO host pairs. Existing sync peers must update and re-pair. Removing a device blocks its later authenticated sync locally, but cannot erase old copies or revoke shared keys from snapshots acquired separately.
 * **Hardware Envelopes (TPM 2.0 & App-Bound DPAPI)**: Sensitive secrets and biometric session tokens are hardware-bound using Windows TPM 2.0 RSA encryption and BLAKE3 installation-bound DPAPI envelopes.
 * **Passkey Support**: Native ES256 (ECDSA P-256) keypair generation and signing per entry.
 * **Zeroize Memory Protection**: Critical keys and decrypted fields implement `zeroize::ZeroizeOnDrop` alongside guard-paged locked buffers (`PAGE_NOACCESS` / `mlock` + `MADV_DONTDUMP`).
@@ -97,8 +97,8 @@ Yntra Vault is localized into 24 languages with 100% string coverage (824 transl
 | Password History & Rollback | `core::vault::history` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Hardware Envelopes (TPM 2.0 / DPAPI) | `crypto::tpm` | `Login.tsx` | Windows, macOS | ✅ Complete |
 | Shamir Secret Sharing & Emergency Kit | `core::vault::emergency` | `SecurityTab.tsx` | Cross-Platform | ✅ Complete |
-| WebDAV Cloud & Zero-Knowledge P2P Sync | `core::sync` | `DevicePairingWizard.tsx`, `SettingsPanel.tsx` | Cross-Platform | ✅ Complete |
-| Optical QR-Code Device Pairing (YQR2) | `core::sync` | `QrScannerModal.tsx`, `DevicePairingWizard.tsx` | Cross-Platform | ✅ Complete |
+| WebDAV & P2P Sync | `core::sync` | `DevicePairingWizard.tsx`, `SettingsPanel.tsx` | Cross-Platform | Implemented; v3 peers require re-pairing |
+| QR Device Pairing (YQR3) | `core::sync` | `QrScannerModal.tsx`, `DevicePairingWizard.tsx` | Cross-Platform | Implemented; physical-device validation is separate |
 | Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
 | 24 Locales & RTL Support | — | `src/i18n/` | Cross-Platform | ✅ Complete |
 
@@ -106,7 +106,7 @@ Yntra Vault is localized into 24 languages with 100% string coverage (824 transl
 
 ## Command Line Interface (`yntra` / `yntra-cli`)
 
-Yntra Vault features an ultra-fast, SOTA command-line interface (`yntra` / `yntra-cli`) built with Rust `clap` (v4) and `ratatui` (v0.26).
+Yntra Vault features an ultra-fast command-line interface (`yntra` / `yntra-cli`) built with Rust `clap` (v4) and `ratatui` (v0.30).
 
 ### CLI Key Capabilities
 - **Sub-5ms IPC Session Daemon (`yntra unlock`)**: Keeps unlocked vault state in zeroized memory over local Named Pipe / Unix Socket with `YNTRA_SESSION` token authentication and OS Credential Manager persistence.

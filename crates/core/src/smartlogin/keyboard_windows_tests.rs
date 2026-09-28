@@ -177,10 +177,10 @@ async fn google_identifier_diagnostic() {
         } else if mode != "auto" {
             page.bring_to_front().await.unwrap();
             let engine = SmartLoginEngine::new(SmartLoginConfig::default(), SmartLoginLogger::new(Box::new(|_| {})), Arc::new(AtomicBool::new(false)));
-            engine.direct_fill_field(&page, "identifier", &text).await.unwrap();
+            engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &text).await.unwrap();
             eprintln!("Identifier event counts: {}", page.evaluate("window.yntraDiagnostic").await.unwrap().into_value::<serde_json::Value>().unwrap());
             if mode == "enter" { page.find_element("input:focus").await.unwrap().press_key("Enter").await.unwrap(); }
-            else { engine.direct_submit(&page).await; }
+            else { engine.direct_submit(&page, &page.url().await.unwrap().unwrap()).await; }
         } else {
             crate::services::autotype::run_smart_autotype_with_delays(text.to_string(), String::new(), String::new(), "https://accounts.google.com/".into(), false, 15, 300).unwrap();
         }
@@ -273,7 +273,7 @@ async fn windows_keyboard_browser_smoke() {
         let cancelled = Arc::new(AtomicBool::new(false));
         let engine = SmartLoginEngine::new(SmartLoginConfig::default(), SmartLoginLogger::new(Box::new(|_| {})), cancelled.clone());
         let text = Zeroizing::new("Demo.+_%@example.test".to_string());
-        engine.direct_fill_field(&page, "identifier", &text).await.unwrap();
+        engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &text).await.unwrap();
         let value = page.evaluate("document.getElementById('identifierId').value").await.unwrap().into_value::<String>().unwrap();
         assert_eq!(value, *text);
         let events = page.evaluate("window.events").await.unwrap().into_value::<Vec<serde_json::Value>>().unwrap();
@@ -286,41 +286,41 @@ async fn windows_keyboard_browser_smoke() {
 
         // Preserve native characters AND unmapped/astral Unicode without clipboard use.
         let unicode = Zeroizing::new("åÅé漢😀+_%@example.test".to_string());
-        engine.direct_fill_field(&page, "identifier", &unicode).await.unwrap();
+        engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &unicode).await.unwrap();
         assert_eq!(page.evaluate("document.getElementById('identifierId').value").await.unwrap().into_value::<String>().unwrap(), *unicode);
         assert!(!page.evaluate("window.events.some(e => e.type === 'paste')").await.unwrap().into_value::<bool>().unwrap());
 
         let control = Zeroizing::new("name\tother@example.test".to_string());
-        assert!(engine.direct_fill_field(&page, "identifier", &control).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &control).await.is_err());
         assert_eq!(page.evaluate("document.getElementById('identifierId').value").await.unwrap().into_value::<String>().unwrap(), *unicode);
 
         page.evaluate("document.getElementById('identifierId').value = ''; window.events = []; document.getElementById('identifierId').readOnly = true").await.unwrap();
-        assert!(engine.direct_fill_field(&page, "identifier", &text).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &text).await.is_err());
         assert_eq!(page.evaluate("window.events.length").await.unwrap().into_value::<usize>().unwrap(), 0);
 
         // A page that moves focus after the first character must not receive the rest elsewhere.
         page.evaluate("document.getElementById('identifierId').readOnly = false; document.getElementById('identifierId').addEventListener('input', () => document.getElementById('trap').focus(), {once:true})").await.unwrap();
-        assert!(engine.direct_fill_field(&page, "identifier", &text).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &text).await.is_err());
         assert_eq!(page.evaluate("document.getElementById('trap').value").await.unwrap().into_value::<String>().unwrap(), "");
 
         // Rejected input must fail verification, with no submission/retry.
         page.evaluate("document.getElementById('identifierId').value = ''; document.getElementById('identifierId').addEventListener('beforeinput', e => e.preventDefault())").await.unwrap();
-        assert!(engine.direct_fill_field(&page, "identifier", &text).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &text).await.is_err());
         assert_eq!(page.evaluate("document.getElementById('identifierId').value").await.unwrap().into_value::<String>().unwrap(), "");
         // A CSS-hidden decoy must not redirect a password into the identifier.
         page.set_content(r#"<input id="identifierId" autocomplete="username webauthn"><input type="password" style="display:none"><input id="trap">"#).await.unwrap();
         page.find_element("#identifierId").await.unwrap().click().await.unwrap();
         let dummy_password = Zeroizing::new("Dummy-Secret-123!".into());
-        assert!(engine.direct_fill_field(&page, "password", &dummy_password).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "password", &dummy_password).await.is_err());
         assert_eq!(page.evaluate("identifierId.value").await.unwrap().into_value::<String>().unwrap(), "");
         page.evaluate("document.querySelector('input[type=password]').style.display = ''; document.querySelector('input[type=password]').id='passwordId'").await.unwrap();
-        engine.direct_fill_field(&page, "password", &dummy_password).await.unwrap();
+        engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "password", &dummy_password).await.unwrap();
         assert_eq!(page.evaluate("passwordId.value").await.unwrap().into_value::<String>().unwrap(), *dummy_password);
         page.evaluate("passwordId.value=''; passwordId.addEventListener('input',()=>trap.focus(),{once:true})").await.unwrap();
-        assert!(engine.direct_fill_field(&page, "password", &dummy_password).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "password", &dummy_password).await.is_err());
         assert_eq!(page.evaluate("trap.value").await.unwrap().into_value::<String>().unwrap(), "");
         cancelled.store(true, Ordering::SeqCst);
-        assert!(engine.direct_fill_field(&page, "identifier", &text).await.is_err());
+        assert!(engine.direct_fill_field(&page, &page.url().await.unwrap().unwrap(), "identifier", &text).await.is_err());
 
         // Exercise the real Windows accessibility observer on local fixtures only.
         use crate::smartlogin::native_state::PageState;
@@ -370,3 +370,4 @@ async fn windows_keyboard_browser_smoke() {
         std::panic::resume_unwind(panic);
     }
 }
+

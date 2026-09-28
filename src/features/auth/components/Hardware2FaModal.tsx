@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { KeyRound, ShieldCheck, Cpu, RefreshCw, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { getBackend, isTauri, openFileDialog } from '@/lib/backend';
@@ -27,6 +27,15 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const attemptRef = useRef(0);
+
+  const requestClose = () => {
+    attemptRef.current += 1;
+    setLoading(false);
+    setMasterPassword('');
+    setStep('select');
+    onClose();
+  };
 
   const refreshKeys = async () => {
     if (!isTauri()) return;
@@ -81,6 +90,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
       return;
     }
 
+    const attempt = ++attemptRef.current;
     setLoading(true);
     setError(null);
     setStep('prompt');
@@ -89,6 +99,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
       const backend = await getBackend();
       const challengeSalt = Array.from(crypto.getRandomValues(new Uint8Array(32)));
       const responseBytes = await backend.performHardware2FaChallenge(protocol, challengeSalt);
+      if (attempt !== attemptRef.current) return;
 
       if (mode === 'enroll') {
         const kf = useKeyFile && keyFilePath.trim() ? keyFilePath.trim() : undefined;
@@ -101,19 +112,23 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
           undefined,
           responseBytes,
         );
+        if (attempt !== attemptRef.current) return;
         setMasterPassword('');
       }
 
+      if (attempt !== attemptRef.current) return;
       setStep('success');
       setTimeout(() => {
+        if (attempt !== attemptRef.current) return;
         onSuccess?.();
         onClose();
       }, 1200);
     } catch (err: any) {
+      if (attempt !== attemptRef.current) return;
       setError(err.toString() || 'Hardware key authentication failed');
       setStep('select');
     } finally {
-      setLoading(false);
+      if (attempt === attemptRef.current) setLoading(false);
     }
   };
 
@@ -121,35 +136,35 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
     <AnimatePresence>
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm p-3 sm:p-4 touch-pan-y overscroll-contain"
-          onClick={onClose}
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 backdrop-blur-[2px] sm:items-center sm:p-4 touch-pan-y overscroll-contain"
+          onClick={requestClose}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97 }}
             transition={{ duration: 0.15 }}
-            className="w-full max-w-[420px] my-auto rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh]"
+            className="my-auto flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[420px] flex-col overflow-hidden rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-xl sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)] shrink-0">
+            <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-base)] px-5 py-3.5">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
+                <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
                   <KeyRound size={14} />
                 </div>
                 <div>
-                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                    <h2 className="text-[14px] font-medium leading-tight text-[var(--text-primary)]">
                     {mode === 'enroll' ? t('hw.enroll_title') : t('hw.test_title')}
                   </h2>
-                  <p className="text-[11px] text-[var(--text-secondary)]">
+                    <p className="text-[11px] text-[var(--text-tertiary)]">
                     {mode === 'enroll' ? t('hw.enroll_desc') : t('hw.test_desc')}
                   </p>
                 </div>
               </div>
               <ActionTooltip content={t('common.close')}>
                 <button
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                 >
                   <X size={15} />
@@ -158,7 +173,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
             </div>
 
             {/* Content */}
-            <div className="p-4 flex-1 min-h-0 overflow-y-auto touch-pan-y overscroll-contain">
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 text-[12px] leading-relaxed touch-pan-y overscroll-contain">
               {step === 'select' && (
                 <div className="flex flex-col gap-3.5">
                   <div>
@@ -337,10 +352,10 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
 
             {/* Footer */}
             {step === 'select' && (
-              <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
+              <div className="flex justify-end gap-2 border-t border-[var(--border-subtle)] bg-[var(--bg-base)] px-5 py-3">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                 >
                   {t('common.cancel')}

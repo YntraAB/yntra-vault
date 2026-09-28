@@ -227,8 +227,8 @@ export const sv = {
   'settings.tooltip_group_by_date': 'Slå på eller av datumgruppering i postlistan',
 
   'settings.favicons_label': 'Hämta webbplatsikoner (Favicons)',
-  'settings.favicons_desc': 'Hämtar automatiskt logotyper och ikoner för webbplatser. Inaktivera för ett helt slutet och strikt offline-system.',
-  'settings.tooltip_favicons': 'Styr automatisk hämtning av webbplatsikoner',
+  'settings.favicons_desc': 'Skickar kontodomäner till DuckDuckGo, med Google som reserv. Ikonerna finns bara i minnet tills valvet låses.',
+  'settings.tooltip_favicons': 'Ikonleverantören ser domänen och din IP-adress. Slutet system blockerar dessa anrop.',
 
   'settings.updates_title': "Appuppdateringar och version",
   'settings.current_version': "Installerad version",

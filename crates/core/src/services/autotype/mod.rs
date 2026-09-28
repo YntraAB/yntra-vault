@@ -3,6 +3,24 @@
 //! Callers must wrap sensitive strings (username, password) in
 //! `zeroize::Zeroizing<String>` to ensure they are wiped from memory after use.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static AUTOTYPE_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Start a new foreground autotype operation. The native lock path calls
+/// `cancel_autotype` so detached Windows input cannot continue after locking.
+pub fn begin_autotype() {
+    AUTOTYPE_CANCEL.store(false, Ordering::Release);
+}
+
+pub fn cancel_autotype() {
+    AUTOTYPE_CANCEL.store(true, Ordering::Release);
+}
+
+pub(crate) fn is_cancelled() -> bool {
+    AUTOTYPE_CANCEL.load(Ordering::Acquire)
+}
+
 #[cfg(target_os = "windows")]
 mod sys_windows;
 #[cfg(target_os = "windows")]
@@ -101,5 +119,15 @@ mod tests {
         assert!(driver.autotype_text_with_delay("test", 0, 0).is_ok());
         let guard = AutotypeGuard::new("user".into(), "pass".into(), "totp".into());
         assert!(driver.run_smart_autotype(guard, "", false, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn lock_cancellation_stops_the_next_input_check() {
+        begin_autotype();
+        assert!(!is_cancelled());
+        cancel_autotype();
+        assert!(is_cancelled());
+        begin_autotype();
+        assert!(!is_cancelled());
     }
 }

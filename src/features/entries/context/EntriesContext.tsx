@@ -33,6 +33,24 @@ export function entryPreviewToPasswordEntry(preview: EntryPreview, password = '�
   };
 }
 
+/** Keep only list metadata; never retain decrypted fields or staged attachment bytes. */
+export function passwordEntryToPreview(entry: PasswordEntry): PasswordEntry {
+  return {
+    id: entry.id, title: entry.title, username: entry.username, password: '••••••••',
+    url: entry.url, email: entry.email, notes: '', tags: [...entry.tags],
+    favorite: entry.favorite, pinned: entry.pinned,
+    totpSecret: entry.totpSecret ? 'has-totp' : undefined, customFields: [],
+    createdAt: entry.createdAt, updatedAt: entry.updatedAt, breachStatus: entry.breachStatus,
+    hasPasskey: entry.hasPasskey, attachmentCount: entry.attachmentCount ?? entry.attachments?.length ?? 0,
+  };
+}
+
+export function needsBreachRecheck(status: BreachStatus | undefined, now = Date.now()): boolean {
+  if (!status || !('checked_at' in status)) return true;
+  const checkedAt = Date.parse(status.checked_at);
+  return !Number.isFinite(checkedAt) || checkedAt > now || now - checkedAt >= 24 * 60 * 60 * 1000;
+}
+
 export function isRecoveryField(name: string): boolean {
   if (!name) return false;
   const norm = name.trim().toLowerCase();
@@ -142,8 +160,8 @@ export interface EntriesContextType {
 const EntriesContext = createContext<EntriesContextType | undefined>(undefined);
 
 export function EntriesProvider({ children }: { children: React.ReactNode }) {
-  const { backend, currentVault, isLocked } = useAuth();
-  const { settings } = useSettings();
+  const { backend, currentVault, isLocked, getSessionGeneration, isSessionCurrent } = useAuth();
+  const { settings, networkAccessReady } = useSettings();
   const { addToast } = useToast();
 
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
@@ -201,11 +219,12 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
   // Load entries from backend when vault is opened
   const refreshEntries = useCallback(async () => {
-    if (!backend || !currentVault || isLockedRef.current) return;
+    const session = getSessionGeneration();
+    if (!backend || !currentVault || !isSessionCurrent(session)) return;
     const request = ++refreshSeqRef.current;
     try {
       const previews = await backend.listEntries();
-      if (isLockedRef.current || request !== refreshSeqRef.current) return;
+      if (!isSessionCurrent(session) || request !== refreshSeqRef.current) return;
       const entriesList = previews.map((p) => entryPreviewToPasswordEntry(p));
 
       setEntries(entriesList);
@@ -220,7 +239,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
           const selection = selectionSeqRef.current;
           try {
             const full = await backend.getEntry(currentSelected.id);
-            if (!isLockedRef.current && request === refreshSeqRef.current && selection === selectionSeqRef.current && selectedEntryRef.current?.id === currentSelected.id) {
+            if (isSessionCurrent(session) && request === refreshSeqRef.current && selection === selectionSeqRef.current && selectedEntryRef.current?.id === currentSelected.id) {
               setSelectedEntry(decryptedEntryToPasswordEntry(full));
             }
           } catch (err) {
@@ -231,7 +250,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error('Failed to load entries:', e);
     }
-  }, [backend, currentVault]);
+  }, [backend, currentVault, getSessionGeneration, isSessionCurrent]);
 
   useEffect(() => () => {
     refreshSeqRef.current++;
@@ -241,11 +260,12 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
   // Load tags from backend when vault is opened
   const refreshTags = useCallback(async () => {
-    if (!backend || !currentVault || isLockedRef.current) return;
+    const session = getSessionGeneration();
+    if (!backend || !currentVault || !isSessionCurrent(session)) return;
     const request = ++tagRefreshSeqRef.current;
     try {
       const dbTags = await backend.getTags();
-      if (isLockedRef.current || request !== tagRefreshSeqRef.current) return;
+      if (!isSessionCurrent(session) || request !== tagRefreshSeqRef.current) return;
       setRawTags(
         dbTags.map((t) => ({
           id: t.id,
@@ -258,7 +278,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error('Failed to load tags:', e);
     }
-  }, [backend, currentVault]);
+  }, [backend, currentVault, getSessionGeneration, isSessionCurrent]);
 
   // Auto-refresh when vault unlocks or changes
   useEffect(() => {
@@ -290,8 +310,9 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const selectEntryById = useCallback(
     async (id: string | null) => {
       const seq = ++selectionSeqRef.current;
+      const session = getSessionGeneration();
 
-      if (!id || isLockedRef.current) {
+      if (!id || !isSessionCurrent(session)) {
         setSelectedEntry(null);
         return;
       }
@@ -305,7 +326,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           const full = await backend.getEntry(id);
-          if (seq !== selectionSeqRef.current || isLockedRef.current) {
+          if (seq !== selectionSeqRef.current || !isSessionCurrent(session)) {
             return;
           }
 
@@ -315,13 +336,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
             if (elapsed < 150) {
               await new Promise((resolve) => setTimeout(resolve, 150 - elapsed));
             }
-            if (seq !== selectionSeqRef.current || isLockedRef.current) {
+            if (seq !== selectionSeqRef.current || !isSessionCurrent(session)) {
               return;
             }
           }
           setSelectedEntry(entry);
         } catch (e) {
-          if (seq === selectionSeqRef.current && !isLockedRef.current) {
+          if (seq === selectionSeqRef.current && isSessionCurrent(session)) {
             setSelectedEntry(entries.find((e) => e.id === id) || null);
           }
         } finally {
@@ -334,7 +355,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         if (!isSameEntry && !settings.disableSkeletonDelays) {
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
-        if (seq !== selectionSeqRef.current || isLockedRef.current) {
+        if (seq !== selectionSeqRef.current || !isSessionCurrent(session)) {
           return;
         }
         const entry = entries.find((e) => e.id === id) || null;
@@ -344,7 +365,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, settings.disableSkeletonDelays]
+    [backend, entries, settings.disableSkeletonDelays, getSessionGeneration, isSessionCurrent]
   );
 
   // Dynamic tag counts
@@ -362,13 +383,15 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const triggerAutoSync = useCallback(() => {
-    if (!settings.webdavEnabled || !settings.webdavAutoSync || !settings.webdavUrl || !settings.webdavUser || !backend) {
+    if (settings.operationMode === 'airgap' || !settings.webdavEnabled || !settings.webdavAutoSync || !settings.webdavUrl || !settings.webdavUser || !backend) {
       return;
     }
     if (autoSyncTimerRef.current) {
       clearTimeout(autoSyncTimerRef.current);
     }
+    const session = getSessionGeneration();
     autoSyncTimerRef.current = setTimeout(async () => {
+      if (!isSessionCurrent(session)) return;
       try {
         const pass = getTransientWebdavPassword();
         const stats = await backend.webdavSync(settings.webdavUrl!, settings.webdavUser!, pass);
@@ -379,7 +402,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         console.warn('Auto-sync on save failed:', err);
       }
     }, 2000);
-  }, [settings.webdavEnabled, settings.webdavAutoSync, settings.webdavUrl, settings.webdavUser, backend, refreshEntries, refreshTags]);
+  }, [settings.operationMode, settings.webdavEnabled, settings.webdavAutoSync, settings.webdavUrl, settings.webdavUser, backend, refreshEntries, refreshTags, getSessionGeneration, isSessionCurrent]);
+
+  useEffect(() => () => {
+    if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
+  }, [isLocked, currentVault?.id, currentVault?.path, settings.operationMode]);
 
   const toggleP2pListener = useCallback((enable?: boolean) => {
     setListenerManualOverride((prev) => {
@@ -403,7 +430,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isLocked]);
 
-  const shouldListen = (listenerManualOverride !== null ? listenerManualOverride : Boolean(settings.p2pAutoListen)) && !isLocked && Boolean(backend) && Boolean(currentVault);
+  const shouldListen = networkAccessReady && settings.operationMode !== 'airgap' && (listenerManualOverride !== null ? listenerManualOverride : Boolean(settings.p2pAutoListen)) && !isLocked && Boolean(backend) && Boolean(currentVault);
 
   const listenerTail = useRef<Promise<void>>(Promise.resolve());
   const listenerView = useRef({ refreshEntries, refreshTags, addToast, language: settings.language });
@@ -473,7 +500,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
   // P2P Auto-Sync on Wi-Fi (Periodically scans for beacons and syncs)
   useEffect(() => {
-    if (!settings.p2pAutoSyncWifi || !backend || !currentVault || isLocked) {
+    if (!networkAccessReady || settings.operationMode === 'airgap' || !settings.p2pAutoSyncWifi || !backend || !currentVault || isLocked) {
       return;
     }
 
@@ -517,12 +544,14 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(initTimer);
       clearInterval(interval);
     };
-  }, [settings.p2pAutoSyncWifi, settings.p2pAutoSyncIntervalMinutes, settings.language, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
+  }, [networkAccessReady, settings.operationMode, settings.p2pAutoSyncWifi, settings.p2pAutoSyncIntervalMinutes, settings.language, backend, currentVault, isLocked, refreshEntries, refreshTags, addToast]);
 
   // CRUD Operations
   // CRUD Operations with SOTA Optimistic Local-First State & Background Persistence
   const updateEntry = useCallback(
     async (entry: PasswordEntry) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const now = new Date().toISOString();
       const cleanedCustomFields = entry.customFields.filter(f => !isRecoveryField(f.name));
       let recoveryCodes = entry.recoveryCodes;
@@ -543,7 +572,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
       // 2. Optimistic update immediately (0ms visual latency)
       setEntries((prev) =>
-        prev.map((e) => (e.id === entry.id ? updatedEntry : e))
+        prev.map((e) => (e.id === entry.id ? passwordEntryToPreview(updatedEntry) : e))
       );
       setSelectedEntry((prev) => (prev?.id === entry.id ? updatedEntry : prev));
 
@@ -599,21 +628,24 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
           }
 
           await backend.updateEntry(entry.id, updatePayload);
+          if (!isSessionCurrent(session)) return;
 
           // If attachments or passkeys were staged, fetch refreshed entry metadata without reloading whole DB
           if (entry.newAttachments?.length || entry.deleteAttachmentIds?.length || entry.passkeyAction) {
             const updatedDetail = await backend.getEntry(entry.id).catch(() => null);
+            if (!isSessionCurrent(session)) return;
             if (updatedDetail) {
               const fullEntry = decryptedEntryToPasswordEntry(updatedDetail);
               setSelectedEntry((prev) => (prev?.id === entry.id ? fullEntry : prev));
               setEntries((prev) =>
-                prev.map((e) => (e.id === entry.id ? { ...fullEntry, password: '••••••••' } : e))
+                prev.map((e) => (e.id === entry.id ? passwordEntryToPreview(fullEntry) : e))
               );
             }
           }
           triggerAutoSync();
         } catch (e) {
           // 4. Rollback on failure
+          if (!isSessionCurrent(session)) return;
           setEntries(prevEntries);
           setSelectedEntry(prevSelected);
           addToast({
@@ -623,29 +655,34 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync]
+    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const updateBreachStatus = useCallback(
     async (id: string, newStatus: BreachStatus) => {
+      if (!isSessionCurrent(getSessionGeneration())) return;
       setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, breachStatus: newStatus } : e)));
       setSelectedEntry((prev) => (prev?.id === id ? { ...prev, breachStatus: newStatus } : prev));
       if (backend) {
         await backend.updateEntryBreachStatus(id, newStatus);
       }
     },
-    [backend]
+    [backend, getSessionGeneration, isSessionCurrent]
   );
 
   const saveVault = useCallback(async () => {
+    const session = getSessionGeneration();
+    if (!isSessionCurrent(session)) return;
     if (backend) {
       await backend.saveVault();
-      triggerAutoSync();
+      if (isSessionCurrent(session)) triggerAutoSync();
     }
-  }, [backend, triggerAutoSync]);
+  }, [backend, triggerAutoSync, getSessionGeneration, isSessionCurrent]);
 
   const addEntry = useCallback(
     async (entry: PasswordEntry) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const now = new Date().toISOString();
       const cleanedCustomFields = entry.customFields.filter(f => !isRecoveryField(f.name));
       let recoveryCodes = entry.recoveryCodes;
@@ -686,6 +723,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
             generate_passkey: entry.generatePasskey,
             attachments: entry.newAttachments,
           });
+          if (!isSessionCurrent(session)) return;
 
           // In-memory instant insertion without full DB reload across IPC
           const createdEntry: PasswordEntry = {
@@ -696,10 +734,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
             attachmentCount: (entry.newAttachments?.length || 0) + (entry.attachments?.length || 0),
           };
 
-          setEntries((prev) => [createdEntry, ...prev.filter((e) => e.id !== newId)]);
+          setEntries((prev) => [passwordEntryToPreview(createdEntry), ...prev.filter((e) => e.id !== newId)]);
           setSelectedEntry(createdEntry);
           triggerAutoSync();
         } catch (e) {
+          if (!isSessionCurrent(session)) return;
           addToast({
             message: getTranslation(settings.language, 'toast.add_failed', { err: String(e) }),
             type: 'error',
@@ -712,15 +751,17 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
           createdAt: entry.createdAt || now,
           updatedAt: entry.updatedAt || now,
         };
-        setEntries((prev) => [localEntry, ...prev]);
+        setEntries((prev) => [passwordEntryToPreview(localEntry), ...prev]);
         setSelectedEntry(localEntry);
       }
     },
-    [backend, settings.language, addToast, triggerAutoSync]
+    [backend, settings.language, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const deleteEntry = useCallback(
     async (id: string) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       // 1. Snapshot previous state for rollback
       const prevEntries = entries;
       const prevSelected = selectedEntry;
@@ -736,9 +777,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           await backend.deleteEntry(id);
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
           // 4. Rollback on failure
+          if (!isSessionCurrent(session)) return;
           setEntries(prevEntries);
           setSelectedEntry(prevSelected);
           addToast({
@@ -748,11 +791,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync]
+    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const deleteAttachment = useCallback(
     async (entryId: string, attachmentId: string) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const prevEntries = entries;
       const prevSelected = selectedEntry;
 
@@ -780,6 +825,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         try {
           await backend.deleteAttachment(entryId, attachmentId);
         } catch (e) {
+          if (!isSessionCurrent(session)) return;
           setSelectedEntry(prevSelected);
           setEntries(prevEntries);
           addToast({
@@ -789,11 +835,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, settings.language, addToast]
+    [backend, entries, selectedEntry, settings.language, addToast, getSessionGeneration, isSessionCurrent]
   );
 
   const toggleFavorite = useCallback(
     async (id: string) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       // 1. Snapshot previous state for rollback
       const prevEntries = entries;
       const prevSelected = selectedEntry;
@@ -810,9 +858,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           await backend.toggleFavorite(id);
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
           // 4. Rollback on failure
+          if (!isSessionCurrent(session)) return;
           setEntries(prevEntries);
           setSelectedEntry(prevSelected);
           console.error('Toggle favorite failed:', e);
@@ -823,11 +873,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync]
+    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const togglePin = useCallback(
     async (id: string) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       // 1. Snapshot previous state for rollback
       const prevEntries = entries;
       const prevSelected = selectedEntry;
@@ -844,9 +896,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           await backend.togglePin(id);
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
           // 4. Rollback on failure
+          if (!isSessionCurrent(session)) return;
           setEntries(prevEntries);
           setSelectedEntry(prevSelected);
           console.error('Toggle pin failed:', e);
@@ -857,7 +911,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync]
+    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   // Multi-selection & Bulk operations
@@ -901,6 +955,8 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       tagsToRemove: string[] = [],
       notesMode: 'append' | 'overwrite' = 'append'
     ) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       if (ids.length === 0) return;
 
       const prevEntries = entries;
@@ -925,13 +981,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
               notesMode === 'append' && e.notes ? `${e.notes}\n${updates.notes}` : updates.notes;
           }
 
-          return {
+          return passwordEntryToPreview({
             ...e,
             ...updates,
             tags: updatedTags,
             notes: updatedNotes,
             updatedAt: new Date().toISOString(),
-          };
+          });
         })
       );
 
@@ -968,6 +1024,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           for (const id of ids) {
+            if (!isSessionCurrent(session)) return;
             const entry = prevEntries.find((e) => e.id === id);
             if (!entry) continue;
 
@@ -992,6 +1049,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
             if (updates.notes !== undefined) {
               if (notesMode === 'append') {
                 const fullEntry = await backend.getEntry(id).catch(() => null);
+                if (!isSessionCurrent(session)) return;
                 const currentNotes = fullEntry?.notes || '';
                 patchData.notes = currentNotes ? `${currentNotes}\n${updates.notes}` : updates.notes;
               } else {
@@ -1001,9 +1059,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
             await backend.updateEntry(id, patchData);
           }
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
           // 3. Rollback on failure
+          if (!isSessionCurrent(session)) return;
           setEntries(prevEntries);
           setSelectedEntry(prevSelected);
           addToast({
@@ -1013,11 +1073,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync]
+    [backend, entries, selectedEntry, settings.language, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const bulkDeleteEntries = useCallback(
     async (ids: string[]) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       if (ids.length === 0) return;
 
       const prevEntries = entries;
@@ -1035,11 +1097,14 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           for (const id of ids) {
+            if (!isSessionCurrent(session)) return;
             await backend.deleteEntry(id);
           }
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
           // Rollback on failure
+          if (!isSessionCurrent(session)) return;
           setEntries(prevEntries);
           setSelectedEntry(prevSelected);
           setSelectedEntryIds(prevSelectedIds);
@@ -1047,31 +1112,37 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [backend, entries, selectedEntry, selectedEntryIds, addToast, triggerAutoSync]
+    [backend, entries, selectedEntry, selectedEntryIds, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   // Tag CRUD with SOTA Optimistic Updates & Rollback
   const addTag = useCallback(
     async (tag: Tag) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const prevTags = rawTags;
       setRawTags((prev) => [...prev, tag]);
 
       if (backend) {
         try {
           const realId = await backend.addTag(tag.name, tag.color, tag.icon);
+          if (!isSessionCurrent(session)) return;
           setRawTags((prev) => prev.map((t) => (t.id === tag.id ? { ...t, id: realId } : t)));
           triggerAutoSync();
         } catch (e) {
+          if (!isSessionCurrent(session)) return;
           setRawTags(prevTags);
           addToast({ message: `Failed to create tag: ${e}`, type: 'error' });
         }
       }
     },
-    [backend, rawTags, addToast, triggerAutoSync]
+    [backend, rawTags, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const updateTag = useCallback(
     async (id: string, updates: Partial<Tag>) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const oldTag = rawTags.find((t) => t.id === id);
       if (!oldTag) return;
 
@@ -1097,19 +1168,23 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           await backend.updateTag(id, nextTag.name, nextTag.color, nextTag.icon);
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
+          if (!isSessionCurrent(session)) return;
           setRawTags(prevTags);
           setEntries(prevEntries);
           addToast({ message: `Failed to update tag in database: ${e}`, type: 'error' });
         }
       }
     },
-    [backend, rawTags, entries, addToast, triggerAutoSync]
+    [backend, rawTags, entries, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const removeTag = useCallback(
     async (id: string) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const tag = rawTags.find((t) => t.id === id);
       if (!tag) return;
 
@@ -1127,33 +1202,39 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       if (backend) {
         try {
           await backend.deleteTag(id);
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
+          if (!isSessionCurrent(session)) return;
           setRawTags(prevTags);
           setEntries(prevEntries);
           addToast({ message: `Failed to delete tag: ${e}`, type: 'error' });
         }
       }
     },
-    [backend, rawTags, entries, addToast, triggerAutoSync]
+    [backend, rawTags, entries, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   const reorderTags = useCallback(
     async (newTags: Tag[]) => {
+      const session = getSessionGeneration();
+      if (!isSessionCurrent(session)) return;
       const prevTags = rawTagsRef.current;
       setRawTags(newTags);
 
       if (backend) {
         try {
           await backend.reorderTags(newTags.map((t) => t.id));
+          if (!isSessionCurrent(session)) return;
           triggerAutoSync();
         } catch (e) {
+          if (!isSessionCurrent(session)) return;
           setRawTags(prevTags);
           addToast({ message: `Failed to save tag order: ${e}`, type: 'error' });
         }
       }
     },
-    [backend, addToast, triggerAutoSync]
+    [backend, addToast, triggerAutoSync, getSessionGeneration, isSessionCurrent]
   );
 
   // Silent background vault-wide breach check on vault unlock
@@ -1163,18 +1244,20 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   }, [entries]);
 
   useEffect(() => {
-    if (!backend || isLocked || !currentVault || entries.length === 0 || !settings.autoBreachCheck) {
+    if (!networkAccessReady || !backend || isLocked || !currentVault || entries.length === 0 || !settings.autoBreachCheck || settings.operationMode === 'airgap') {
       return;
     }
 
     let active = true;
     let timeoutId: any = null;
     let hasChangesToSave = false;
+    const session = getSessionGeneration();
+    const attempted = new Set<string>();
 
     const checkNext = async () => {
-      if (!active) return;
+      if (!active || !isSessionCurrent(session)) return;
 
-      const target = entriesRef.current.find((e) => !e.breachStatus || e.breachStatus.type === 'Unknown');
+      const target = entriesRef.current.find((e) => !attempted.has(e.id) && needsBreachRecheck(e.breachStatus));
 
       if (!target) {
         if (hasChangesToSave && backend) {
@@ -1189,14 +1272,15 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
+        attempted.add(target.id);
         const decryptedRaw = await backend.getEntry(target.id);
         const decrypted = decryptedEntryToPasswordEntry(decryptedRaw);
-        if (!active) return;
+        if (!active || !isSessionCurrent(session)) return;
 
         const passwordValue = decrypted.password;
         if (passwordValue && passwordValue.trim() !== '') {
           const result = await backend.checkPasswordBreach(passwordValue);
-          if (!active) return;
+          if (!active || !isSessionCurrent(session)) return;
 
           const wasSafe = target.breachStatus?.type === 'Safe';
           const newStatus = result.is_breached
@@ -1248,7 +1332,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         console.error('Background breach check failed for entry', target.title, err);
       }
 
-      if (active) {
+      if (active && isSessionCurrent(session)) {
         timeoutId = setTimeout(checkNext, 2000);
       }
     };
@@ -1258,11 +1342,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
       if (timeoutId) clearTimeout(timeoutId);
-      if (hasChangesToSave && backend) {
+      if (hasChangesToSave && backend && isSessionCurrent(session)) {
         backend.saveVault().catch(() => {});
       }
     };
-  }, [backend, isLocked, currentVault, entries.length, settings.autoBreachCheck, addToast]);
+  }, [networkAccessReady, backend, isLocked, currentVault, entries.length, settings.autoBreachCheck, settings.operationMode, addToast, getSessionGeneration, isSessionCurrent]);
 
   const value = useMemo(
     () => ({
