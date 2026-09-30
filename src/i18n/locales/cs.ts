@@ -134,6 +134,7 @@ export const cs = {
   'detail.password': 'Heslo',
   'detail.url': 'URL webu',
   'detail.email': 'E-mail',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Poznámky',
   'detail.totp': 'TOTP 2FA kód',
   'detail.recovery_codes': '2FA Záchranné kódy',

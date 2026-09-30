@@ -11,9 +11,25 @@ use crate::smartlogin::logging::{SmartLoginLogger, SmartLoginEvent, SmartLoginEv
 /// Runs in the page context; returns a JSON blob consumed by the Rust analyzer.
 const PAGE_ANALYSIS_JS: &str = r#"
 (() => {
+    function walk(root, seen = new Set()) {
+        if (!root || seen.has(root)) return [];
+        seen.add(root);
+        const nodes = [];
+        for (const el of root.querySelectorAll ? root.querySelectorAll('*') : []) {
+            nodes.push(el);
+            if (el.shadowRoot) nodes.push(...walk(el.shadowRoot, seen));
+            if (el.tagName === 'IFRAME') {
+                try { if (el.contentDocument) nodes.push(...walk(el.contentDocument, seen)); } catch (_) {}
+            }
+        }
+        return nodes;
+    }
+    const composedNodes = walk(document);
+    const all = selector => composedNodes.filter(el => el.matches(selector));
+
     function isVisible(el) {
         if (!el) return false;
-        const style = window.getComputedStyle(el);
+        const style = (el.ownerDocument.defaultView || window).getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
         const rect = el.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
@@ -21,7 +37,7 @@ const PAGE_ANALYSIS_JS: &str = r#"
 
     function getLabel(el) {
         if (el.id) {
-            const label = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+            const label = (el.ownerDocument || document).querySelector('label[for="' + CSS.escape(el.id) + '"]');
             if (label) return label.textContent.trim();
         }
         const parent = el.closest('label');
@@ -45,7 +61,7 @@ const PAGE_ANALYSIS_JS: &str = r#"
     function getFormIndex(el) {
         const form = el.closest('form');
         if (!form) return null;
-        const forms = Array.from(document.querySelectorAll('form'));
+        const forms = all('form');
         return forms.indexOf(form);
     }
 
@@ -54,18 +70,20 @@ const PAGE_ANALYSIS_JS: &str = r#"
     }
 
     // Collect forms
-    const forms = Array.from(document.querySelectorAll('form')).map(f => ({
+    const forms = all('form').map(f => ({
         form_id: f.id || null,
         action: f.action || '',
         method: (f.method || 'get').toUpperCase(),
-        input_count: f.querySelectorAll('input').length,
-        has_password_input: f.querySelector('input[type="password"]') !== null,
+        input_count: all('input, select, textarea, [contenteditable="true"], [contenteditable=""]').filter(el => el.closest('form') === f).length,
+        has_password_input: all('input[type="password"]').some(el => el.closest('form') === f),
     }));
 
     // Collect inputs
-    const inputs = Array.from(document.querySelectorAll('input, select')).map(el => ({
+    const inputs = all('input, select, textarea, [contenteditable="true"], [contenteditable=""]')
+        .filter(el => !(el.getAttribute('contenteditable') && el.getAttribute('role') !== 'textbox' && !el.getAttribute('aria-label') && !el.id && !el.getAttribute('name')))
+        .map(el => ({
         backend_node_id: 0,
-        input_type: el.type || el.tagName.toLowerCase(),
+        input_type: el.type || (el.matches('[contenteditable="true"], [contenteditable=""]') ? 'text' : el.tagName.toLowerCase()),
         name: el.name || '',
         id: el.id || '',
         placeholder: el.placeholder || '',
@@ -73,7 +91,7 @@ const PAGE_ANALYSIS_JS: &str = r#"
         aria_label: el.getAttribute('aria-label') || '',
         associated_label: getLabel(el),
         is_visible: isVisible(el),
-        is_readonly: el.readOnly || el.disabled || false,
+        is_readonly: el.readOnly || el.disabled || el.getAttribute('aria-readonly') === 'true' || false,
         form_index: getFormIndex(el),
         surrounding_text: getSurroundingText(el),
         ax_role: el.getAttribute('role') || '',
@@ -81,12 +99,7 @@ const PAGE_ANALYSIS_JS: &str = r#"
     }));
 
     // Collect buttons (button elements + input[type=submit] + role=button)
-    const buttonEls = [
-        ...document.querySelectorAll('button'),
-        ...document.querySelectorAll('input[type="submit"]'),
-        ...document.querySelectorAll('input[type="button"]'),
-        ...document.querySelectorAll('[role="button"]'),
-    ];
+    const buttonEls = all('button, input[type="submit"], input[type="button"], [role="button"], [role="tab"]');
     const seen = new Set();
     const buttons = [];
     for (const el of buttonEls) {
@@ -105,7 +118,7 @@ const PAGE_ANALYSIS_JS: &str = r#"
     }
 
     // Collect links
-    const links = Array.from(document.querySelectorAll('a[href]')).map(el => ({
+    const links = all('a[href], [role="link"]').map(el => ({
         backend_node_id: 0,
         text: (el.textContent || '').trim().substring(0, 100),
         href: el.href || '',
@@ -278,8 +291,20 @@ pub async fn wait_for_dom_settle(page: &Page, settle_ms: u64) -> crate::Result<(
 pub async fn wait_for_page_ready(page: &Page, max_wait_ms: u64) -> bool {
     const POLL_JS: &str = r#"
     (() => {
-        const inputs = document.querySelectorAll('input:not([type="hidden"])');
-        const buttons = document.querySelectorAll('button, [role="button"], input[type="submit"]');
+        function walk(root, seen = new Set()) {
+            if (!root || seen.has(root)) return [];
+            seen.add(root);
+            const nodes = [];
+            for (const el of root.querySelectorAll ? root.querySelectorAll('*') : []) {
+                nodes.push(el);
+                if (el.shadowRoot) nodes.push(...walk(el.shadowRoot, seen));
+                if (el.tagName === 'IFRAME') { try { if (el.contentDocument) nodes.push(...walk(el.contentDocument, seen)); } catch (_) {} }
+            }
+            return nodes;
+        }
+        const nodes = walk(document);
+        const inputs = nodes.filter(el => el.matches('input:not([type="hidden"]), textarea, [contenteditable="true"], [contenteditable=""]'));
+        const buttons = nodes.filter(el => el.matches('button, [role="button"], input[type="submit"]'));
         return JSON.stringify({
             ready: document.readyState,
             inputs: inputs.length,

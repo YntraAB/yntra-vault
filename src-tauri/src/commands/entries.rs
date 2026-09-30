@@ -393,12 +393,14 @@ pub async fn autotype_entry_password(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // Release vault lock before starting autotype delays to avoid deadlocking with focus-loss auto-lock.
+    let generation = yntra_vault_core::services::autotype::begin_autotype();
     let password = extract_entry_password(&entry_id, &state)?;
     let char_delay = char_delay_ms.unwrap_or(15);
     let settle_delay = settle_delay_ms.unwrap_or(3000);
 
     tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::autotype::autotype_text_with_delay(
+        yntra_vault_core::services::autotype::autotype_text_with_delay_for_session(
+            generation,
             &password,
             char_delay,
             settle_delay,
@@ -418,9 +420,11 @@ pub async fn autotype_entry_smart(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // Release vault lock before initiating autotype execution.
+    let generation = yntra_vault_core::services::autotype::begin_autotype();
     let (username, password, totp_sec, url) = extract_entry_autotype_smart(&entry_id, &state)?;
 
-    yntra_vault_core::services::autotype::run_smart_autotype_with_delays(
+    yntra_vault_core::services::autotype::run_smart_autotype_with_delays_for_session(
+        generation,
         username,
         password,
         totp_sec,

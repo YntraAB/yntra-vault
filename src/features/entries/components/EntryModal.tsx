@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import {
   X, Plus, Eye, EyeOff, Wand2, GripVertical,
-  Globe, User, Mail, Key, FileText, ShieldCheck, Loader2,
+  Globe, User, Mail, Smartphone, Key, FileText, ShieldCheck, Loader2,
   Paperclip, Upload, QrCode, FolderOpen,
 } from 'lucide-react';
 import { useEntries, decryptedEntryToPasswordEntry, isRecoveryField } from '../context/EntriesContext';
@@ -375,6 +375,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
     switch (type) {
       case 'password': return t('detail.password');
       case 'email': return t('detail.email');
+      case 'phone': return t('detail.phone');
       case 'username': return t('detail.username');
       case 'url': return t('detail.url');
       case 'totp': return t('detail.totp');
@@ -1072,6 +1073,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                       let cfIcon = <FileText size={13} />;
                       if (cf.type === 'password') cfIcon = <Key size={13} />;
                       else if (cf.type === 'email') cfIcon = <Mail size={13} />;
+                      else if (cf.type === 'phone') cfIcon = <Smartphone size={13} />;
                       else if (cf.type === 'url') cfIcon = <Globe size={13} />;
                       else if (cf.type === 'username') cfIcon = <User size={13} />;
                       else if (cf.type === 'totp') cfIcon = <ShieldCheck size={13} />;
@@ -1115,6 +1117,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           >
                             <option value="password">{t('detail.password')}</option>
                             <option value="email">{t('detail.email')}</option>
+                            <option value="phone">{t('detail.phone')}</option>
                             <option value="username">{t('detail.username')}</option>
                             <option value="url">{t('detail.url')}</option>
                             <option value="notes">{t('preset.secure_note')}</option>
@@ -1348,6 +1351,13 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                       >
                         <Plus size={13} />
                         <span>Custom Hidden / PIN Field</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => addCustomField('phone', t('detail.phone'))}
+                        className="flex items-center gap-2 text-[12px] cursor-pointer"
+                      >
+                        <Smartphone size={13} />
+                        <span>{t('detail.phone')}</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

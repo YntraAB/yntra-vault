@@ -321,12 +321,12 @@ pub async fn autotype(
     char_delay_ms: Option<u64>,
     settle_delay_ms: Option<u64>,
 ) -> Result<(), String> {
-    yntra_vault_core::services::autotype::begin_autotype();
+    let generation = yntra_vault_core::services::autotype::begin_autotype();
     let secret = Zeroizing::new(text);
     let char_delay = char_delay_ms.unwrap_or(15);
     let settle_delay = settle_delay_ms.unwrap_or(0);
     tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::autotype::autotype_text_with_delay(&secret, char_delay, settle_delay)
+        yntra_vault_core::services::autotype::autotype_text_with_delay_for_session(generation, &secret, char_delay, settle_delay)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -348,7 +348,6 @@ pub async fn run_smart_autotype(
     char_delay_ms: u64,
     field_delay_ms: u64,
 ) -> Result<(), String> {
-    yntra_vault_core::services::autotype::begin_autotype();
     yntra_vault_core::services::autotype::run_smart_autotype_with_delays(
         username,
         password,

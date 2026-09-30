@@ -134,6 +134,7 @@ export const ko = {
   'detail.password': '비밀번호',
   'detail.url': '웹사이트 URL',
   'detail.email': '이메일',
+  'detail.phone': 'Phone number',
   'detail.notes': '메모',
   'detail.totp': 'TOTP 2차 인증 코드',
   'detail.recovery_codes': '2FA 복구 코드',

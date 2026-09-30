@@ -134,6 +134,7 @@ export const el = {
   'detail.password': 'Κωδικός πρόσβασης',
   'detail.url': 'URL ιστοσελίδας',
   'detail.email': 'Email',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Σημειώσεις',
   'detail.totp': 'Κωδικός TOTP 2FA',
   'detail.recovery_codes': 'Κωδικοί ανάκτησης 2FA',

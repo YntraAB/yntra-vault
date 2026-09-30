@@ -28,7 +28,9 @@ impl AutotypeDriver for StubAutotypeDriver {
         char_delay_ms: u64,
         _field_delay_ms: u64,
     ) -> crate::Result<()> {
+        let generation = guard.generation;
         std::thread::spawn(move || {
+            super::bind_autotype_session(generation);
             std::thread::sleep(std::time::Duration::from_secs(3));
             if super::is_cancelled() { return; }
             let driver = StubAutotypeDriver::new();

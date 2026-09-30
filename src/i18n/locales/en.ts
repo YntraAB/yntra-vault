@@ -172,6 +172,7 @@ export const en = {
   'detail.password': 'Password',
   'detail.url': 'Website URL / App Path',
   'detail.email': 'Email',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Notes',
   'detail.totp': 'TOTP 2FA Code',
   'detail.recovery_codes': '2FA Recovery Codes',

@@ -134,6 +134,7 @@ export const tr = {
   'detail.password': 'Parola',
   'detail.url': 'Web Sitesi URL\'si',
   'detail.email': 'E-posta',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Notlar',
   'detail.totp': 'TOTP 2FA Kodu',
   'detail.recovery_codes': '2FA Kurtarma Kodları',

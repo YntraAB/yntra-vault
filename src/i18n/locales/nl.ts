@@ -134,6 +134,7 @@ export const nl = {
   'detail.password': 'Wachtwoord',
   'detail.url': 'Website-URL',
   'detail.email': 'E-mail',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Notities',
   'detail.totp': 'TOTP 2FA-code',
   'detail.recovery_codes': '2FA-herstelcodes',

@@ -134,6 +134,7 @@ export const fi = {
   'detail.password': 'Salasana',
   'detail.url': 'Verkkosivun URL',
   'detail.email': 'Sähköposti',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Muistiinpanot',
   'detail.totp': 'TOTP 2FA-koodi',
   'detail.recovery_codes': '2FA-palautuskoodit',

@@ -40,7 +40,7 @@ pub struct PreCheckResult {
     pub browsers: Vec<BrowserInfo>,
     /// Index of the recommended browser (default or first available)
     pub recommended_index: Option<usize>,
-    /// Whether the recommended browser is currently running
+    /// Retained for API compatibility; Smart Login no longer requires closing it.
     pub needs_close: bool,
     /// Error message if no browsers found
     pub error: Option<String>,
@@ -121,9 +121,11 @@ pub fn precheck() -> PreCheckResult {
         .or_else(|| browsers.iter().position(|b| !is_edge(b)))
         .or(Some(0));
 
-    let needs_close = recommended_index
-        .map(|i| browsers[i].is_running)
-        .unwrap_or(false);
+    // Smart Login never needs to close a user's browser. If an existing
+    // process does not expose the requested CDP endpoint, launch_and_connect
+    // uses an isolated temporary profile instead of killing every process with
+    // the same image name.
+    let needs_close = false;
 
     PreCheckResult {
         browsers,
@@ -157,11 +159,12 @@ pub async fn launch_and_connect(
         if let Ok(result) = try_connect_existing(url, port, logger).await {
             return Ok(result);
         }
-        // CDP not available — close and relaunch
+        // CDP not available — leave the user's browser untouched and relaunch
+        // with an isolated profile.
         logger.log(LoginState::LaunchingBrowser, format!(
-            "Closing {}...", browser_info.name
+            "{} is running without the requested debug endpoint; starting an isolated Smart Login profile...",
+            browser_info.name
         ));
-        let _ = close_browser(&browser_info.process_name);
     }
 
     // Fresh launch
@@ -169,20 +172,10 @@ pub async fn launch_and_connect(
         "Launching {} with CDP...", browser_info.name
     ));
 
-    // Clean up stale lock files or active port indicators if left over from previous runs
-    let active_port_path = browser_info.profile_dir.join("DevToolsActivePort");
-    if active_port_path.exists() {
-        let _ = std::fs::remove_file(&active_port_path);
-    }
-    for lock_name in &["SingletonLock", "lockfile", "SingletonCookie", "SingletonSocket"] {
-        let lock_path = browser_info.profile_dir.join(lock_name);
-        if lock_path.exists() {
-            let _ = std::fs::remove_file(&lock_path);
-        }
-    }
+    let profile_dir = isolated_profile_dir(&browser_info.name)?;
 
     let exe = browser_info.exe_path.to_string_lossy().to_string();
-    let profile = browser_info.profile_dir.to_string_lossy().to_string();
+    let profile = profile_dir.to_string_lossy().to_string();
 
     let mut args = vec![
         format!("--remote-debugging-port={port}"),
@@ -198,8 +191,23 @@ pub async fn launch_and_connect(
 
     let mut child = spawn_browser_process(&exe, &args, browser_info, logger)?;
 
-    let ws_url = wait_for_cdp_endpoint(&mut child, port, &browser_info.profile_dir, config.page_load_timeout_secs * 1000).await?;
+    let ws_url = wait_for_cdp_endpoint(&mut child, port, &profile_dir, config.page_load_timeout_secs * 1000).await?;
     connect_and_get_page(url, &ws_url, config, logger).await
+}
+
+fn isolated_profile_dir(browser_name: &str) -> crate::Result<PathBuf> {
+    let safe_name: String = browser_name
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect();
+    let path = std::env::temp_dir()
+        .join("YntraVault")
+        .join("smart-login")
+        .join(format!("{}-{}", safe_name.trim_matches('-'), uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&path).map_err(|e| {
+        crate::error::VaultError::SmartLoginError(format!("Could not create isolated browser profile: {e}"))
+    })?;
+    Ok(path)
 }
 
 /// Try connecting to an already-running browser via its CDP endpoint.
@@ -390,52 +398,15 @@ pub const ALLOWED_BROWSER_PROCESSES: &[&str] = &[
     "google-chrome", "google-chrome-stable", "microsoft-edge", "brave-browser", "chromium", "opera", "vivaldi",
 ];
 
-/// Close a browser gracefully by process name.
+/// Browser shutdown is intentionally unsupported. Smart Login uses an
+/// isolated profile when it cannot attach to an existing CDP session, so a
+/// process-name kill could never be necessary and would risk unrelated tabs.
 pub fn close_browser(process_name: &str) -> Result<(), String> {
     let clean_name = process_name.trim();
     if !ALLOWED_BROWSER_PROCESSES.iter().any(|&p| p.eq_ignore_ascii_case(clean_name)) {
         return Err(format!("Disallowed or invalid browser process name: {clean_name}"));
     }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let mut kill_cmd = std::process::Command::new("taskkill");
-        kill_cmd.args(["/IM", clean_name, "/F"]);
-        kill_cmd.creation_flags(0x08000000);
-        let output = kill_cmd.output()
-            .map_err(|e| format!("Failed to run taskkill: {e}"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // "not found" is OK — means it's already closed
-            if !stderr.contains("not found") && !stderr.contains("not running") {
-                return Err(format!("taskkill failed: {}", stderr.trim()));
-            }
-        }
-
-        // Poll for up to 3500ms for all browser processes to fully exit
-        for _ in 0..35 {
-            if !is_process_running(process_name) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        // Additional delay to allow Windows to release file handles on the user profile
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        Ok(())
-    }
-
-    #[cfg(not(windows))]
-    {
-        let output = std::process::Command::new("pkill")
-            .args(["-f", process_name])
-            .output()
-            .map_err(|e| format!("Failed to run pkill: {e}"))?;
-
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        Ok(())
-    }
+    Err(format!("Smart Login will not close {clean_name}; it uses an isolated browser profile instead"))
 }
 
 /// Fetch a single list of all running process names to avoid redundant subprocess calls.
@@ -471,13 +442,6 @@ fn get_running_process_list() -> Vec<String> {
     {
         Vec::new()
     }
-}
-
-/// Check if a process is running by name.
-fn is_process_running(process_name: &str) -> bool {
-    let running = get_running_process_list();
-    let p_lower = process_name.to_lowercase();
-    running.iter().any(|p| p.to_lowercase() == p_lower)
 }
 
 /// Browser process handle, either a direct spawned process or a de-elevated process.
@@ -891,7 +855,7 @@ fn parse_registry_browser(
     }
 
     // Determine process name from the exe path
-    let process_name = exe_path.file_name()?.to_string_lossy().to_string();
+    let process_name = process_name_for_browser(&exe_path, &display_name);
 
     // Determine profile directory
     let profile_dir = detect_profile_dir(&exe_path, &display_name);
@@ -1053,6 +1017,18 @@ fn scan_common_paths(browsers: &mut Vec<BrowserInfo>, default_progid: &Option<St
             PathBuf::from(&local_appdata).join(r"Vivaldi\Application\vivaldi.exe"),
             PathBuf::from(&program_files).join(r"Vivaldi\Application\vivaldi.exe"),
         ]),
+        ("Opera", vec![
+            PathBuf::from(&local_appdata).join(r"Programs\Opera\opera.exe"),
+            PathBuf::from(&local_appdata).join(r"Programs\Opera GX\opera.exe"),
+            PathBuf::from(&program_files).join(r"Opera\launcher.exe"),
+            PathBuf::from(&program_files).join(r"Opera GX\launcher.exe"),
+        ]),
+        ("Chromium", vec![
+            PathBuf::from(&local_appdata).join(r"Chromium\Application\chrome.exe"),
+            PathBuf::from(&local_appdata).join(r"Chromium\chrome.exe"),
+            PathBuf::from(&program_files).join(r"Chromium\Application\chrome.exe"),
+            PathBuf::from(&program_files).join(r"Chromium\chrome.exe"),
+        ]),
     ];
 
     let existing_exes: Vec<PathBuf> = browsers.iter()
@@ -1062,9 +1038,7 @@ fn scan_common_paths(browsers: &mut Vec<BrowserInfo>, default_progid: &Option<St
     for (name, paths) in candidates {
         for path in paths {
             if path.exists() && !existing_exes.contains(&normalize_path(&path)) {
-                let process_name = path.file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                let process_name = process_name_for_browser(path.as_path(), name);
 
                 let is_default = default_progid.as_ref().map(|pid| {
                     match_progid_to_name(pid, name)
@@ -1086,5 +1060,22 @@ fn scan_common_paths(browsers: &mut Vec<BrowserInfo>, default_progid: &Option<St
 
 fn normalize_path(path: &Path) -> PathBuf {
     path.to_string_lossy().to_lowercase().into()
+}
+
+/// Browser launchers can be named differently from the process they start.
+/// Keep `BrowserInfo::process_name` aligned with the real browser process so
+/// running detection and safe shutdown work for Opera's launcher too.
+fn process_name_for_browser(exe_path: &Path, browser_name: &str) -> String {
+    let file_name = exe_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if file_name.eq_ignore_ascii_case("launcher.exe")
+        && browser_name.to_ascii_lowercase().contains("opera")
+    {
+        "opera.exe".into()
+    } else {
+        file_name
+    }
 }
 

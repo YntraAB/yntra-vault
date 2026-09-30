@@ -134,6 +134,7 @@ export const zhTW = {
   'detail.password': '密碼',
   'detail.url': '網站 URL',
   'detail.email': '電子郵件',
+  'detail.phone': 'Phone number',
   'detail.notes': '筆記',
   'detail.totp': 'TOTP 雙重驗證碼',
   'detail.recovery_codes': '2FA 復原代碼',

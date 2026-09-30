@@ -134,6 +134,7 @@ export const hi = {
   'detail.password': 'पासवर्ड',
   'detail.url': 'वेबसाइट यूआरएल',
   'detail.email': 'ईमेल',
+  'detail.phone': 'Phone number',
   'detail.notes': 'नोट्स',
   'detail.totp': 'TOTP 2FA कोड',
   'detail.recovery_codes': '2FA रिकवरी कोड',

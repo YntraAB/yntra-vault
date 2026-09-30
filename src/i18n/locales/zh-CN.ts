@@ -134,6 +134,7 @@ export const zhCN = {
   'detail.password': '密码',
   'detail.url': '网站 URL',
   'detail.email': '电子邮箱',
+  'detail.phone': 'Phone number',
   'detail.notes': '笔记',
   'detail.totp': 'TOTP 二步验证码',
   'detail.recovery_codes': '2FA 恢复代码',

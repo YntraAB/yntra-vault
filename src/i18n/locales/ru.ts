@@ -134,6 +134,7 @@ export const ru = {
   'detail.password': 'Пароль',
   'detail.url': 'URL сайта',
   'detail.email': 'Электронная почта',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Заметки',
   'detail.totp': 'Код TOTP 2FA',
   'detail.recovery_codes': 'Коды восстановления 2FA',

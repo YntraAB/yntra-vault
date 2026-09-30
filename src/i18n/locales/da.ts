@@ -134,6 +134,7 @@ export const da = {
   'detail.password': 'Adgangskode',
   'detail.url': 'Websted-URL',
   'detail.email': 'E-mail',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Noter',
   'detail.totp': 'TOTP 2FA-kode',
   'detail.recovery_codes': '2FA-genoprettelseskoder',

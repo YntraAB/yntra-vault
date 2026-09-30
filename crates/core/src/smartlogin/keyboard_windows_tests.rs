@@ -30,6 +30,31 @@ async fn cdp_session_browser_regression() {
         let cancel = Arc::new(AtomicBool::new(false));
         let logger = SmartLoginLogger::new(Box::new(|_| {}));
         let engine = SmartLoginEngine::new(SmartLoginConfig::default(), logger, cancel.clone());
+        // Exercise the production semantic method selector without any provider
+        // URL. Only these click handlers can advance the fixture's state/path.
+        page.set_content("<a hidden>Use username</a><button disabled>Username</button><button>Register with username</button><div id='methods'></div>").await.unwrap();
+        page.evaluate(r##"(() => {
+            window.methodClicks = [];
+            document.querySelector('button:not([disabled])').onclick = () => { throw new Error('Registration must never be selected'); };
+            const root = document.getElementById('methods').attachShadow({mode:'open'});
+            root.innerHTML = '<div role="link" tabindex="0">Use phone / email / username</div>';
+            root.firstElementChild.onclick = () => {
+                methodClicks.push('chooser');
+                root.innerHTML = '<input name="mobile" placeholder="Phone number" autocomplete="username webauthn"><a href="#identifier">Log in with email or username</a>';
+                root.querySelector('a').onclick = event => {
+                    event.preventDefault();
+                    methodClicks.push('identifier');
+                    history.pushState({}, '', '/flow/fixture-identifier');
+                    root.innerHTML = '<input name="identifier" placeholder="Email or username"><input type="password">';
+                };
+            };
+        })()"##).await.unwrap();
+        assert!(engine.try_login_method_selector(&page, &local, "demo_user").await);
+        assert!(engine.try_login_method_selector(&page, &local, "demo_user").await);
+        assert_eq!(page.evaluate("window.methodClicks").await.unwrap().into_value::<Vec<String>>().unwrap(), vec!["chooser", "identifier"]);
+        assert!(page.evaluate("location.pathname === '/flow/fixture-identifier'").await.unwrap().into_value::<bool>().unwrap());
+        assert!(!engine.try_login_method_selector(&page, &local, "demo_user").await);
+        page.goto(&local).await.unwrap();
         page.set_content("<header><button aria-label='demo@example.test' aria-controls='menu'>Account</button><div id='menu' hidden><a href='/logout'>Exit</a></div></header>").await.unwrap();
         assert!(matches!(engine.find_login_form(page.clone(), &local, "demo@example.test").await, Err(LoginResult::AlreadySignedIn { .. })));
         assert!(matches!(engine.find_login_form(page.clone(), &local, "unknown-username").await, Err(LoginResult::RequiresManualAction)));
@@ -122,6 +147,78 @@ async fn google_native_smart_login_diagnostic() {
         || matches!(result, LoginResult::AlreadySignedIn { .. } | LoginResult::RequiresCaptcha | LoginResult::RequiresMfa { .. })
         || (matches!(result, LoginResult::RequiresManualAction) && password_step.load(Ordering::SeqCst)),
         "Expected the selected session, a password step or verification, got {result:?}");
+}
+
+/// Run the generic CDP Smart Login route against an explicitly supplied test
+/// account. Read the password from a hidden prompt; require actual typing and
+/// submission, as well as no unrelated discovery probes. A passing diagnostic
+/// proves the input path, never a successful authenticated session by itself.
+#[tokio::test]
+#[ignore = "requires explicit test URL/identifier, hidden password prompt and a disposable Brave profile"]
+async fn smart_login_method_chooser_diagnostic() {
+    let url = std::env::var("YNTRA_SMART_LOGIN_TEST_URL").expect("explicit test URL required");
+    let identifier = Zeroizing::new(
+        std::env::var("YNTRA_SMART_LOGIN_TEST_IDENTIFIER")
+            .expect("explicit test identifier required"),
+    );
+    eprintln!("Enter the authorized test account password at the hidden terminal prompt:");
+    let password = Zeroizing::new(rpassword::read_password().expect("hidden password prompt unavailable"));
+    assert!(!password.is_empty(), "explicit test password must not be empty");
+
+    let requested_browser = std::env::var("YNTRA_TEST_BROWSER").ok();
+    let discovered = browser::discover_browsers()
+        .into_iter()
+        .find(|browser| {
+            requested_browser.as_ref().is_some_and(|requested| {
+                browser.exe_path.to_string_lossy().eq_ignore_ascii_case(requested)
+            })
+        })
+        .or_else(|| browser::discover_browsers().into_iter().find(|browser| {
+            browser::ALLOWED_BROWSER_PROCESSES.iter().any(|allowed| {
+                browser.process_name.eq_ignore_ascii_case(allowed)
+            })
+        }))
+        .expect("A supported Chromium browser is required");
+    let profile = tempfile::tempdir().expect("temporary browser profile");
+    let browser_info = browser::BrowserInfo {
+        name: discovered.name,
+        exe_path: discovered.exe_path,
+        profile_dir: profile.path().to_path_buf(),
+        process_name: discovered.process_name,
+        is_default: false,
+        is_running: false,
+    };
+
+    let probes = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let observed_probes = Arc::clone(&probes);
+    let input_steps = Arc::new(std::sync::Mutex::new([false; 3]));
+    let observed_steps = Arc::clone(&input_steps);
+    let started = std::time::Instant::now();
+    let logger = SmartLoginLogger::new(Box::new(move |event| {
+        let step = match event.message.as_str() {
+            "Identifier typed and verified [REDACTED]" => Some(0),
+            "Password typed into protected field [REDACTED]" => Some(1),
+            "Submitted via native Enter keystroke" => Some(2),
+            _ => None,
+        };
+        if let Some(step) = step { observed_steps.lock().unwrap()[step] = true; }
+        if matches!(event.state, LoginState::SearchingForLogin)
+            && event.message.starts_with("Probing:")
+        {
+            observed_probes.lock().unwrap().push(event.message.clone());
+        }
+        eprintln!("{}ms {:?}: {}", started.elapsed().as_millis(), event.state, event.message);
+    }));
+    let engine = SmartLoginEngine::new(
+        SmartLoginConfig::default(),
+        logger,
+        Arc::new(AtomicBool::new(false)),
+    );
+    let result = engine.execute(&url, identifier, password, None, &browser_info).await;
+    let probes = probes.lock().unwrap().clone();
+    eprintln!("Diagnostic result: {result:?}; generic probes: {probes:?}");
+    assert!(probes.is_empty(), "login flow probed unrelated paths: {probes:?}");
+    assert!(input_steps.lock().unwrap().iter().all(|step| *step), "Expected both credential fields and native submission; got {result:?}");
 }
 
 /// Opt-in investigation against Google's identifier step. Never supplies a password.

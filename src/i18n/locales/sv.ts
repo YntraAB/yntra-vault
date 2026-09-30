@@ -147,6 +147,7 @@ export const sv = {
   'detail.password': 'Lösenord',
   'detail.url': 'Webbplats-URL / Programsökväg',
   'detail.email': 'E-post',
+  'detail.phone': 'Telefonnummer',
   'detail.notes': 'Anteckningar',
   'detail.totp': 'TOTP 2FA-kod',
   'detail.recovery_codes': '2FA Återställningskoder',

@@ -26,7 +26,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, SW_SHOWNORMAL,
+    EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+    IsWindowVisible, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOWNORMAL,
 };
 
 fn is_target_window_active(target_hwnd: HWND) -> bool {
@@ -40,9 +41,7 @@ fn is_target_window_active(target_hwnd: HWND) -> bool {
 }
 
 fn check_target_window_active(target_hwnd: HWND) -> crate::Result<()> {
-    if super::is_cancelled() {
-        return Err(crate::error::VaultError::AutoTypeError("Autotype cancelled by vault lock".into()));
-    }
+    super::ensure_input_allowed()?;
     if !is_target_window_active(target_hwnd) {
         return Err(crate::error::VaultError::AutoTypeError(
             "Target window lost active focus during autotype execution".into(),
@@ -352,6 +351,70 @@ pub(crate) fn foreground_browser_token() -> crate::Result<usize> {
     Ok(hwnd.0 as usize)
 }
 
+struct BrowserWindowSearch<'a> {
+    automation: &'a IUIAutomation,
+    expected_url: &'a str,
+    found: HWND,
+}
+
+unsafe extern "system" fn find_browser_window(hwnd: HWND, context: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::BOOL {
+    let search = unsafe { &mut *(context.0 as *mut BrowserWindowSearch<'_>) };
+    if hwnd.is_invalid() || !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        return true.into();
+    }
+    if !is_known_web_browser(&get_window_process_name(hwnd)) {
+        return true.into();
+    }
+    if browser_address_display(search.automation, hwnd)
+        .is_some_and(|actual| browser_display_matches(search.expected_url, &actual))
+    {
+        search.found = hwnd;
+        return false.into();
+    }
+    true.into()
+}
+
+/// Bring the browser window containing the exact verified page to the Windows
+/// foreground. The address bar is checked through UI Automation before focus
+/// changes, so a different browser tab/window cannot receive credentials.
+pub(crate) fn activate_browser_window(expected_url: &str) -> crate::Result<usize> {
+    unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok()
+        .map_err(|_| crate::error::VaultError::AutoTypeError("Cannot initialize browser focus".into()))?;
+    let result = (|| {
+        let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) }
+            .map_err(|_| crate::error::VaultError::AutoTypeError("Cannot inspect browser windows".into()))?;
+        let mut search = BrowserWindowSearch { automation: &automation, expected_url, found: HWND::default() };
+        let enumeration = unsafe {
+            EnumWindows(
+                Some(find_browser_window),
+                windows::Win32::Foundation::LPARAM(&mut search as *mut _ as isize),
+            )
+        };
+        // EnumWindows can report FALSE when our callback intentionally stops
+        // after finding the matching page. Treat that as success when a
+        // verified window was captured; only a FALSE result without a match is
+        // an enumeration failure.
+        if enumeration.is_err() && search.found.is_invalid() {
+            return Err(crate::error::VaultError::AutoTypeError("Cannot enumerate browser windows".into()));
+        }
+        if search.found.is_invalid() {
+            return Err(crate::error::VaultError::AutoTypeError("The verified login page is not visible in a browser window".into()));
+        }
+        unsafe {
+            let _ = ShowWindow(search.found, SW_RESTORE);
+            if !SetForegroundWindow(search.found).as_bool() {
+                return Err(crate::error::VaultError::AutoTypeError("Windows refused to focus the login browser".into()));
+            }
+            if GetForegroundWindow() != search.found {
+                return Err(crate::error::VaultError::AutoTypeError("The login browser did not become the foreground window".into()));
+            }
+        }
+        Ok(search.found.0 as usize)
+    })();
+    unsafe { windows::Win32::System::Com::CoUninitialize(); }
+    result
+}
+
 fn inject_password_guarded(
     focused: &IUIAutomationElement,
     text: &str,
@@ -409,13 +472,13 @@ pub(crate) fn type_browser_field(
     let address_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let actual = loop {
         check_target_window_active(hwnd)?;
-        if let Some(actual) = browser_address(&automation, hwnd) { break actual; }
+        if let Some(actual) = browser_address_display(&automation, hwnd) { break actual; }
         if std::time::Instant::now() >= address_deadline {
             return Err(crate::error::VaultError::AutoTypeError("Cannot inspect the active browser address".into()));
         }
         safe_sleep_with_target_guard(50, hwnd)?;
     };
-    if !same_browser_document(expected_url, &actual) {
+    if !browser_display_matches(expected_url, &actual) {
         return Err(crate::error::VaultError::AutoTypeError("The selected browser page is not the active window".into()));
     }
     if let Ok(window) = unsafe { automation.ElementFromHandle(hwnd) } {
@@ -654,7 +717,9 @@ fn get_window_process_name(hwnd: HWND) -> String {
 fn is_known_web_browser(proc_name: &str) -> bool {
     let p = proc_name.to_lowercase();
     p.contains("chrome")
+        || p.contains("chromium")
         || p.contains("msedge")
+        || p.contains("microsoft-edge")
         || p.contains("firefox")
         || p.contains("brave")
         || p.contains("opera")
@@ -666,6 +731,12 @@ fn is_known_web_browser(proc_name: &str) -> bool {
         || p.contains("thorium")
         || p.contains("floorp")
         || p.contains("iexplore")
+}
+
+fn native_process_matches_domain(proc_name: &str, domain_token: &str) -> bool {
+    let process = proc_name.to_lowercase();
+    process.contains(domain_token)
+        || (domain_token == "steampowered" && process.contains("steam"))
 }
 
 fn extract_domain_token(url: &str) -> String {
@@ -730,6 +801,22 @@ fn same_browser_document(expected: &str, actual: &str) -> bool {
     expected == actual
 }
 
+/// Compare a trusted native omnibox display with the separately verified CDP
+/// document. Chromium can elide both the scheme and leading www. Only permit
+/// that one-way presentation difference when the display lacks a scheme;
+/// explicit URLs and the credential-origin policy remain exact. This display
+/// check is combined with CDP document focus and native field/window guards.
+fn browser_display_matches(expected: &str, display: &str) -> bool {
+    let Some(actual) = normalize_browser_address(display) else { return false; };
+    if same_browser_document(expected, &actual) { return true; }
+    if display.trim().to_ascii_lowercase().starts_with("https://")
+        || display.trim().to_ascii_lowercase().starts_with("http://") { return false; }
+    let Ok(mut expected) = reqwest::Url::parse(expected) else { return false; };
+    let Some(host) = expected.host_str().and_then(|host| host.strip_prefix("www.")).map(str::to_owned) else { return false; };
+    if expected.set_host(Some(&host)).is_err() { return false; }
+    same_browser_document(expected.as_str(), &actual)
+}
+
 /// Before native Enter, bind the selected CDP page to a focused document input.
 pub(crate) fn verify_browser_submit(window_token: usize, expected_url: &str) -> bool {
     let hwnd = HWND(window_token as *mut _);
@@ -737,9 +824,9 @@ pub(crate) fn verify_browser_submit(window_token: usize, expected_url: &str) -> 
     if unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_err() { return false; }
     let valid = (|| {
         let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) }.ok()?;
-        let actual = browser_address(&automation, hwnd)?;
+        let actual = browser_address_display(&automation, hwnd)?;
         let focused = unsafe { automation.GetFocusedElement() }.ok()?;
-        Some(same_browser_document(expected_url, &actual)
+        Some(browser_display_matches(expected_url, &actual)
             && unsafe { focused.CurrentControlType() }.ok() == Some(UIA_EditControlTypeId)
             && native_login::document_field(&automation, &focused)
             && check_identifier_focus(&focused, hwnd).is_ok())
@@ -769,6 +856,10 @@ fn normalize_browser_address(address: &str) -> Option<String> {
 
 /// Read only browser chrome: an edit beneath a native toolbar, never a web document.
 fn browser_address(automation: &IUIAutomation, hwnd: HWND) -> Option<String> {
+    normalize_browser_address(&browser_address_display(automation, hwnd)?)
+}
+
+fn browser_address_display(automation: &IUIAutomation, hwnd: HWND) -> Option<String> {
     unsafe {
         let window = automation.ElementFromHandle(hwnd).ok()?;
         let edits = find_targeted_elements(automation, &window, UIA_EditControlTypeId)?;
@@ -776,6 +867,19 @@ fn browser_address(automation: &IUIAutomation, hwnd: HWND) -> Option<String> {
         for index in 0..edits.Length().ok()?.min(100) {
             let Ok(edit) = edits.GetElement(index) else { continue; };
             if edit.CurrentIsOffscreen().map_or(true, |v| v.as_bool()) { continue; }
+            // Chromium-family browsers expose the omnibox with stable native
+            // metadata, but the surrounding toolbar ancestry can vary by
+            // browser version, locale and accessibility mode. Keep the
+            // ancestry check as the primary boundary and accept this semantic
+            // fallback only for a known browser's native edit tree; the value
+            // is URL-validated below, so a web-document input cannot satisfy it.
+            let semantic_address_bar = {
+                let class_name = edit.CurrentClassName().map(|value| value.to_string().to_lowercase()).unwrap_or_default();
+                let automation_id = edit.CurrentAutomationId().map(|value| value.to_string().to_lowercase()).unwrap_or_default();
+                class_name.contains("omnibox")
+                    || class_name.contains("locationbar")
+                    || automation_id.contains("omnibox")
+            };
             let mut ancestor = edit.clone();
             let mut toolbar = false;
             let mut chrome = false;
@@ -790,14 +894,14 @@ fn browser_address(automation: &IUIAutomation, hwnd: HWND) -> Option<String> {
                 }
                 ancestor = parent;
             }
-            if !chrome { continue; }
+            if !chrome && !semantic_address_bar { continue; }
             let Ok(pattern) = edit.GetCurrentPattern(UIA_ValuePatternId) else { continue; };
             let Ok(value) = pattern.cast::<IUIAutomationValuePattern>() else { continue; };
             let Ok(value) = value.CurrentValue() else { continue; };
             let address = value.to_string();
             // Chromium's unfocused omnibox elides the scheme. This verifies the
             // hostname, not the TLS state; never accept an explicitly insecure URL.
-            if let Some(address) = normalize_browser_address(&address) { return Some(address); }
+            if normalize_browser_address(&address).is_some() { return Some(address); }
         }
     }
     None
@@ -844,27 +948,18 @@ fn is_verified_login_context(
 
     // 2. Strict Domain & Process Executable Anti-Phishing Guard
     if !target_domain_token.is_empty() {
-        let is_token_match = |text: &str| -> bool {
-            if text.contains(target_domain_token) {
-                return true;
-            }
-            if target_domain_token == "steampowered" && text.contains("steam") {
-                return true;
-            }
-            false
-        };
-
         if is_browser {
             // Browser window MUST contain the verified domain token in its title bar snippet
             // E.g., "Sign in to GitHub · GitHub - Google Chrome" contains "github" -> Verified.
-            if !is_token_match(&title_lower) {
+            if !title_lower.contains(target_domain_token)
+                && !(target_domain_token == "steampowered" && title_lower.contains("steam")) {
                 return false;
             }
         } else {
-            // Native Application window: Process name or window title MUST match domain token
-            // E.g., "discord.exe" matches "discord" -> Verified.
-            // Spoofed app "phish.exe" with title "Sign In - Google Chrome" -> Rejected!
-            if !is_token_match(&proc_name) && !is_token_match(&title_lower) {
+            // Native applications must prove ownership through their executable
+            // name. A window title is user-controlled and can be spoofed by a
+            // phishing process, so it is never sufficient for credential input.
+            if !native_process_matches_domain(&proc_name, target_domain_token) {
                 return false;
             }
         }
@@ -1352,7 +1447,9 @@ impl AutotypeDriver for WindowsAutotypeDriver {
             String::new()
         };
 
+        let generation = guard.generation;
         std::thread::spawn(move || {
+            super::bind_autotype_session(generation);
             let expected_url = normalized_url.clone();
 
             // Use normalized target URL directly without network probing (enforces offline invariant)
@@ -1679,6 +1776,27 @@ impl AutotypeDriver for WindowsAutotypeDriver {
 mod tests {
     use super::*;
     #[test]
+    fn browser_process_guard_covers_supported_chromium_family() {
+        for process in [
+            "chrome.exe", "msedge.exe", "brave.exe", "chromium.exe", "opera.exe", "vivaldi.exe",
+            "google-chrome", "google-chrome-stable", "microsoft-edge", "brave-browser", "chromium", "opera", "vivaldi",
+        ] { assert!(is_known_web_browser(process), "{process}"); }
+        // These are accepted by the native foreground/UIA guard when a user
+        // has already focused them, but the Chromium CDP launcher does not
+        // discover or start them.
+        assert!(is_known_web_browser("firefox.exe"));
+        assert!(is_known_web_browser("waterfox.exe"));
+        for process in ["safari.exe", "not-a-browser.exe"] { assert!(!is_known_web_browser(process), "{process}"); }
+    }
+
+    #[test]
+    fn native_process_guard_does_not_trust_spoofable_titles() {
+        assert!(native_process_matches_domain("discord.exe", "discord"));
+        assert!(native_process_matches_domain("steam.exe", "steampowered"));
+        assert!(!native_process_matches_domain("phish.exe", "discord"));
+    }
+
+    #[test]
     fn browser_url_requires_verified_https_origin() {
         assert!(verified_browser_url("https://gmail.com", "https://accounts.google.com/signin"));
         for target in ["http://accounts.google.com", "https://accounts.google.com.evil.test", "https://accounts.google.com@evil.test", "https://evil.test/login/google", "accounts.google.com"] {
@@ -1689,12 +1807,30 @@ mod tests {
     #[test]
     fn browser_target_binding_rejects_other_documents_and_error_pages() {
         assert!(same_browser_document("https://example.test/login#one", "https://example.test/login#two"));
+        assert!(!same_browser_document("https://www.example.test/login", "https://example.test/login"));
         assert!(!same_browser_document("https://example.test/login", "https://other.test/login"));
+        assert!(!same_browser_document("https://www.example.test/login", "https://login.example.test/login"));
         assert!(!same_browser_document("https://example.test/login", "https://example.test/other"));
         assert!(!same_browser_document("https://example.test/login?a=1", "https://example.test/login?a=2"));
         assert!(!same_browser_document("chrome-error://chromewebdata/", "https://example.test/"));
         assert!(!same_browser_document("https://example.test/login", ""));
         assert!(same_browser_document("http://127.0.0.1:1234/", "https://127.0.0.1:1234/"));
+    }
+
+    #[test]
+    fn native_display_elision_does_not_change_credential_origins() {
+        let expected = "https://www.example.test/login?step=2";
+        assert!(browser_display_matches(expected, "example.test/login?step=2"));
+        assert!(browser_display_matches(expected, "www.example.test/login?step=2"));
+        assert!(browser_display_matches(expected, expected));
+        for display in [
+            "https://example.test/login?step=2", "http://www.example.test/login?step=2",
+            "login.example.test/login?step=2", "example.test.evil.test/login?step=2",
+            "example.test/other?step=2", "example.test/login?step=3",
+            "example.test:8443/login?step=2", "user@example.test/login?step=2",
+        ] { assert!(!browser_display_matches(expected, display), "{display}"); }
+        assert!(!browser_display_matches("https://example.test/login", "www.example.test/login"));
+        assert!(!crate::smartlogin::discovery::is_allowed_auth_domain(expected, "https://example.test/login?step=2"));
     }
 
     #[test]

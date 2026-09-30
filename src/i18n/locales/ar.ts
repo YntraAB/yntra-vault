@@ -134,6 +134,7 @@ export const ar = {
   'detail.password': 'كلمة المرور',
   'detail.url': 'رابط الموقع',
   'detail.email': 'البريد الإلكتروني',
+  'detail.phone': 'Phone number',
   'detail.notes': 'ملاحظات',
   'detail.totp': 'رمز 2FA TOTP',
   'detail.recovery_codes': 'رموز استرداد 2FA',

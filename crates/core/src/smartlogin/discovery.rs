@@ -92,6 +92,11 @@ const AUTH_DOMAINS: &[(&str, &str)] = &[
     ("steampowered.com", "store.steampowered.com"),
     ("steamcommunity.com", "store.steampowered.com"),
     ("steamcommunity.com", "steampowered.com"),
+    // Proton Mail starts on the product host and redirects its credential
+    // form to the dedicated account host. Keep this explicit so unrelated
+    // Proton subdomains remain outside the trust boundary.
+    ("proton.me", "account.proton.me"),
+    ("mail.proton.me", "account.proton.me"),
 ];
 
 /// Normalize a user-provided URL for navigation.
@@ -110,6 +115,13 @@ pub fn has_login_form(snapshot: &PageSnapshot) -> bool {
     // Complex pages (many buttons/links) are NOT standalone login forms.
     // Force navigation to /login instead of filling in-place.
     let is_simple_page = snapshot.buttons.len() <= 10 && snapshot.links.len() <= 20;
+
+    // Some providers render an authenticated login chooser before they create
+    // any input. Treat a clearly labelled chooser on a login URL
+    // as the login form so discovery does not wander through unrelated paths.
+    if has_login_method_chooser(snapshot) {
+        return true;
+    }
 
     // Direct: password field on a simple page
     let has_password = snapshot.inputs.iter().any(|i| i.is_visible && !i.is_readonly && i.input_type == "password");
@@ -190,6 +202,47 @@ pub fn has_login_form(snapshot: &PageSnapshot) -> bool {
     }
 
     false
+}
+
+/// Returns true for a login/auth page whose visible controls select an
+/// authentication method instead of exposing an identifier input immediately.
+/// This is deliberately stricter than matching a lone "Continue" button: the
+/// page must be on a login-like path and expose a known method label.
+pub fn has_login_method_chooser(snapshot: &PageSnapshot) -> bool {
+    if !is_login_url(&snapshot.url) {
+        return false;
+    }
+
+    let method_labels = [
+        "phone", "mobile", "telephone", "teléfono", "téléphone", "telefon", "телефон", "email", "e-mail", "correo", "courriel", "e-post", "邮箱", "username",
+        "user name", "usuario", "utilisateur", "användarnamn", "benutzername", "имя пользователя", "用户名", "qr code", "passkey", "google", "facebook", "apple",
+        "microsoft", "use another account", "annat konto", "anderes konto", "otro método",
+    ];
+    let is_method_control = |text: &str, aria_label: &str| {
+        let combined = format!("{text} {aria_label}").to_ascii_lowercase();
+        method_labels.iter().any(|pattern| combined.contains(pattern))
+    };
+    let method_controls = snapshot.buttons.iter().filter(|button| {
+        button.is_visible && is_method_control(&button.text, &button.aria_label)
+    }).count() + snapshot.links.iter().filter(|link| {
+        link.is_visible && is_method_control(&link.text, &link.aria_label)
+    }).count();
+
+    // One explicit method selector is sufficient. Social/QR-only choosers are
+    // also valid because they are still a user-visible authentication choice.
+    method_controls > 0
+}
+
+/// Returns true when a URL is already on a conventional authentication path.
+/// Discovery must not leave such a page just because its controls are rendered
+/// unusually or its challenge is not yet understood.
+pub fn is_login_url(value: &str) -> bool {
+    let Ok(url) = url::Url::parse(value) else { return false; };
+    let path = url.path().to_ascii_lowercase();
+    LOGIN_PATH_PATTERNS.iter().any(|pattern| {
+        let pattern = pattern.to_ascii_lowercase();
+        path == pattern || path.starts_with(&format!("{pattern}/"))
+    })
 }
 
 /// Detect if the user is already logged into a dashboard/inbox
@@ -427,14 +480,19 @@ pub fn is_allowed_auth_domain(entry_url: &str, target_url: &str) -> bool {
 /// For generic sites, tries common login paths on the same domain.
 pub fn get_probe_urls(base_url: &str) -> Vec<String> {
     let normalized = normalize_url(base_url);
-    let domain = extract_domain(&normalized).unwrap_or_default();
+    let Some(parsed) = credential_url(&normalized) else { return Vec::new(); };
+    let domain = parsed.host_str().unwrap_or_default();
+    let authority = match parsed.port() {
+        Some(port) => format!("{domain}:{port}"),
+        None => domain.to_string(),
+    };
 
     let mut urls = Vec::new();
 
     // Check known service login URLs first (optimization)
     for (service, login_url) in SERVICE_LOGIN_URLS {
         let domain_matches = domain == *service || domain.ends_with(&format!(".{}", service));
-        if domain_matches {
+        if domain_matches && parsed.port_or_known_default() == Some(443) {
             urls.push(login_url.to_string());
             return urls;
         }
@@ -442,7 +500,7 @@ pub fn get_probe_urls(base_url: &str) -> Vec<String> {
 
     // Generic: try common login paths on the same domain
     for path in PROBE_PATHS {
-        urls.push(format!("https://{domain}{path}"));
+        urls.push(format!("{}://{authority}{path}", parsed.scheme()));
     }
 
     urls
@@ -558,6 +616,68 @@ mod tests {
     }
 
     #[test]
+    fn tiktok_method_chooser_stops_discovery_on_login_page() {
+        let snapshot = PageSnapshot {
+            url: "https://www.tiktok.com/login".into(),
+            title: "Log in to TikTok".into(),
+            forms: vec![],
+            inputs: vec![],
+            buttons: vec![
+                ButtonInfo {
+                    backend_node_id: 0,
+                    text: "Use QR code".into(),
+                    button_type: String::new(),
+                    aria_label: String::new(),
+                    is_visible: true,
+                    form_index: None,
+                    ax_role: "button".into(),
+                    ax_name: String::new(),
+                },
+                ButtonInfo {
+                    backend_node_id: 0,
+                    text: "Use phone / email / username".into(),
+                    button_type: String::new(),
+                    aria_label: String::new(),
+                    is_visible: true,
+                    form_index: None,
+                    ax_role: "button".into(),
+                    ax_name: String::new(),
+                },
+            ],
+            links: vec![],
+        };
+        assert!(has_login_method_chooser(&snapshot));
+        assert!(is_login_url(&snapshot.url));
+        assert!(has_login_form(&snapshot));
+    }
+
+    #[test]
+    fn method_chooser_requires_login_path_and_visible_controls() {
+        let mut snapshot = PageSnapshot {
+            url: "https://www.tiktok.com/".into(),
+            title: "TikTok".into(),
+            forms: vec![],
+            inputs: vec![],
+            buttons: vec![ButtonInfo {
+                backend_node_id: 0,
+                text: "Continue with Google".into(),
+                button_type: String::new(),
+                aria_label: String::new(),
+                is_visible: true,
+                form_index: None,
+                ax_role: "button".into(),
+                ax_name: String::new(),
+            }],
+            links: vec![],
+        };
+        assert!(!has_login_method_chooser(&snapshot));
+        assert!(!is_login_url(&snapshot.url));
+        snapshot.url = "https://www.tiktok.com/login".into();
+        snapshot.buttons[0].is_visible = false;
+        assert!(!has_login_method_chooser(&snapshot));
+    }
+
+    #[test]
     fn test_probe_urls_gmail() {
         let probes = get_probe_urls("gmail.com");
         assert!(probes[0].contains("accounts.google.com"));
@@ -576,6 +696,14 @@ mod tests {
     }
 
     #[test]
+    fn probe_urls_preserve_custom_https_ports_and_do_not_cross_domains() {
+        let probes = get_probe_urls("https://example.test:8443/account");
+        assert!(probes.iter().all(|probe| probe.starts_with("https://example.test:8443/")));
+        assert!(probes.iter().all(|probe| login_target_allowed("https://example.test:8443/account", probe)));
+        assert!(get_probe_urls("not a url").is_empty());
+    }
+
+    #[test]
     fn credential_origins_reject_cross_tenant_downgrades_userinfo_and_ports() {
         for (entry,target) in [
             ("https://victim.pages.dev","https://attacker.pages.dev/login"),
@@ -590,6 +718,9 @@ mod tests {
         ] { assert!(!is_allowed_auth_domain(entry,target),"{entry} -> {target}"); }
         assert!(is_allowed_auth_domain("https://bank.example","https://bank.example/login"));
         assert!(is_allowed_auth_domain("https://gmail.com","https://accounts.google.com/login"));
+        assert!(is_allowed_auth_domain("https://mail.proton.me/","https://account.proton.me/mail"));
+        assert!(is_allowed_auth_domain("https://proton.me/","https://account.proton.me/mail"));
+        assert!(!is_allowed_auth_domain("https://mail.proton.me/","https://evil.account.proton.me/mail"));
     }
 }
 

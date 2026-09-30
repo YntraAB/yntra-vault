@@ -10,8 +10,8 @@ Security fixes and advisories are prioritized for active development releases:
 
 | Version | Supported          | Status |
 | ------- | ------------------ | ------ |
-| `0.2.5` | :white_check_mark: | Active local development / unpublished |
-| `0.2.4` | :white_check_mark: | Published baseline; security behavior is documented separately |
+| `0.2.6` | :white_check_mark: | Active local development / unpublished |
+| `0.2.5` | :white_check_mark: | Published baseline; security behavior is documented separately |
 | `< 0.2` | :x:                | Unsupported / Deprecated |
 
 > **Pre-Audit Notice**: Yntra Vault is currently in active development. While built with defense-in-depth cryptographic primitives and hardware-assisted memory locking, the codebase **has not yet undergone an independent third-party security audit**. It is provided for evaluation, testing, and community security review.

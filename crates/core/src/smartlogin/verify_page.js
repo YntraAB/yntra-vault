@@ -150,7 +150,7 @@
 
     // Account lock
     const lockPatterns = [
-        'account locked', 'too many attempts', 'temporarily blocked',
+        'account locked', 'too many attempts', 'maximum number of attempts reached', 'temporarily blocked',
         'account suspended', 'account disabled',
     ];
     const bodyLower = document.body ? document.body.innerText.substring(0, 2000).toLowerCase() : '';

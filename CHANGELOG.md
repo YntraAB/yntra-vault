@@ -5,6 +5,29 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-09-30
+
+This release is the launch-readiness hardening pass. It is prepared locally and has not been published.
+
+### Security
+- Bind every Auto-Type worker to a generation token. Locking the vault now invalidates workers already queued or waiting, and a later Auto-Type request cannot accidentally re-enable an older worker.
+- Require the expected executable identity when verifying native non-browser windows. A spoofed title alone can no longer authorize credential typing; Chromium browser windows continue to require the verified HTTPS omnibox document and foreground window.
+- Keep Smart Login discovery on the verified origin and preserve explicit HTTPS ports. Custom-port login pages no longer lose their port during fallback probing, and probes outside the credential origin are skipped.
+- Never terminate browser processes by image name. If CDP cannot be attached, Smart Login starts a temporary isolated profile and leaves the user's tabs and cookies untouched.
+
+### Added
+- Fill Smart Login credentials, OTP inputs and submit controls inside open shadow roots and same-origin iframes on the non-Windows path, including textareas and accessible contenteditable textboxes. Native value setters and composed input/change events preserve controlled-framework behavior while keeping the field and origin checks active.
+- Add regression coverage for Auto-Type session invalidation and custom-port Smart Login discovery.
+- Add native process-identity regression coverage for the anti-phishing foreground guard.
+
+### Fixed
+- Entry password and Smart Login commands now start a session before reading secrets and carry that session into the worker, closing the lock-between-read-and-type race.
+- Keep Auto-Type cancellation state isolated across platform worker threads and the Tauri command layer.
+
+### Changed
+- Bump all application and workspace package manifests to 0.2.6 together, including the lockfile package records.
+- Update Smart Login and CDP verification documentation with the 0.2.6 audit scope, session-bound Auto-Type behavior and deep-DOM filling limits.
+
 ## [0.2.5] - 2026-09-28
 
 Security and bug fixes take priority over new features.
@@ -19,6 +42,10 @@ Security and bug fixes take priority over new features.
 - Respect native memory page sizes, fail safely when protected-memory setup fails, clear temporary secrets on drop, and restrict test-only authentication mocks to test builds.
 - Reduce release-workflow permissions, pin third-party actions and separate package building from protected signing jobs. Refresh dependencies with security fixes.
 - Update rustls, ratatui/lru and frontend dependencies; include a documented upstream glib security backport. Track remaining unmaintained dependencies and platform verification limits in the security notes.
+- Keep Windows Smart Login credentials bound to the verified CDP document and the foreground browser window. Native browser UI Automation now tolerates Chromium toolbar-tree and `www.` address-display differences without relaxing exact origin, protected-field, cancellation or focus checks.
+
+### Added
+- Add focused Smart Login chooser, identifier matching, native browser focus and attempt-limit regressions, plus an opt-in runtime diagnostic that records no credential values or unrelated probe URLs.
 
 ### Fixed
 - Prevent plaintext exports from overwriting the open vault, including filesystem aliases; serialize competing saves and reject stale writers.
@@ -29,11 +56,17 @@ Security and bug fixes take priority over new features.
 - Display OS screen-lock integration only where supported; report unavailable biometric consent instead of silently succeeding.
 - Bound and pad breach-check requests, ignore padding records, and refresh previously checked passwords after the configured age.
 - Add regression coverage for recovery rotation, wrong-origin credentials, revoked peers, asynchronous locking, privacy toggles and update signatures. Live clipboard, device and network tests require explicit opt-in.
+- Make generic Smart Login follow sequential email/username/phone method choices using visible semantic buttons and links. It re-analyzes after each bounded transition, supports open shadow roots/same-origin frames and combined identifier placeholders, and keeps unfamiliar login pages in place instead of probing unrelated URLs. TikTok is covered only as a fixture/live diagnostic; no provider URL or selector is hardcoded in production.
+- Fix username entry on phone-first forms whose `autocomplete` still says `username`; descriptive phone metadata now takes precedence. Add the encrypted Phone custom-field option and use it as a saved-identifier fallback.
+- Recognize explicit provider attempt-limit/error text during post-submit verification and stop without retrying credentials. Document the generic diagnostic, Windows focus binding, live-test limits and next-AI handoff in the Smart Login guide.
+- Allow Proton Mail's documented product-to-account login redirect through the existing exact HTTPS SSO-pair policy, while continuing to reject arbitrary sibling or nested subdomains.
 - Allow setup and recovery-share dialogs to be cancelled through the close button, Escape or Cancel with a warning when newly generated shares have not been saved. Standardize security, hardware-key and language popups with the startup card visual style. Harmonize Settings access and recovery rows with the standard settings layout, streamline the USB Protection flow into a clean two-step verification and selection dialog with smooth vertical slide transitions, and automatically pre-select the primary connected USB drive.
 
 ### Changed
 - Protected-vault CLI password changes require `--recovery-output-dir` when recovery is enabled. Store the replacement shares separately.
 - Device removal revokes future authenticated P2P sessions on that replica; it cannot erase old files, secrets already shared, or access retained through an independent WebDAV account.
+- Update the 0.2.5 Smart Login and CDP documentation with the provider-neutral flow, Windows focus bridge, test evidence, rate-limit boundary and handoff instructions for future maintainers.
+- Document the browser boundary explicitly: Chrome/Brave/Edge/Chromium/Opera/Vivaldi use the shared Chromium CDP route; Firefox-family windows are only recognized by native foreground guards until a separate protocol adapter exists.
 - See [security notes](docs/security/SECURITY-0.2.5.md), [USB/recovery](docs/security/USB-RECOVERY.md) and [updates](docs/security/UPDATES.md) for migration and verification limits.
 
 ## [0.2.4] - 2026-09-26

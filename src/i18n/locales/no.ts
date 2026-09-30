@@ -134,6 +134,7 @@ export const no = {
   'detail.password': 'Passord',
   'detail.url': 'Nettsted-URL',
   'detail.email': 'E-post',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Notater',
   'detail.totp': 'TOTP 2FA-kode',
   'detail.recovery_codes': '2FA Gjenopprettingskoder',

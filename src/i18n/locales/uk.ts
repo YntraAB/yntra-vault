@@ -134,6 +134,7 @@ export const uk = {
   'detail.password': 'Пароль',
   'detail.url': 'URL веб-сайту',
   'detail.email': 'Електронна пошта',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Примітки',
   'detail.totp': 'Код TOTP 2FA',
   'detail.recovery_codes': 'Коди відновлення 2FA',

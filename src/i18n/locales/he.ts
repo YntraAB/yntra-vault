@@ -134,6 +134,7 @@ export const he = {
   'detail.password': 'סיסמה',
   'detail.url': 'כתובת אתר',
   'detail.email': 'דוא"ל',
+  'detail.phone': 'Phone number',
   'detail.notes': 'הערות',
   'detail.totp': 'קוד 2FA TOTP',
   'detail.recovery_codes': 'קודי שחזור 2FA',

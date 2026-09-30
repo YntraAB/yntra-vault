@@ -134,6 +134,7 @@ export const ja = {
   'detail.password': 'パスワード',
   'detail.url': 'ウェブサイトURL',
   'detail.email': 'メールアドレス',
+  'detail.phone': 'Phone number',
   'detail.notes': 'メモ',
   'detail.totp': 'TOTP 2要素認証コード',
   'detail.recovery_codes': '2FAリカバリーコード',

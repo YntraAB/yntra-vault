@@ -51,4 +51,8 @@ describe('Production Smart Login page observer', () => {
     expect(observe(github + '<input type="password"><input autocomplete="one-time-code"><p>Two-factor verification code</p><div class="captcha">Check</div>')).toMatchObject({ has_password_input: true, has_mfa_input: true, has_mfa_text: true, has_captcha: true });
     expect(observe('<input type="password" hidden><div class="captcha" hidden>Check</div>')).toMatchObject({ has_password_input: false, has_captcha: false });
   });
+  it('recognizes an attempt limit alongside the generic error message', () => {
+    expect(observe('<input type="password"><div role="alert">Maximum number of attempts reached. Try again later.</div>'))
+      .toMatchObject({ has_account_locked: true, has_error_message: true, has_password_input: true });
+  });
 });

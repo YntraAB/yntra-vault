@@ -134,6 +134,7 @@ export const fr = {
   'detail.password': 'Mot de passe',
   'detail.url': 'URL du site web',
   'detail.email': 'E-mail',
+  'detail.phone': 'Phone number',
   'detail.notes': 'Notes',
   'detail.totp': 'Code TOTP 2FA',
   'detail.recovery_codes': 'Codes de récupération 2FA',
