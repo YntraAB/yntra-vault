@@ -291,6 +291,22 @@ pub async fn wait_for_dom_settle(page: &Page, settle_ms: u64) -> crate::Result<(
 pub async fn wait_for_page_ready(page: &Page, max_wait_ms: u64) -> bool {
     const POLL_JS: &str = r#"
     (() => {
+        // Most pages expose their login controls in the top document. Keep the
+        // hot path cheap and only walk composed DOM when the top document is
+        // empty; this function is polled several times during every attempt.
+        const inputSelector = 'input:not([type="hidden"]), textarea, [contenteditable="true"], [contenteditable=""]';
+        const buttonSelector = 'button, [role="button"], input[type="submit"]';
+        const topInputs = document.querySelectorAll(inputSelector).length;
+        const topButtons = document.querySelectorAll(buttonSelector).length;
+        if (topInputs > 0 || topButtons > 1) {
+            return JSON.stringify({
+                ready: document.readyState,
+                inputs: topInputs,
+                buttons: topButtons,
+                url: window.location.href,
+            });
+        }
+
         function walk(root, seen = new Set()) {
             if (!root || seen.has(root)) return [];
             seen.add(root);
@@ -303,8 +319,8 @@ pub async fn wait_for_page_ready(page: &Page, max_wait_ms: u64) -> bool {
             return nodes;
         }
         const nodes = walk(document);
-        const inputs = nodes.filter(el => el.matches('input:not([type="hidden"]), textarea, [contenteditable="true"], [contenteditable=""]'));
-        const buttons = nodes.filter(el => el.matches('button, [role="button"], input[type="submit"]'));
+        const inputs = nodes.filter(el => el.matches(inputSelector));
+        const buttons = nodes.filter(el => el.matches(buttonSelector));
         return JSON.stringify({
             ready: document.readyState,
             inputs: inputs.length,

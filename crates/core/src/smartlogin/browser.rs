@@ -40,7 +40,7 @@ pub struct PreCheckResult {
     pub browsers: Vec<BrowserInfo>,
     /// Index of the recommended browser (default or first available)
     pub recommended_index: Option<usize>,
-    /// Retained for API compatibility; Smart Login no longer requires closing it.
+    /// Whether the recommended browser is currently running
     pub needs_close: bool,
     /// Error message if no browsers found
     pub error: Option<String>,
@@ -121,11 +121,9 @@ pub fn precheck() -> PreCheckResult {
         .or_else(|| browsers.iter().position(|b| !is_edge(b)))
         .or(Some(0));
 
-    // Smart Login never needs to close a user's browser. If an existing
-    // process does not expose the requested CDP endpoint, launch_and_connect
-    // uses an isolated temporary profile instead of killing every process with
-    // the same image name.
-    let needs_close = false;
+    let needs_close = recommended_index
+        .map(|i| browsers[i].is_running)
+        .unwrap_or(false);
 
     PreCheckResult {
         browsers,
@@ -156,15 +154,14 @@ pub async fn launch_and_connect(
 
     // Try connecting to an already-running browser with CDP enabled
     if browser_info.is_running {
-        if let Ok(result) = try_connect_existing(url, port, logger).await {
+        if let Ok(result) = try_connect_existing(url, port, &browser_info.profile_dir, logger).await {
             return Ok(result);
         }
-        // CDP not available — leave the user's browser untouched and relaunch
-        // with an isolated profile.
+        // CDP not available — close and relaunch
         logger.log(LoginState::LaunchingBrowser, format!(
-            "{} is running without the requested debug endpoint; starting an isolated Smart Login profile...",
-            browser_info.name
+            "Closing {}...", browser_info.name
         ));
+        let _ = close_browser(&browser_info.process_name);
     }
 
     // Fresh launch
@@ -172,10 +169,20 @@ pub async fn launch_and_connect(
         "Launching {} with CDP...", browser_info.name
     ));
 
-    let profile_dir = isolated_profile_dir(&browser_info.name)?;
+    // Clean up stale lock files or active port indicators if left over from previous runs
+    let active_port_path = browser_info.profile_dir.join("DevToolsActivePort");
+    if active_port_path.exists() {
+        let _ = std::fs::remove_file(&active_port_path);
+    }
+    for lock_name in &["SingletonLock", "lockfile", "SingletonCookie", "SingletonSocket"] {
+        let lock_path = browser_info.profile_dir.join(lock_name);
+        if lock_path.exists() {
+            let _ = std::fs::remove_file(&lock_path);
+        }
+    }
 
     let exe = browser_info.exe_path.to_string_lossy().to_string();
-    let profile = profile_dir.to_string_lossy().to_string();
+    let profile = browser_info.profile_dir.to_string_lossy().to_string();
 
     let mut args = vec![
         format!("--remote-debugging-port={port}"),
@@ -191,23 +198,8 @@ pub async fn launch_and_connect(
 
     let mut child = spawn_browser_process(&exe, &args, browser_info, logger)?;
 
-    let ws_url = wait_for_cdp_endpoint(&mut child, port, &profile_dir, config.page_load_timeout_secs * 1000).await?;
+    let ws_url = wait_for_cdp_endpoint(&mut child, port, &browser_info.profile_dir, config.page_load_timeout_secs * 1000).await?;
     connect_and_get_page(url, &ws_url, config, logger).await
-}
-
-fn isolated_profile_dir(browser_name: &str) -> crate::Result<PathBuf> {
-    let safe_name: String = browser_name
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-        .collect();
-    let path = std::env::temp_dir()
-        .join("YntraVault")
-        .join("smart-login")
-        .join(format!("{}-{}", safe_name.trim_matches('-'), uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&path).map_err(|e| {
-        crate::error::VaultError::SmartLoginError(format!("Could not create isolated browser profile: {e}"))
-    })?;
-    Ok(path)
 }
 
 /// Try connecting to an already-running browser via its CDP endpoint.
@@ -215,36 +207,27 @@ fn isolated_profile_dir(browser_name: &str) -> crate::Result<PathBuf> {
 async fn try_connect_existing(
     url: &str,
     port: u16,
+    profile_dir: &Path,
     logger: &SmartLoginLogger,
 ) -> crate::Result<(BrowserSession, chromiumoxide::Page)> {
     logger.log(LoginState::LaunchingBrowser, "Browser already running — trying to connect...");
 
-    // Check if CDP endpoint is available
-    let version_url = format!("http://127.0.0.1:{port}/json/version");
-    let response = reqwest::get(&version_url).await.map_err(|e| {
-        crate::error::VaultError::SmartLoginError(format!("No CDP endpoint: {e}"))
-    })?;
-
-    let text = response.text().await.map_err(|e| {
-        crate::error::VaultError::SmartLoginError(format!("Invalid CDP response: {e}"))
-    })?;
-
-    let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        crate::error::VaultError::SmartLoginError(format!("Invalid CDP JSON: {e}"))
-    })?;
-
-    let ws_url = json["webSocketDebuggerUrl"]
-        .as_str()
-        .ok_or_else(|| crate::error::VaultError::SmartLoginError(
-            "No WebSocket URL in CDP response".into()
-        ))?
-        .to_string();
+    let ws_url = if port == 0 {
+        read_active_cdp_endpoint(profile_dir).ok_or_else(|| {
+            crate::error::VaultError::SmartLoginError("No dynamic CDP endpoint is published for the running browser".into())
+        })?
+    } else {
+        endpoint_on_port(port).await.ok_or_else(|| {
+            crate::error::VaultError::SmartLoginError("No local CDP endpoint is available".into())
+        })?
+    };
 
     logger.log(LoginState::LaunchingBrowser, "Connecting to existing browser via CDP...");
 
-    let (browser, mut handler) = Browser::connect(&ws_url).await.map_err(|e| {
-        crate::error::VaultError::SmartLoginError(format!("CDP connect failed: {e}"))
-    })?;
+    let (browser, mut handler) = tokio::time::timeout(
+        tokio::time::Duration::from_secs(2), Browser::connect(&ws_url)
+    ).await.map_err(|_| crate::error::VaultError::SmartLoginError("Existing CDP connection timed out".into()))?
+        .map_err(|_| crate::error::VaultError::SmartLoginError("Existing CDP connection failed".into()))?;
 
     let handler_task = tokio::spawn(async move {
         use futures::StreamExt;
@@ -284,6 +267,46 @@ async fn try_connect_existing(
     };
 
     Ok((session, page))
+}
+
+/// Read Chromium's ephemeral CDP port from the profile-local handshake file.
+/// The first line is the port and the second line is the browser endpoint path.
+fn read_active_cdp_endpoint(profile_dir: &Path) -> Option<String> {
+    use std::io::Read;
+    let file = std::fs::File::open(profile_dir.join("DevToolsActivePort")).ok()?;
+    let mut content = String::new();
+    file.take(1025).read_to_string(&mut content).ok()?;
+    if content.len() > 1024 { return None; }
+    let mut lines = content.lines();
+    let port = lines.next()?.trim().parse::<u16>().ok()?;
+    let path = lines.next()?.trim();
+    if port == 0 || !valid_browser_endpoint_path(path) { return None; }
+    Some(format!("ws://127.0.0.1:{port}{path}"))
+}
+
+fn valid_browser_endpoint_path(path: &str) -> bool {
+    path.strip_prefix("/devtools/browser/").is_some_and(|id| {
+        !id.is_empty() && id.len() <= 128
+            && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
+}
+
+async fn endpoint_on_port(port: u16) -> Option<String> {
+    if port == 0 { return None; }
+    let client = reqwest::Client::builder().no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_millis(500)).build().ok()?;
+    let response = client.get(format!("http://127.0.0.1:{port}/json/version"))
+        .send().await.ok()?.error_for_status().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&response.text().await.ok()?).ok()?;
+    let ws_url = json.get("webSocketDebuggerUrl")?.as_str()?;
+    let parsed = url::Url::parse(ws_url).ok()?;
+    if parsed.scheme() != "ws" || !matches!(parsed.host_str(), Some("127.0.0.1" | "localhost"))
+        || parsed.port() != Some(port) || !parsed.username().is_empty() || parsed.password().is_some()
+        || parsed.query().is_some() || parsed.fragment().is_some() || !valid_browser_endpoint_path(parsed.path()) {
+        return None;
+    }
+    Some(format!("ws://127.0.0.1:{port}{}", parsed.path()))
 }
 
 /// Connect to a CDP WebSocket URL, get or create the target page.
@@ -398,15 +421,52 @@ pub const ALLOWED_BROWSER_PROCESSES: &[&str] = &[
     "google-chrome", "google-chrome-stable", "microsoft-edge", "brave-browser", "chromium", "opera", "vivaldi",
 ];
 
-/// Browser shutdown is intentionally unsupported. Smart Login uses an
-/// isolated profile when it cannot attach to an existing CDP session, so a
-/// process-name kill could never be necessary and would risk unrelated tabs.
+/// Close a browser gracefully by process name.
 pub fn close_browser(process_name: &str) -> Result<(), String> {
     let clean_name = process_name.trim();
     if !ALLOWED_BROWSER_PROCESSES.iter().any(|&p| p.eq_ignore_ascii_case(clean_name)) {
         return Err(format!("Disallowed or invalid browser process name: {clean_name}"));
     }
-    Err(format!("Smart Login will not close {clean_name}; it uses an isolated browser profile instead"))
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut kill_cmd = std::process::Command::new("taskkill");
+        kill_cmd.args(["/IM", clean_name, "/F"]);
+        kill_cmd.creation_flags(0x08000000);
+        let output = kill_cmd.output()
+            .map_err(|e| format!("Failed to run taskkill: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // "not found" is OK — means it's already closed
+            if !stderr.contains("not found") && !stderr.contains("not running") {
+                return Err(format!("taskkill failed: {}", stderr.trim()));
+            }
+        }
+
+        // Poll for up to 3500ms for all browser processes to fully exit
+        for _ in 0..35 {
+            if !is_process_running(process_name) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // Additional delay to allow Windows to release file handles on the user profile
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        let output = std::process::Command::new("pkill")
+            .args(["-f", process_name])
+            .output()
+            .map_err(|e| format!("Failed to run pkill: {e}"))?;
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Ok(())
+    }
 }
 
 /// Fetch a single list of all running process names to avoid redundant subprocess calls.
@@ -442,6 +502,13 @@ fn get_running_process_list() -> Vec<String> {
     {
         Vec::new()
     }
+}
+
+/// Check if a process is running by name.
+fn is_process_running(process_name: &str) -> bool {
+    let running = get_running_process_list();
+    let p_lower = process_name.to_lowercase();
+    running.iter().any(|p| p.to_lowercase() == p_lower)
 }
 
 /// Browser process handle, either a direct spawned process or a de-elevated process.
@@ -748,30 +815,13 @@ async fn wait_for_cdp_endpoint(
 
         // 1. Dynamic port allocation: Check DevToolsActivePort inside profile directory
         if (port == 0 || active_port_path.exists())
-            && let Ok(content) = std::fs::read_to_string(&active_port_path) {
-                let mut lines = content.lines();
-                if let (Some(port_str), Some(ws_path)) = (lines.next(), lines.next())
-                    && let Ok(assigned_port) = port_str.trim().parse::<u16>() {
-                        let endpoint = format!("http://127.0.0.1:{assigned_port}/json/version");
-                        if let Ok(resp) = reqwest::get(&endpoint).await
-                            && let Ok(text) = resp.text().await
-                                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                                    && let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
-                                        return Ok(ws.to_string());
-                                    }
-                        return Ok(format!("ws://127.0.0.1:{assigned_port}{ws_path}"));
-                    }
+            && let Some(endpoint) = read_active_cdp_endpoint(profile_dir) {
+                return Ok(endpoint);
             }
 
         // 2. Fixed port fallback
-        if port != 0 {
-            let endpoint = format!("http://127.0.0.1:{port}/json/version");
-            if let Ok(resp) = reqwest::get(&endpoint).await
-                && let Ok(text) = resp.text().await
-                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                        && let Some(ws) = json.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
-                            return Ok(ws.to_string());
-                        }
+        if port != 0 && let Some(endpoint) = endpoint_on_port(port).await {
+            return Ok(endpoint);
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
@@ -1076,6 +1126,32 @@ fn process_name_for_browser(exe_path: &Path, browser_name: &str) -> String {
         "opera.exe".into()
     } else {
         file_name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_active_cdp_endpoint;
+
+    #[test]
+    fn dynamic_cdp_port_reader_accepts_only_valid_nonzero_ports() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("DevToolsActivePort");
+
+        std::fs::write(&path, "43127\n/devtools/browser/test\n").unwrap();
+        assert_eq!(read_active_cdp_endpoint(dir.path()).as_deref(), Some("ws://127.0.0.1:43127/devtools/browser/test"));
+
+        std::fs::write(&path, "0\n/devtools/browser/test\n").unwrap();
+        assert_eq!(read_active_cdp_endpoint(dir.path()), None);
+
+        std::fs::write(&path, "not-a-port\n").unwrap();
+        assert_eq!(read_active_cdp_endpoint(dir.path()), None);
+        for content in ["43127\n//evil.example/\n", "43127\n/devtools/browser/id?redirect=evil\n", "43127\n/devtools/browser/\n", "65536\n/devtools/browser/id\n"] {
+            std::fs::write(&path, content).unwrap();
+            assert_eq!(read_active_cdp_endpoint(dir.path()), None);
+        }
+        std::fs::write(&path, format!("43127\n/devtools/browser/{}\n", "a".repeat(1100))).unwrap();
+        assert_eq!(read_active_cdp_endpoint(dir.path()), None);
     }
 }
 

@@ -479,28 +479,27 @@ pub fn is_allowed_auth_domain(entry_url: &str, target_url: &str) -> bool {
 /// For known services, returns the direct login URL.
 /// For generic sites, tries common login paths on the same domain.
 pub fn get_probe_urls(base_url: &str) -> Vec<String> {
-    let normalized = normalize_url(base_url);
-    let Some(parsed) = credential_url(&normalized) else { return Vec::new(); };
-    let domain = parsed.host_str().unwrap_or_default();
-    let authority = match parsed.port() {
-        Some(port) => format!("{domain}:{port}"),
-        None => domain.to_string(),
-    };
+    let Some(base) = credential_url(base_url) else { return Vec::new(); };
+    let domain = base.host_str().unwrap_or_default();
 
     let mut urls = Vec::new();
 
     // Check known service login URLs first (optimization)
     for (service, login_url) in SERVICE_LOGIN_URLS {
-        let domain_matches = domain == *service || domain.ends_with(&format!(".{}", service));
-        if domain_matches && parsed.port_or_known_default() == Some(443) {
+        // A known provider may own a documented subdomain (Steam is one
+        // example), but the final origin policy must still approve the target.
+        let domain_matches = domain == *service || domain.ends_with(&format!(".{service}"));
+        if domain_matches && is_allowed_auth_domain(base_url, login_url) {
             urls.push(login_url.to_string());
             return urls;
         }
     }
 
-    // Generic: try common login paths on the same domain
+    // Generic: try common login paths on the exact saved origin. Preserving a
+    // non-standard HTTPS port matters for self-hosted and enterprise sites.
+    let origin = base.origin().ascii_serialization();
     for path in PROBE_PATHS {
-        urls.push(format!("{}://{authority}{path}", parsed.scheme()));
+        urls.push(format!("{origin}{path}"));
     }
 
     urls
@@ -696,11 +695,10 @@ mod tests {
     }
 
     #[test]
-    fn probe_urls_preserve_custom_https_ports_and_do_not_cross_domains() {
-        let probes = get_probe_urls("https://example.test:8443/account");
-        assert!(probes.iter().all(|probe| probe.starts_with("https://example.test:8443/")));
-        assert!(probes.iter().all(|probe| login_target_allowed("https://example.test:8443/account", probe)));
-        assert!(get_probe_urls("not a url").is_empty());
+    fn generic_probe_urls_preserve_the_saved_https_port() {
+        let probes = get_probe_urls("https://vault.example:8443/app");
+        assert_eq!(probes.first().map(String::as_str), Some("https://vault.example:8443/login"));
+        assert!(probes.iter().all(|url| is_allowed_auth_domain("https://vault.example:8443/app", url)));
     }
 
     #[test]

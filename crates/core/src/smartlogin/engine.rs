@@ -242,22 +242,8 @@ impl SmartLoginEngine {
         let expected_origin = serde_json::to_string(&discovery::credential_url(&expected_url).unwrap().origin().ascii_serialization()).unwrap();
         let focus_js = r#"
         (() => {
-            const walk = (root, seen = new Set()) => {
-                if (!root || seen.has(root)) return [];
-                seen.add(root);
-                const nodes = [];
-                for (const el of root.querySelectorAll ? root.querySelectorAll('*') : []) {
-                    nodes.push(el);
-                    if (el.shadowRoot) nodes.push(...walk(el.shadowRoot, seen));
-                    if (el.tagName === 'IFRAME') {
-                        try { if (el.contentDocument) nodes.push(...walk(el.contentDocument, seen)); } catch (_) {}
-                    }
-                }
-                return nodes;
-            };
-            const all = walk(document);
             // Strategy 1: Multi-box input (e.g. 6 separate inputs)
-            const singleCharInputs = all.filter(el => el.tagName === 'INPUT').filter(el =>
+            const singleCharInputs = Array.from(document.querySelectorAll('input')).filter(el => 
                 el.offsetParent !== null && 
                 (el.maxLength === 1 || el.getAttribute('maxlength') === '1') &&
                 (el.type === 'text' || el.type === 'tel' || el.type === 'number')
@@ -283,7 +269,7 @@ impl SmartLoginEngine {
             ];
             
             for (const sel of selectors) {
-                const el = all.find(candidate => candidate.matches(sel));
+                const el = document.querySelector(sel);
                 if (el && el.offsetParent !== null) {
                     el.focus();
                     el.click();
@@ -292,7 +278,7 @@ impl SmartLoginEngine {
             }
 
             // Strategy 3: Fallback any short text input
-            const inputs = all.filter(candidate => candidate.matches('input[type="text"], input[type="tel"], input[type="number"]'));
+            const inputs = document.querySelectorAll('input[type="text"], input[type="tel"], input[type="number"]');
             for (const el of inputs) {
                 if (el.offsetParent !== null && !el.value && ((el.maxLength > 0 && el.maxLength <= 8) || el.getAttribute('inputmode') === 'numeric')) {
                     el.focus();
@@ -324,20 +310,9 @@ impl SmartLoginEngine {
             let type_js = format!(
                 r#"
                 (() => {{
-                    const deepActive = (root) => {{
-                        let el = root && root.activeElement;
-                        while (el) {{
-                            if (el.shadowRoot?.activeElement) {{ el = el.shadowRoot.activeElement; continue; }}
-                            if (el.tagName === 'IFRAME') {{
-                                try {{ const inner = el.contentDocument?.activeElement; if (inner && inner !== el) {{ el = inner; continue; }} }} catch (_) {{}}
-                            }}
-                            break;
-                        }}
-                        return el;
-                    }};
-                    const el = deepActive(document);
-                    if (el && (el.ownerDocument.defaultView || window).location.origin === {expected_origin} &&
-                        el.tagName === 'INPUT' && !el.disabled && !el.readOnly && el.getClientRects().length) {{
+                    if (location.origin !== {expected_origin}) return false;
+                    const el = document.activeElement;
+                    if (el && el.tagName === 'INPUT' && !el.disabled && !el.readOnly && el.getClientRects().length) {{
                         const val = {ch_json};
                         // Append character to value if it's a single box, or set it if it's a multi-box
                         if (el.maxLength === 1) {{
@@ -361,18 +336,7 @@ impl SmartLoginEngine {
         // Final change/blur dispatch
         let _ = page.evaluate(r#"
             (() => {
-                const deepActive = (root) => {
-                    let el = root && root.activeElement;
-                    while (el) {
-                        if (el.shadowRoot?.activeElement) { el = el.shadowRoot.activeElement; continue; }
-                        if (el.tagName === 'IFRAME') {
-                            try { const inner = el.contentDocument?.activeElement; if (inner && inner !== el) { el = inner; continue; } } catch (_) {}
-                        }
-                        break;
-                    }
-                    return el;
-                };
-                const el = deepActive(document);
+                const el = document.activeElement;
                 if (el && el.tagName === 'INPUT') {
                     el.dispatchEvent(new Event('change', {bubbles: true, composed: true}));
                     el.dispatchEvent(new Event('blur', {bubbles: true, composed: true}));
@@ -528,13 +492,6 @@ impl SmartLoginEngine {
 
                 for probe_url in &probe_urls {
                     if self.is_cancelled() { return Err(LoginResult::Cancelled); }
-                    if !discovery::login_target_allowed(entry_url, probe_url) {
-                        self.logger.log(
-                            LoginState::SearchingForLogin,
-                            "Skipping a login probe outside the verified origin boundary",
-                        );
-                        continue;
-                    }
                     if !visited.insert(probe_url.clone()) { continue; }
                     self.logger.log(
                         LoginState::SearchingForLogin,
@@ -867,141 +824,45 @@ impl SmartLoginEngine {
             return self.type_credential_on_windows(page, entry_url, value, field_type == "password").await;
         }
 
-        // The semantic selector can focus fields inside open shadow roots and
-        // same-origin frames. Keep that deep-active element instead of falling
-        // back to the top-document input list.
-        let marker = format!("yntra-vault-{}", uuid::Uuid::new_v4());
-        let marker_json = serde_json::to_string(&marker).unwrap();
+        // Keep the selected node, not whichever input happens to gain focus next.
+        let target = page.find_element("input:focus").await.map_err(|_| {
+            crate::error::VaultError::SmartLoginError("Credential field lost focus".into())
+        })?;
         let expected_password = field_type == "password";
-        let bind_js = format!(r#"
-            (() => {{
-                const expectedOrigin = {expected_origin};
-                const expectedPassword = {expected_password};
-                const marker = {marker_json};
-                const deepActive = (root) => {{
-                    let el = root && root.activeElement;
-                    while (el) {{
-                        if (el.shadowRoot && el.shadowRoot.activeElement) {{ el = el.shadowRoot.activeElement; continue; }}
-                        if (el.tagName === 'IFRAME') {{
-                            try {{ const inner = el.contentDocument && el.contentDocument.activeElement; if (inner && inner !== el) {{ el = inner; continue; }} }} catch (_) {{}}
-                        }}
-                        break;
-                    }}
-                    return el;
-                }};
-                const visible = (el) => {{
-                    if (!el || !el.isConnected || el.closest('[inert]')) return false;
-                    const style = (el.ownerDocument.defaultView || window).getComputedStyle(el);
-                    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' &&
-                        el.getClientRects().length > 0 && (!el.checkVisibility || el.checkVisibility({{checkOpacity:true,checkVisibilityCSS:true}}));
-                }};
-                const editable = (el) => el && !el.disabled && !el.readOnly && !el.matches(':disabled') &&
-                    ((el.tagName === 'INPUT' && (expectedPassword ? el.type === 'password' : ['email','tel','text','url','number'].includes(el.type))) ||
-                     (!expectedPassword && (el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox')));
-                const target = deepActive(document);
-                if (!editable(target) || !visible(target) || (target.ownerDocument.defaultView || window).location.origin !== expectedOrigin ||
-                    (target.tagName === 'INPUT' && (target.type === 'password') !== expectedPassword)) return false;
-                if (target.__yntraVaultFillMarker && target.__yntraVaultFillMarker !== marker) return false;
-                target.__yntraVaultFillMarker = marker;
-                return true;
-            }})()
-        "#);
-        let bound = page.evaluate(bind_js).await.map_err(|_| {
-            crate::error::VaultError::SmartLoginError("Could not bind the verified credential field".into())
+        let guard_js = format!(r#"function() {{
+            return location.origin === {expected_origin} && this === document.activeElement && this.isConnected &&
+                !this.disabled && !this.readOnly && !this.matches(':disabled') &&
+                (this.type === 'password') === {expected_password} &&
+                this.getClientRects().length > 0 &&
+                (!this.checkVisibility || this.checkVisibility({{checkOpacity:true,checkVisibilityCSS:true}}));
+        }}"#);
+        let clear_js = format!(r#"function() {{
+            if (!({guard_js}).call(this)) return false;
+            this.value = '';
+            this.dispatchEvent(new Event('input', {{bubbles:true,composed:true}}));
+            return ({guard_js}).call(this);
+        }}"#);
+        let cleared = target.call_js_fn(clear_js, false).await.map_err(|_| {
+            crate::error::VaultError::SmartLoginError("Could not clear credential field".into())
         })?;
-        if bound.into_value::<bool>().ok() != Some(true) {
+        if cleared.result.value.and_then(|value| value.as_bool()) != Some(true) {
             return Err(crate::error::VaultError::SmartLoginError("Credential field changed before typing".into()));
         }
-
-        let clear_js = format!(r#"
-            (() => {{
-                const expectedOrigin = {expected_origin};
-                const expectedPassword = {expected_password};
-                const marker = {marker_json};
-                const deepActive = (root) => {{
-                    let el = root && root.activeElement;
-                    while (el) {{
-                        if (el.shadowRoot?.activeElement) {{ el = el.shadowRoot.activeElement; continue; }}
-                        if (el.tagName === 'IFRAME') {{
-                            try {{ const inner = el.contentDocument?.activeElement; if (inner && inner !== el) {{ el = inner; continue; }} }} catch (_) {{}}
-                        }}
-                        break;
-                    }}
-                    return el;
-                }};
-                const target = deepActive(document);
-                if (!target || target.__yntraVaultFillMarker !== marker || (target.ownerDocument.defaultView || window).location.origin !== expectedOrigin ||
-                    target.disabled || target.readOnly || (target.tagName === 'INPUT' && (target.type === 'password') !== expectedPassword)) return false;
-                const view = target.ownerDocument.defaultView || window;
-                const setter = target.tagName === 'INPUT'
-                    ? Object.getOwnPropertyDescriptor(view.HTMLInputElement.prototype, 'value')?.set
-                    : target.tagName === 'TEXTAREA'
-                        ? Object.getOwnPropertyDescriptor(view.HTMLTextAreaElement.prototype, 'value')?.set
-                        : null;
-                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {{
-                    if (!setter) return false;
-                    setter.call(target, '');
-                }} else {{
-                    target.textContent = '';
-                }}
-                target.dispatchEvent(new InputEvent('input', {{bubbles:true, composed:true, inputType:'deleteContentBackward', data:null}}));
-                return true;
-            }})()
-        "#);
-        let cleared = page.evaluate(clear_js).await.map_err(|_| {
-            crate::error::VaultError::SmartLoginError("Could not clear the verified credential field".into())
-        })?;
-        if cleared.into_value::<bool>().ok() != Some(true) {
-            return Err(crate::error::VaultError::SmartLoginError("Credential field changed before typing".into()));
-        }
-
         for ch in value.chars() {
             if self.is_cancelled() {
                 return Err(crate::error::VaultError::SmartLoginError("Login cancelled".into()));
             }
-            let ch_json = serde_json::to_string(&ch.to_string()).unwrap_or_else(|_| "\"\"".into());
-            let type_js = format!(r#"
-                (() => {{
-                    const expectedOrigin = {expected_origin};
-                    const expectedPassword = {expected_password};
-                    const marker = {marker_json};
-                    const incoming = {ch_json};
-                    const deepActive = (root) => {{
-                        let el = root && root.activeElement;
-                        while (el) {{
-                            if (el.shadowRoot?.activeElement) {{ el = el.shadowRoot.activeElement; continue; }}
-                            if (el.tagName === 'IFRAME') {{
-                                try {{ const inner = el.contentDocument?.activeElement; if (inner && inner !== el) {{ el = inner; continue; }} }} catch (_) {{}}
-                            }}
-                            break;
-                        }}
-                        return el;
-                    }};
-                    const target = deepActive(document);
-                    if (!target || target.__yntraVaultFillMarker !== marker || (target.ownerDocument.defaultView || window).location.origin !== expectedOrigin ||
-                        target.disabled || target.readOnly || (target.tagName === 'INPUT' && (target.type === 'password') !== expectedPassword)) return false;
-                    const view = target.ownerDocument.defaultView || window;
-                    const setter = target.tagName === 'INPUT'
-                        ? Object.getOwnPropertyDescriptor(view.HTMLInputElement.prototype, 'value')?.set
-                        : target.tagName === 'TEXTAREA'
-                            ? Object.getOwnPropertyDescriptor(view.HTMLTextAreaElement.prototype, 'value')?.set
-                            : null;
-                    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {{
-                        if (!setter) return false;
-                        setter.call(target, target.value + incoming);
-                    }} else {{
-                        target.textContent = (target.textContent || '') + incoming;
-                    }}
-                    target.dispatchEvent(new InputEvent('input', {{bubbles:true, composed:true, inputType:'insertText', data: incoming}}));
-                    return true;
-                }})()
-            "#);
-            let typed = page.evaluate(type_js).await.map_err(|_| {
-                crate::error::VaultError::SmartLoginError("Could not type into the verified credential field".into())
+            let valid = target.call_js_fn(guard_js.clone(), false).await.map_err(|_| {
+                crate::error::VaultError::SmartLoginError("Cannot verify credential field".into())
             })?;
-            if typed.into_value::<bool>().ok() != Some(true) {
+            if valid.result.value.and_then(|value| value.as_bool()) != Some(true) {
                 return Err(crate::error::VaultError::SmartLoginError("Credential field lost focus".into()));
             }
+            let text = Zeroizing::new(ch.to_string());
+            target.type_str(&*text).await.map_err(|_| {
+                // CDP errors can contain the character; never include them in a login log.
+                crate::error::VaultError::SmartLoginError("Could not type into credential field".into())
+            })?;
             let (min_delay, max_delay) = self.config.keystroke_delay_range_ms;
             let delay = if min_delay < max_delay {
                 use rand::Rng;
@@ -1009,34 +870,18 @@ impl SmartLoginEngine {
             } else { min_delay };
             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
         }
-
-        let finish_js = format!(r#"
-            (() => {{
-                const expectedOrigin = {expected_origin};
-                const marker = {marker_json};
-                const deepActive = (root) => {{
-                    let el = root && root.activeElement;
-                    while (el) {{
-                        if (el.shadowRoot?.activeElement) {{ el = el.shadowRoot.activeElement; continue; }}
-                        if (el.tagName === 'IFRAME') {{
-                            try {{ const inner = el.contentDocument?.activeElement; if (inner && inner !== el) {{ el = inner; continue; }} }} catch (_) {{}}
-                        }}
-                        break;
-                    }}
-                    return el;
-                }};
-                const target = deepActive(document);
-                if (!target || target.__yntraVaultFillMarker !== marker || (target.ownerDocument.defaultView || window).location.origin !== expectedOrigin) return false;
-                target.dispatchEvent(new Event('change', {{bubbles:true, composed:true}}));
-                target.dispatchEvent(new Event('blur', {{bubbles:true, composed:true}}));
-                delete target.__yntraVaultFillMarker;
-                return true;
-            }})()
-        "#);
-        let finished = page.evaluate(finish_js).await.map_err(|_| {
+        let finish_js = format!(r#"function() {{
+            if (!({guard_js}).call(this)) return false;
+            for (const type of ['input','change','blur']) {{
+                if (!({guard_js}).call(this)) return false;
+                this.dispatchEvent(new Event(type, {{bubbles:true,composed:true}}));
+            }}
+            return true;
+        }}"#);
+        let finished = target.call_js_fn(finish_js, false).await.map_err(|_| {
             crate::error::VaultError::SmartLoginError("Cannot finalize credential input".into())
         })?;
-        if finished.into_value::<bool>().ok() != Some(true) {
+        if finished.result.value.and_then(|value| value.as_bool()) != Some(true) {
             return Err(crate::error::VaultError::SmartLoginError("Credential field changed after typing".into()));
         }
         self.logger.emit(
@@ -1181,37 +1026,6 @@ impl SmartLoginEngine {
         }
         let submit_js = r#"
         (() => {
-            const walk = (root, seen = new Set()) => {
-                if (!root || seen.has(root)) return [];
-                seen.add(root);
-                const nodes = [];
-                for (const el of root.querySelectorAll ? root.querySelectorAll('*') : []) {
-                    nodes.push(el);
-                    if (el.shadowRoot) nodes.push(...walk(el.shadowRoot, seen));
-                    if (el.tagName === 'IFRAME') {
-                        try { if (el.contentDocument) nodes.push(...walk(el.contentDocument, seen)); } catch (_) {}
-                    }
-                }
-                return nodes;
-            };
-            const all = walk(document);
-            const visible = (el) => {
-                if (!el || !el.isConnected || el.closest('[inert]')) return false;
-                const style = (el.ownerDocument.defaultView || window).getComputedStyle(el);
-                return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' &&
-                    el.getClientRects().length > 0 && (!el.checkVisibility || el.checkVisibility({checkOpacity:true, checkVisibilityCSS:true}));
-            };
-            const deepActive = (root) => {
-                let el = root && root.activeElement;
-                while (el) {
-                    if (el.shadowRoot?.activeElement) { el = el.shadowRoot.activeElement; continue; }
-                    if (el.tagName === 'IFRAME') {
-                        try { const inner = el.contentDocument?.activeElement; if (inner && inner !== el) { el = inner; continue; } } catch (_) {}
-                    }
-                    break;
-                }
-                return el;
-            };
             const loginPatterns = [
                 'sign in', 'signin', 'log in', 'login', 'logga in', 'anmelden',
                 'submit', 'entrar', 'accedi', 'войти',
@@ -1253,26 +1067,26 @@ impl SmartLoginEngine {
             }
 
             // Strategy 1: Find submit button INSIDE the form of the active element or input field
-            let focused = deepActive(document);
-            if (!focused || focused === document.body || !['INPUT', 'TEXTAREA'].includes(focused.tagName) && !focused.isContentEditable) {
-                focused = all.find(el => el.matches('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="totp" i], input[name*="app_totp" i], input[type="password"]:not([hidden]), input[type="email"]:not([hidden]), input[type="text"]:not([hidden])'));
+            let focused = document.activeElement;
+            if (!focused || focused === document.body || focused.tagName !== 'INPUT') {
+                focused = document.querySelector('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="totp" i], input[name*="app_totp" i], input[type="password"]:not([hidden]), input[type="email"]:not([hidden]), input[type="text"]:not([hidden])');
             }
             const form = focused ? focused.closest('form') : null;
             if (form) {
                 // Try form's submit input first
-                const submitInput = Array.from(form.querySelectorAll('input[type="submit"]')).find(visible);
+                const submitInput = form.querySelector('input[type="submit"]');
                 if (submitInput) {
                     submitInput.click();
                     return 'clicked: ' + (submitInput.value || 'submit');
                 }
                 // Try buttons inside the form
-                const formButtons = Array.from(form.querySelectorAll('button, [role="button"]')).filter(visible);
+                const formButtons = form.querySelectorAll('button, [role="button"]');
                 for (const btn of formButtons) {
                     const match = matchButton(btn);
                     if (match) { btn.click(); return 'clicked: ' + match; }
                 }
                 // Submit the form directly
-                const submitBtn = Array.from(form.querySelectorAll('button[type="submit"]')).find(visible);
+                const submitBtn = form.querySelector('button[type="submit"]');
                 if (submitBtn) { submitBtn.click(); return 'clicked: form submit btn'; }
                 if (typeof form.requestSubmit === 'function') {
                     form.requestSubmit();
@@ -1283,14 +1097,16 @@ impl SmartLoginEngine {
             }
 
             // Strategy 2: Page-wide button search (no form context)
-            const buttons = all.filter(el => visible(el) && el.matches('button, input[type="submit"], input[type="button"], [role="button"]'));
+            const buttons = document.querySelectorAll(
+                'button, input[type="submit"], input[type="button"], [role="button"]'
+            );
             for (const btn of buttons) {
                 const match = matchButton(btn);
                 if (match) { btn.click(); return 'clicked: ' + match; }
             }
 
             // Strategy 2b: Fallback to any visible submit button on the page
-            const submitBtnFallback = all.find(el => visible(el) && el.matches('button[type="submit"]:not([hidden]), input[type="submit"]:not([hidden])'));
+            const submitBtnFallback = document.querySelector('button[type="submit"]:not([hidden]), input[type="submit"]:not([hidden])');
             if (submitBtnFallback) {
                 submitBtnFallback.click();
                 return 'clicked: fallback submit button';
@@ -1320,33 +1136,14 @@ impl SmartLoginEngine {
     async fn try_account_chooser(&self, page: &Page) -> bool {
         let js = r#"
         (() => {
-            const walk = (root, seen = new Set()) => {
-                if (!root || seen.has(root)) return [];
-                seen.add(root);
-                const nodes = [];
-                for (const el of root.querySelectorAll ? root.querySelectorAll('*') : []) {
-                    nodes.push(el);
-                    if (el.shadowRoot) nodes.push(...walk(el.shadowRoot, seen));
-                    if (el.tagName === 'IFRAME') {
-                        try { if (el.contentDocument) nodes.push(...walk(el.contentDocument, seen)); } catch (_) {}
-                    }
-                }
-                return nodes;
-            };
             const patterns = [
                 'use another', 'another account', 'add account', 'add an account',
                 'lägg till', 'annat konto', 'anderes konto', 'otro cuenta',
                 'autre compte', 'use a different',
             ];
-            const visible = (el) => {
-                if (!el || !el.isConnected || el.closest('[inert]')) return false;
-                const style = (el.ownerDocument.defaultView || window).getComputedStyle(el);
-                return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' &&
-                    el.getClientRects().length > 0 && (!el.checkVisibility || el.checkVisibility({checkOpacity:true, checkVisibilityCSS:true}));
-            };
-            const elements = walk(document).filter(el => el.matches(
+            const elements = document.querySelectorAll(
                 'button, [role="button"], [role="link"], a, li[data-identifier], div[data-identifier]'
-            ) && visible(el));
+            );
             for (const el of elements) {
                 const text = (el.textContent || '').trim().toLowerCase();
                 for (const pattern of patterns) {
