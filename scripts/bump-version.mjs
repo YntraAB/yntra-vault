@@ -7,17 +7,63 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 
-const targetVersion = process.argv[2]?.trim();
+// 1. Read current version from package.json
+const currentPkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+const currentVersion = currentPkg.version;
 
-if (!targetVersion || !/^\d+\.\d+\.\d+$/.test(targetVersion)) {
-    console.error('Usage: bun run bump <version>  (e.g., bun run bump 0.2.8)');
-    console.error('Error: Version must be in semver format (X.Y.Z)');
+let arg = process.argv[2]?.trim();
+
+function getNextVersion(current) {
+    const match = current.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (!match) throw new Error(`Invalid current version: ${current}`);
+    let major = parseInt(match[1], 10);
+    let minor = parseInt(match[2], 10);
+    let patch = parseInt(match[3], 10);
+
+    // Increment patch, rolling over at 9 (e.g., 0.2.9 -> 0.3.0, 0.9.9 -> 1.0.0)
+    if (patch >= 9) {
+        patch = 0;
+        minor += 1;
+        if (minor >= 10) {
+            minor = 0;
+            major += 1;
+        }
+    } else {
+        patch += 1;
+    }
+    return `${major}.${minor}.${patch}`;
+}
+
+let targetVersion = '';
+let autoCalculated = false;
+
+if (!arg || arg === 'auto' || arg === 'next') {
+    targetVersion = getNextVersion(currentVersion);
+    autoCalculated = true;
+} else if (arg === 'patch') {
+    const match = currentVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    let [maj, min, pat] = [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+    targetVersion = `${maj}.${min}.${pat + 1}`;
+} else if (arg === 'minor') {
+    const match = currentVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    let [maj, min] = [parseInt(match[1], 10), parseInt(match[2], 10)];
+    targetVersion = `${maj}.${min + 1}.0`;
+} else if (arg === 'major') {
+    const match = currentVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    let maj = parseInt(match[1], 10);
+    targetVersion = `${maj + 1}.0.0`;
+} else if (/^\d+\.\d+\.\d+$/.test(arg)) {
+    targetVersion = arg;
+} else {
+    console.error(`Error: Version must be in semver format (X.Y.Z) or 'auto' (received: '${arg}')`);
+    console.error('Usage: bun run bump [version]');
     process.exit(1);
 }
 
 console.log(`\x1b[36m================================================\x1b[0m`);
 console.log(`\x1b[36m Yntra Vault: Automated Version Synchronization \x1b[0m`);
-console.log(`\x1b[36m Target Version: ${targetVersion}\x1b[0m`);
+console.log(`\x1b[36m Current Version: ${currentVersion}\x1b[0m`);
+console.log(`\x1b[36m Target Version:  ${targetVersion}${autoCalculated ? ' (auto-calculated)' : ''}\x1b[0m`);
 console.log(`\x1b[36m================================================\x1b[0m\n`);
 
 const filesToUpdate = [
@@ -59,7 +105,7 @@ const filesToUpdate = [
     }
 ];
 
-// 1. Update manifest files
+// 2. Update manifest files
 for (const file of filesToUpdate) {
     if (!fs.existsSync(file.path)) {
         console.error(`\x1b[31mError: Missing file ${file.path}\x1b[0m`);
@@ -75,7 +121,7 @@ for (const file of filesToUpdate) {
     console.log(`\x1b[32m✔ Updated\x1b[0m ${file.name} -> ${targetVersion}`);
 }
 
-// 2. Refresh Cargo.lock
+// 3. Refresh Cargo.lock
 console.log(`\n\x1b[33mRefreshing Cargo.lock via cargo check --workspace...\x1b[0m`);
 try {
     execSync('cargo check --workspace', { cwd: rootDir, stdio: 'inherit' });
@@ -85,7 +131,7 @@ try {
     process.exit(1);
 }
 
-// 3. Ensure CHANGELOG.md has a section for this version
+// 4. Ensure CHANGELOG.md has a section for this version
 const changelogPath = path.join(rootDir, 'CHANGELOG.md');
 if (fs.existsSync(changelogPath)) {
     const changelog = fs.readFileSync(changelogPath, 'utf8');
@@ -107,7 +153,7 @@ if (fs.existsSync(changelogPath)) {
     }
 }
 
-// 4. Verification Check
+// 5. Verification Check
 console.log(`\n\x1b[36mValidating version parity across all 7 manifests...\x1b[0m`);
 const pkgVer = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')).version;
 const tauriVer = JSON.parse(fs.readFileSync(path.join(rootDir, 'src-tauri', 'tauri.conf.json'), 'utf8')).version;
