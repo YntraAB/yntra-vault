@@ -240,11 +240,16 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
     {
         use tokio::net::windows::named_pipe::ServerOptions;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use crate::pipe_security::PipeSecurityAttributes;
 
-        let mut server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-            .map_err(|e| VaultError::SyncError(format!("Failed to create named pipe server: {}", e)))?;
+        let mut sec_attrs = PipeSecurityAttributes::new_current_user_only()?;
+        let mut server = unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
+        }
+        .map_err(|e| VaultError::SyncError(format!("Failed to create named pipe server: {}", e)))?;
 
         loop {
             if server.connect().await.is_ok() {
@@ -291,9 +296,12 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
             }
 
             // Recreate pipe instance for next client
-            server = ServerOptions::new()
-                .create(&pipe_name)
-                .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
+            server = unsafe {
+                ServerOptions::new()
+                    .reject_remote_clients(true)
+                    .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
+            }
+            .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
         }
     }
 

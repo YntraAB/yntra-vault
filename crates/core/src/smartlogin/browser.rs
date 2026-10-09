@@ -459,7 +459,7 @@ pub fn close_browser(process_name: &str) -> Result<(), String> {
 
     #[cfg(not(windows))]
     {
-        let output = std::process::Command::new("pkill")
+        let _output = std::process::Command::new("pkill")
             .args(["-f", process_name])
             .output()
             .map_err(|e| format!("Failed to run pkill: {e}"))?;
@@ -505,6 +505,7 @@ fn get_running_process_list() -> Vec<String> {
 }
 
 /// Check if a process is running by name.
+#[cfg(windows)]
 fn is_process_running(process_name: &str) -> bool {
     let running = get_running_process_list();
     let p_lower = process_name.to_lowercase();
@@ -937,6 +938,7 @@ fn parse_registry_browser(
 
 /// Parse an executable path from a registry command string.
 /// Handles: "C:\path\to\browser.exe" --arg  or  C:\path\to\browser.exe
+#[cfg(windows)]
 fn parse_exe_from_command(cmd: &str) -> Option<PathBuf> {
     let trimmed = cmd.trim();
     if let Some(rest) = trimmed.strip_prefix('"') {
@@ -1012,6 +1014,7 @@ fn detect_profile_dir(exe_path: &Path, name: &str) -> PathBuf {
 }
 
 /// Check if a browser is Chromium-based by examining its executable path and name.
+#[cfg(windows)]
 fn is_chromium_based(info: &BrowserInfo) -> bool {
     let name = info.name.to_lowercase();
     let exe = info.exe_path.to_string_lossy().to_lowercase();

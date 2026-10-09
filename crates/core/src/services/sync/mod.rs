@@ -437,6 +437,19 @@ pub async fn webdav_download(
     crate::services::network::run(async {
     validate_webdav_url(url)?;
 
+    if !dest_db_filepath.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vdb")) {
+        return Err(crate::error::VaultError::InvalidFormat(
+            "Destination database path must have a .vdb extension".into(),
+        ));
+    }
+    if let Some(parent) = dest_db_filepath.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            return Err(crate::error::VaultError::InvalidFormat(
+                "Destination directory does not exist".into(),
+            ));
+        }
+    }
+
     let client = reqwest::Client::builder()
         .user_agent("Yntra Vault-PasswordManager/1.0")
         .redirect(reqwest::redirect::Policy::none())
@@ -1091,9 +1104,14 @@ fn run_p2p_sync_listener_prepared(
     let db_filepath = snapshot_path.as_deref().unwrap_or(db_filepath);
 
     let local_salt = if db_filepath.exists() && fs::metadata(db_filepath).map(|m| m.len() > 0).unwrap_or(false) {
-        fs::read(db_filepath)
-            .ok()
-            .and_then(|bytes| VaultFile::from_bytes(&bytes).ok().map(|vf| vf.header.salt))
+        let bytes = fs::read(db_filepath)
+            .map_err(|e| crate::error::VaultError::EncryptionError(format!("Read local database: {}", e)))?;
+        if crate::vault::storage::is_protected(&bytes) {
+            return Err(crate::error::VaultError::SyncError(
+                "Protected vaults require an unlocked sync snapshot".into(),
+            ));
+        }
+        VaultFile::from_bytes(&bytes).ok().map(|vf| vf.header.salt)
     } else {
         None
     };
@@ -1208,6 +1226,14 @@ pub fn run_p2p_sync_client_cancellable(
     if cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
         return Err(crate::VaultError::SyncError("P2P client cancelled".into()));
     }
+    if db_filepath.exists() && fs::metadata(db_filepath).map(|m| m.len() > 0).unwrap_or(false) {
+        let bytes = fs::read(db_filepath).map_err(|e| crate::error::VaultError::EncryptionError(format!("Read local database: {}", e)))?;
+        if crate::vault::storage::is_protected(&bytes) {
+            return Err(crate::error::VaultError::SyncError(
+                "Protected vaults require an unlocked sync snapshot".into(),
+            ));
+        }
+    }
     let target_str = if !server_addr.contains(':') {
         format!("{}:{}", server_addr, DEFAULT_P2P_PORT)
     } else {
@@ -1254,9 +1280,14 @@ pub fn run_p2p_sync_client_cancellable(
     let mut stream = lifecycle::CancellableStream::new_with_generation(stream, cancel, network_generation)?;
 
     let local_salt = if db_filepath.exists() && fs::metadata(db_filepath).map(|m| m.len() > 0).unwrap_or(false) {
-        fs::read(db_filepath)
-            .ok()
-            .and_then(|bytes| VaultFile::from_bytes(&bytes).ok().map(|vf| vf.header.salt))
+        let bytes = fs::read(db_filepath)
+            .map_err(|e| crate::error::VaultError::EncryptionError(format!("Read local database: {}", e)))?;
+        if crate::vault::storage::is_protected(&bytes) {
+            return Err(crate::error::VaultError::SyncError(
+                "Protected vaults require an unlocked sync snapshot".into(),
+            ));
+        }
+        VaultFile::from_bytes(&bytes).ok().map(|vf| vf.header.salt)
     } else {
         None
     };
@@ -1555,7 +1586,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0; 4096];
-            stream.read(&mut request).unwrap();
+            let _bytes_read = stream.read(&mut request).unwrap();
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata").unwrap();
         });
         let result = webdav_download_snapshot(&format!("http://{address}/vault.vdb"), "", None).await;
@@ -2296,6 +2327,27 @@ mod tests {
         let wrong_subkeys = crate::crypto::derive_subkeys(&wrong_master).unwrap();
         let res_wrong_key = crate::crypto::cipher::decrypt_vault_with_aad(&encrypted, &wrong_subkeys.vault_key, P2P_TRANSIT_AAD);
         assert!(res_wrong_key.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_webdav_download_rejects_non_vdb_destination() {
+        let bad_path = std::path::Path::new("malicious_script.bat");
+        let res = webdav_download("https://example.com/vault.vdb", "user", None, bad_path).await;
+        assert!(res.is_err());
+        assert!(res.err().unwrap().to_string().contains(".vdb extension"));
+    }
+
+    #[test]
+    fn test_p2p_sync_rejects_raw_protected_vault_without_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("protected.vdb");
+        let mut manager = crate::vault::VaultManager::create("Protected", "password123456", &path).unwrap();
+        let _ = manager.generate_emergency_kit("password123456").unwrap();
+        let subkeys = manager.get_subkeys().unwrap().clone();
+
+        let res = run_p2p_sync_client("127.0.0.1:49161", &subkeys, &path);
+        assert!(res.is_err());
+        assert!(res.err().unwrap().to_string().contains("Protected vaults require an unlocked sync snapshot"));
     }
 }
 

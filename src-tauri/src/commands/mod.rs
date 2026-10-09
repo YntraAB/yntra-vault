@@ -73,6 +73,7 @@ impl AppState {
         // This check is serialized with saves. An atomic replacement in progress
         // must not cause a false lock, nor may a stale .tmp suppress a real loss.
         if !usb_missing && snapshot.file_present() { return Ok(false); }
+        if usb_missing && snapshot.usb_present() { return Ok(false); }
         if let Some(mut manager) = vault.take() { manager.lock(); }
         // Keep the vault lock until cancellation is visible to work on this session.
         self.cancel_network_work();

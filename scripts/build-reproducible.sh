@@ -30,6 +30,16 @@ export RUSTFLAGS="--remap-path-prefix=${ROOT_DIR}=/yntra-vault/ -C codegen-units
 OUT_DIR="${1:-reproducible-dist}"
 mkdir -p "${ROOT_DIR}/${OUT_DIR}"
 
+# Validate Linux host dependencies if running on Linux
+if [[ "${OSTYPE:-}" == "linux"* ]]; then
+    if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists glib-2.0 2>/dev/null; then
+        echo "ERROR: Missing required system dependencies for Tauri desktop build (glib-2.0)." >&2
+        echo "Please install them via:" >&2
+        echo "  sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl file libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config" >&2
+        exit 1
+    fi
+fi
+
 # 3. Build Frontend
 echo -e "\n[1/3] Building frontend bundle with Bun..."
 bun install --frozen-lockfile
@@ -37,6 +47,7 @@ bun run build
 
 # 4. Build Core Engine
 echo -e "\n[2/3] Building Rust Core Engine (release)..."
+cargo fetch --locked
 cargo build --manifest-path crates/core/Cargo.toml --release --frozen
 
 # 5. Build Desktop Binary

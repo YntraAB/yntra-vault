@@ -11,6 +11,7 @@ pub struct UsbDevice {
     pub(crate) serial: String,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn normalize_serial(value: &str) -> crate::Result<String> {
     let value = value.trim().to_ascii_uppercase();
     if value.len() < 6

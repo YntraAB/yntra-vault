@@ -17,16 +17,25 @@ pub async fn run_ssh_agent_pipe() -> Result<()> {
     {
         use tokio::net::windows::named_pipe::ServerOptions;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use crate::pipe_security::PipeSecurityAttributes;
 
-        let mut server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-            .map_err(|e| VaultError::SyncError(format!("Failed to create SSH agent pipe: {}", e)))?;
+        let mut sec_attrs = PipeSecurityAttributes::new_current_user_only()?;
+        let mut server = unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
+        }
+        .map_err(|e| VaultError::SyncError(format!("Failed to create SSH agent pipe: {}", e)))?;
 
         loop {
             if server.connect().await.is_ok() {
                 let mut client = server;
-                server = match ServerOptions::new().create(&pipe_name) {
+                server = match unsafe {
+                    ServerOptions::new()
+                        .reject_remote_clients(true)
+                        .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
+                } {
                     Ok(next) => next,
                     Err(e) => {
                         eprintln!("Pipe recreate error: {}", e);
@@ -63,9 +72,12 @@ pub async fn run_ssh_agent_pipe() -> Result<()> {
                 });
             } else {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                server = ServerOptions::new()
-                    .create(&pipe_name)
-                    .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
+                server = unsafe {
+                    ServerOptions::new()
+                        .reject_remote_clients(true)
+                        .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
+                }
+                .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
             }
         }
         Ok(())
@@ -147,7 +159,14 @@ pub fn get_ssh_agent_pipe_name() -> String {
             }
             return format!("{}/yntra-ssh-agent.sock", user_dir);
         }
-        format!("/tmp/yntra-ssh-agent-{}.sock", username)
+        let fallback_dir = format!("/tmp/yntra-{}-run", username);
+        let _ = std::fs::create_dir_all(&fallback_dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&fallback_dir, std::fs::Permissions::from_mode(0o700));
+        }
+        format!("{}/yntra-ssh-agent.sock", fallback_dir)
     }
 }
 

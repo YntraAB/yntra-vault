@@ -44,6 +44,7 @@ bun run build
 
 # 5. Build Core Cryptography Engine
 Write-Host "`n[2/3] Building Rust Core Engine (release)..." -ForegroundColor Cyan
+cargo fetch --locked
 cargo build --manifest-path crates/core/Cargo.toml --release --frozen
 
 # 6. Build Desktop App Binary

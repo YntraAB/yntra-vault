@@ -78,12 +78,36 @@ pub async fn webdav_download(
 ) -> Result<(), String> {
     use tauri::Emitter;
 
+    let target_path = std::path::Path::new(&dest_db_path);
+    if dest_db_path.trim().is_empty() {
+        return Err("Destination database path cannot be empty".into());
+    }
+    if !target_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vdb")) {
+        return Err("Destination database path must have a .vdb extension".into());
+    }
+
+    // When an active vault is in memory, restrict download destination
+    // strictly to the active vault to prevent arbitrary file overwrites.
+    {
+        let vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
+        if let Some(mgr) = vault_guard.as_ref() {
+            let is_same_vault = mgr.path == target_path
+                || match (std::fs::canonicalize(&mgr.path), std::fs::canonicalize(target_path)) {
+                    (Ok(c1), Ok(c2)) => c1 == c2,
+                    _ => false,
+                };
+            if !is_same_vault {
+                return Err("WebDAV restore is restricted to the active vault".into());
+            }
+        }
+    }
+
     // 1. Download and write file to dest_db_path with safety backup
     yntra_vault_core::services::sync::webdav_download(
         &url,
         &username,
         password.as_deref(),
-        std::path::Path::new(&dest_db_path),
+        target_path,
     ).await.map_err(|e| e.to_string())?;
 
     // 2. If the active in-memory vault corresponds to dest_db_path, reload it immediately

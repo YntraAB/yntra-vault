@@ -1,4 +1,8 @@
 //! Yntra Vault — Browser Extension Native Messaging Host
+//!
+//! Provides secure stdio communication with authorized browser extensions (Chrome, Edge, Firefox).
+//! Enforces caller origin allowlist checking to prevent unauthorized extensions or local processes
+//! from exfiltrating credentials.
 
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -9,7 +13,91 @@ use serde_json::json;
 use yntra_vault_core::{Result, VaultError};
 use crate::ipc::{try_ipc_request, IpcRequest, IpcResponse};
 
-pub async fn run_native_host_loop() -> Result<()> {
+/// Official canonical extension identifiers
+pub const DEFAULT_ALLOWED_ORIGINS: &[&str] = &[
+    "chrome-extension://yntravaultbrowserextensionid/",
+    "edge-extension://yntravaultbrowserextensionid/",
+    "yntravault@yntra.com",
+];
+
+/// Retrieve effective allowed origins list (default + optional environment overrides)
+pub fn get_allowed_origins() -> Vec<String> {
+    let mut origins: Vec<String> = DEFAULT_ALLOWED_ORIGINS.iter().map(|s| s.to_string()).collect();
+    if let Ok(env_allowed) = std::env::var("YNTRA_ALLOWED_EXTENSIONS") {
+        for item in env_allowed.split(&[',', ';'][..]) {
+            let trimmed = item.trim();
+            if !trimmed.is_empty() {
+                origins.push(trimmed.to_string());
+            }
+        }
+    }
+    origins
+}
+
+/// Verify that the CLI arguments correspond to an authorized browser extension or authenticated session.
+pub fn verify_caller_origin(args: &[String]) -> Result<String> {
+    let allowed = get_allowed_origins();
+
+    // 1. Check for explicit Chromium/Edge/Mozilla extension origin URIs
+    for arg in args.iter().skip(1) {
+        let lower = arg.to_lowercase();
+        if lower.starts_with("chrome-extension://") || lower.starts_with("edge-extension://") || lower.starts_with("moz-extension://") {
+            let normalized = if lower.ends_with('/') { lower } else { format!("{}/", lower) };
+            if allowed.iter().any(|a| a.to_lowercase().trim_end_matches('/') == normalized.trim_end_matches('/')) {
+                return Ok(normalized);
+            } else {
+                return Err(VaultError::InvalidFormat(format!(
+                    "Access Denied: Browser extension origin '{}' is not in the allowed extensions allowlist",
+                    arg
+                )));
+            }
+        }
+    }
+
+    // 2. Check for Firefox extension ID (e.g. yntravault@yntra.com) passed as argument
+    for arg in args.iter().skip(1) {
+        if arg.contains('@') {
+            let lower = arg.to_lowercase();
+            if allowed.iter().any(|a| a.to_lowercase() == lower) {
+                return Ok(lower);
+            } else {
+                return Err(VaultError::InvalidFormat(format!(
+                    "Access Denied: Firefox extension ID '{}' is not in the allowed extensions allowlist",
+                    arg
+                )));
+            }
+        }
+    }
+
+    // 3. Direct invocation via flags: require active session token in environment or keychain
+    let is_direct_flag = args.iter().skip(1).any(|a| {
+        let lower = a.to_lowercase();
+        lower == "--native-host" || lower == "native-host" || lower == "run" || lower == "stdio"
+    });
+
+    if is_direct_flag {
+        let token = crate::ipc::get_session_token_from_env();
+        if !token.is_empty() {
+            return Ok("authenticated-cli-session".to_string());
+        } else {
+            return Err(VaultError::InvalidFormat(
+                "Access Denied: Direct native-host execution requires an active authenticated YNTRA_SESSION".into(),
+            ));
+        }
+    }
+
+    Err(VaultError::InvalidFormat(
+        "Access Denied: Missing or unrecognized browser extension origin".into(),
+    ))
+}
+
+/// Verify origin and run native messaging loop
+pub async fn verify_and_run_native_host(args: &[String]) -> Result<()> {
+    let origin = verify_caller_origin(args)?;
+    run_native_host_loop(&origin).await
+}
+
+pub async fn run_native_host_loop(_caller_origin: &str) -> Result<()> {
     let mut stdin_handle = io::stdin();
     let mut stdout_handle = io::stdout();
 
@@ -182,11 +270,11 @@ mod tests {
     fn test_is_browser_native_host_detection() {
         assert!(is_browser_native_host_invocation(&[
             "yntra.exe".into(),
-            "chrome-extension://knldjmfmopnmpfpdoneapnegffipkgkd/".into(),
+            "chrome-extension://yntravaultbrowserextensionid/".into(),
         ]));
         assert!(is_browser_native_host_invocation(&[
             "yntra.exe".into(),
-            "edge-extension://knldjmfmopnmpfpdoneapnegffipkgkd/".into(),
+            "edge-extension://yntravaultbrowserextensionid/".into(),
         ]));
         assert!(is_browser_native_host_invocation(&[
             "yntra.exe".into(),
@@ -197,5 +285,44 @@ mod tests {
             "get".into(),
             "github".into(),
         ]));
+    }
+
+    #[test]
+    fn test_verify_caller_origin_allowed() {
+        let chrome_args = vec![
+            "yntra.exe".to_string(),
+            "chrome-extension://yntravaultbrowserextensionid/".to_string(),
+        ];
+        assert!(verify_caller_origin(&chrome_args).is_ok());
+
+        let edge_args = vec![
+            "yntra.exe".to_string(),
+            "edge-extension://yntravaultbrowserextensionid/".to_string(),
+        ];
+        assert!(verify_caller_origin(&edge_args).is_ok());
+
+        let firefox_args = vec![
+            "yntra.exe".to_string(),
+            "/path/to/com.yntra.vault.json".to_string(),
+            "yntravault@yntra.com".to_string(),
+        ];
+        assert!(verify_caller_origin(&firefox_args).is_ok());
+    }
+
+    #[test]
+    fn test_verify_caller_origin_unauthorized_rejected() {
+        let rogue_args = vec![
+            "yntra.exe".to_string(),
+            "chrome-extension://rogueextensionid1234567890/".to_string(),
+        ];
+        let err = verify_caller_origin(&rogue_args);
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("Access Denied"));
+
+        let rogue_ff = vec![
+            "yntra.exe".to_string(),
+            "evil@attacker.com".to_string(),
+        ];
+        assert!(verify_caller_origin(&rogue_ff).is_err());
     }
 }

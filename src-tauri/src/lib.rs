@@ -343,15 +343,38 @@ pub fn run() {
                     });
                     let Some(snapshot) = snapshot else { continue; };
                     let lost = if check_usb {
-                        snapshot.requires_usb() && !snapshot.usb_present()
+                        if snapshot.requires_usb() && !snapshot.usb_present() {
+                            // Debounce transient USB enumeration renegotiations
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                            if !snapshot.usb_present() {
+                                std::thread::sleep(std::time::Duration::from_millis(400));
+                                !snapshot.usb_present()
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
                     } else {
                         // Atomic saves can briefly replace the path. Recheck after
-                        // a short grace period, but never trust a leftover .tmp file.
+                        // progressive grace periods, but never trust a leftover .tmp file.
+                        // Debounce transient file locks from AV scanners (Windows Defender)
+                        // or network drive jitter.
                         if snapshot.file_present() {
                             false
                         } else {
-                            std::thread::sleep(std::time::Duration::from_millis(250));
-                            !snapshot.file_present()
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                            if !snapshot.file_present() {
+                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                if !snapshot.file_present() {
+                                    std::thread::sleep(std::time::Duration::from_millis(700));
+                                    !snapshot.file_present()
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
                         }
                     };
                     if lost && state.clear_session_if_disconnected(&snapshot, check_usb).unwrap_or(false) {

@@ -7667,7 +7667,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "yntra-cli"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "clap",
@@ -7688,6 +7688,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+ "windows 0.58.0",
  "yntra-crypto",
  "yntra-vault-core",
  "zeroize",
@@ -7695,7 +7696,7 @@ dependencies = [
 
 [[package]]
 name = "yntra-crypto"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -7724,7 +7725,7 @@ dependencies = [
 
 [[package]]
 name = "yntra-vault-app"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "libc",
@@ -7748,7 +7749,7 @@ dependencies = [
 
 [[package]]
 name = "yntra-vault-core"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "aes-gcm",
  "argon2",

@@ -52,13 +52,14 @@ mod keychain;
 mod git_credential;
 mod ssh_agent;
 mod native_host;
+mod pipe_security;
 
 use ipc::{try_ipc_request, run_ipc_daemon, IpcRequest, IpcResponse};
 use run_cmd::execute_secret_injection;
 use tui::run_tui;
 use git_credential::handle_git_credential;
 use ssh_agent::run_ssh_agent_pipe;
-use native_host::{run_native_host_loop, install_native_host_manifest, is_browser_native_host_invocation};
+use native_host::{verify_and_run_native_host, install_native_host_manifest, is_browser_native_host_invocation};
 use keychain::clear_session_token;
 
 #[derive(Parser)]
@@ -524,7 +525,7 @@ enum BiometricAction {
 async fn main() {
     let raw_args: Vec<String> = std::env::args().collect();
     if is_browser_native_host_invocation(&raw_args) {
-        if let Err(err) = run_native_host_loop().await {
+        if let Err(err) = verify_and_run_native_host(&raw_args).await {
             eprintln!("{} {}", "Native Host Error:".red().bold(), err);
             std::process::exit(1);
         }
@@ -627,7 +628,10 @@ async fn run(cli: Cli) -> Result<()> {
 async fn handle_native_host(args: &NativeHostArgs) -> Result<()> {
     match args.action.to_lowercase().as_str() {
         "install" => install_native_host_manifest(&args.browser),
-        "run" | "stdio" => run_native_host_loop().await,
+        "run" | "stdio" => {
+            let raw_args: Vec<String> = std::env::args().collect();
+            verify_and_run_native_host(&raw_args).await
+        }
         other => Err(VaultError::InvalidFormat(format!("Unknown native-host action '{}'. Allowed: run, install", other))),
     }
 }

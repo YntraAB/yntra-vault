@@ -324,8 +324,11 @@ async fn get_favicon_allowed(domain: &str, generation: u64) -> crate::Result<Opt
 mod tests {
     use super::*;
 
+    static TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     async fn locking_cancels_queued_fetches_without_any_network_request() {
+        let _guard = TEST_MUTEX.lock().await;
         set_external_favicons_enabled(true);
         let permits = get_semaphore().acquire_many(6).await.unwrap();
         let request = get_favicon("synthetic.invalid");
@@ -338,6 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn requests_dispatched_after_their_session_ended_are_rejected() {
+        let _guard = TEST_MUTEX.lock().await;
         set_external_favicons_enabled(true);
         let generation = cache_generation();
         clear_favicon_cache();
@@ -348,6 +352,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "Requires internet access; run separately from the offline toggle tests"]
     async fn public_favicon_network_smoke() {
+        let _guard = TEST_MUTEX.lock().await;
         EXTERNAL_FAVICONS_ENABLED.store(true, Ordering::Relaxed);
         let icon = try_fetch_candidate(get_http_client().unwrap(), "https://icons.duckduckgo.com/ip3/github.com.ico").await;
         EXTERNAL_FAVICONS_ENABLED.store(false, Ordering::Relaxed);
@@ -358,6 +363,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_favicon_offline_first_default() {
+        let _guard = TEST_MUTEX.lock().await;
         set_external_favicons_enabled(false);
         assert!(!is_external_favicons_enabled());
 
@@ -367,6 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_favicon_toggle_and_cache_clearing() {
+        let _guard = TEST_MUTEX.lock().await;
         set_external_favicons_enabled(false);
         assert!(!is_external_favicons_enabled());
 
@@ -382,6 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_favicon_internal_and_private_rejected() {
+        let _guard = TEST_MUTEX.lock().await;
         set_external_favicons_enabled(true);
         assert_eq!(get_favicon("127.0.0.1").await.unwrap(), None);
         assert_eq!(get_favicon("192.168.1.1").await.unwrap(), None);
@@ -390,5 +398,6 @@ mod tests {
         assert_eq!(get_favicon("router.local").await.unwrap(), None);
         assert_eq!(get_favicon("nas.lan").await.unwrap(), None);
         assert_eq!(get_favicon("secret.onion").await.unwrap(), None);
+        set_external_favicons_enabled(false);
     }
 }

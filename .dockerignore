@@ -1,0 +1,36 @@
+# Git and editor files
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+*.sublime-project
+*.sublime-workspace
+
+# Private agent instructions and development records
+.agents
+*.log
+
+# Caches and host build outputs
+target/
+**/target/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+release-assets/
+reproducible-dist/
+reproducible-build-*/
+startup-baseline/
+android-smoke-results/
+signed-android/
+android-unsigned/
+
+# Pre-built binaries
+*.exe
+*.msi
+*.deb
+*.AppImage
+*.apk
+*.dmg

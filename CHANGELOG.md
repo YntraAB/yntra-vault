@@ -5,6 +5,29 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-10-09
+
+### Security
+- **Protected Vault Rekeying**: Enforce comprehensive key rotation on protected storage vaults during master password changes, rotating the inner root salt and all derived subkeys while re-encrypting all active/trashed entries and attachments with fresh nonces.
+- **Local IPC & Named Pipe DACL Hardening**: Implement kernel-enforced Discretionary Access Control Lists (DACLs) on Windows named pipes (`yntra_cli_pipe`, `yntra_ssh_agent`) restricted strictly to the caller Token SID, preventing local privilege escalation and blocking network callers, with 0700 permission enforcement on Unix domain sockets.
+- **Native Extension Origin Verification**: Validate browser extension caller IDs against an explicit allowlist in native messaging host and require an active IPC daemon session token.
+- **P2P Sync & WebDAV Boundary Isolation**: Reject raw protected storage files across P2P sync and enforce strict `.vdb` extension validation and directory isolation on WebDAV downloads to prevent path traversal and authentication factor leakage.
+- **USB Presence Debouncing**: Introduce progressive backoff debouncing on USB device presence checks to prevent false-positive session locks triggered by transient USB bus resets or antivirus handle locks.
+
+### Fixed
+- Resolve Cargo offline resolution failure (`argon2` missing) during reproducible Docker container builds by running `cargo fetch --locked` before building with `--frozen`.
+- Install required Linux GUI/Tauri development libraries (`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `patchelf`, `file`) on reproducible container and CI runner workflows.
+- Resolve target-specific compiler warnings across platforms on Linux and Windows.
+
+### Added
+- Introduce `.dockerignore` to keep reproducible build contexts minimal and clean, preventing host build artifacts (`target/`, `node_modules/`, `dist/`) from contaminating container builds.
+- Add system dependency prerequisite check in `scripts/build-reproducible.sh` for Linux builds.
+- Include `.dockerignore` in the public export allowlist.
+
+### Changed
+- Align Bun toolchain pinning to version `1.4.2` across reproducible build containers and developer documentation.
+- Include CLI binary (`yntra`) in reproducible build attestation manifests.
+
 ## [0.2.6] - 2026-09-30
 
 ### Added

@@ -70,6 +70,7 @@ pub(crate) struct AutotypeGuard {
     pub(crate) generation: u64,
     pub(crate) username: zeroize::Zeroizing<String>,
     pub(crate) password: zeroize::Zeroizing<String>,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) totp_secret: zeroize::Zeroizing<String>,
 }
 

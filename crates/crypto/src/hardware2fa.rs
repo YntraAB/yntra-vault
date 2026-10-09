@@ -324,6 +324,7 @@ pub fn perform_hardware2fa_challenge_with_cred(
 
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = credential_id;
         let connected = list_hardware_keys();
         let key = connected.iter().find(|k| k.protocol == protocol);
         if key.is_none() {

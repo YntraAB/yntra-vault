@@ -20,7 +20,7 @@ A build is reproducible when executing the compilation process on identical sour
 
 ### 2.1 Pinned Toolchain Matrix
 - **Rust Compiler**: `1.95.0` (pinned via `rust-toolchain.toml`)
-- **Package Manager**: `Bun 1.3.13` (pinned via `package.json` & lockfile)
+- **Package Manager**: `Bun 1.4.2` (pinned via `package.json` & lockfile)
 - **Rust Edition**: `2024`
 
 ### 2.2 Compiler Path Remapping & PE Linker Parity (`.cargo/config.toml`)
