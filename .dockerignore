@@ -15,6 +15,7 @@
 *.log
 **/.env*
 **/credentials*
+!crates/core/src/vault/credentials.rs
 **/*.vdb*
 **/*.db
 **/*.pem
