@@ -180,10 +180,10 @@ mod tests {
     fn test_stub_driver() {
         begin_autotype();
         let driver = sys_stub::StubAutotypeDriver::new();
-        assert!(driver.autotype_text_with_delay("test", 0, 0).is_ok());
+        assert!(driver.autotype_text_with_delay("test", 0, 0).unwrap_err().to_string().contains("not supported"));
         let generation = begin_autotype();
         let guard = AutotypeGuard::new(generation, "user".into(), "pass".into(), "totp".into());
-        assert!(driver.run_smart_autotype(guard, "", false, 0, 0).is_ok());
+        assert!(driver.run_smart_autotype(guard, "", false, 0, 0).unwrap_err().to_string().contains("not supported"));
     }
 
     #[test]

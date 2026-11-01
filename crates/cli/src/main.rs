@@ -5,6 +5,10 @@
 //! Git Credential Helper protocol, built-in SSH Agent socket, Browser Extension Native Host,
 //! Shamir secret recovery, WebDAV sync, and auto-generated shell completions.
 
+mod reviewed_sync;
+#[cfg(unix)]
+mod socket_security;
+
 use std::path::{Path, PathBuf};
 use std::env;
 use std::io::Write;
@@ -30,8 +34,8 @@ use yntra_vault_core::{
     services::{
         autotype::run_smart_autotype,
         sync::{
-            webdav_upload, webdav_download, run_p2p_sync_listener, run_p2p_sync_client,
-            generate_pairing_code, run_p2p_pairing_host, run_p2p_pairing_client,
+            webdav_upload_bytes, webdav_download,
+            generate_pairing_code, pairing::run_p2p_pairing_host_reviewed, run_p2p_pairing_client,
             compute_pairing_beacon_id, listen_pairing_beacon,
         },
     },
@@ -46,20 +50,21 @@ use yntra_vault_core::{
 };
 
 mod ipc;
+#[cfg(windows)]
+mod pipe_security;
 mod run_cmd;
 mod tui;
 mod keychain;
 mod git_credential;
 mod ssh_agent;
 mod native_host;
-mod pipe_security;
 
-use ipc::{try_ipc_request, run_ipc_daemon, IpcRequest, IpcResponse};
+use ipc::{try_ipc_request, run_ipc_daemon, try_ipc_mutation, IpcRequest, IpcResponse};
 use run_cmd::execute_secret_injection;
 use tui::run_tui;
 use git_credential::handle_git_credential;
 use ssh_agent::run_ssh_agent_pipe;
-use native_host::{verify_and_run_native_host, install_native_host_manifest, is_browser_native_host_invocation};
+use native_host::{run_native_host_loop, install_native_host_manifest, is_browser_native_host_invocation};
 use keychain::clear_session_token;
 
 #[derive(Parser)]
@@ -86,6 +91,10 @@ struct Cli {
     /// Output results in raw JSON format for scripting
     #[arg(long, global = true)]
     json: bool,
+
+    /// Check for updates during this command (off by default)
+    #[arg(long, global = true, env = "YNTRA_CHECK_UPDATES", default_value_t = false)]
+    check_updates: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -192,6 +201,9 @@ struct NativeHostArgs {
     /// Target browser for manifest installation: chrome, firefox, edge
     #[arg(default_value = "chrome")]
     browser: String,
+    /// Exact extension ID allowed to connect to the native host
+    #[arg(long)]
+    extension_id: Option<String>,
 }
 
 #[derive(Args)]
@@ -525,7 +537,7 @@ enum BiometricAction {
 async fn main() {
     let raw_args: Vec<String> = std::env::args().collect();
     if is_browser_native_host_invocation(&raw_args) {
-        if let Err(err) = verify_and_run_native_host(&raw_args).await {
+        if let Err(err) = run_native_host_loop().await {
             eprintln!("{} {}", "Native Host Error:".red().bold(), err);
             std::process::exit(1);
         }
@@ -552,6 +564,7 @@ fn get_exit_code(err: &VaultError) -> i32 {
 }
 
 async fn run(cli: Cli) -> Result<()> {
+    if let Some(path) = &cli.path { ipc::bind_vault_scope(path)?; }
     if std::env::args().any(|a| a == "-p" || a.starts_with("--password=") || a == "--password") {
         eprintln!(
             "{}",
@@ -584,11 +597,11 @@ async fn run(cli: Cli) -> Result<()> {
     if matches!(command, Commands::Sync(_)) {
         let directory = dirs::config_local_dir().ok_or_else(|| VaultError::InvalidState("Local configuration directory unavailable".into()))?.join("yntra-vault-cli");
         std::fs::create_dir_all(&directory)?;
-        yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&directory.join("device-id"))?;
         yntra_vault_core::services::sync::pairing::initialize_local_signing_identity(&directory.join("device-signing-key"))?;
+        yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&directory.join("device-id"))?;
     }
 
-    if !matches!(command, Commands::Update(_) | Commands::Completions(_) | Commands::NativeHost(_) | Commands::GitCredential(_)) {
+    if cli.check_updates && !matches!(command, Commands::Update(_) | Commands::Completions(_) | Commands::NativeHost(_) | Commands::GitCredential(_)) {
         maybe_print_update_tip().await;
     }
 
@@ -627,30 +640,36 @@ async fn run(cli: Cli) -> Result<()> {
 
 async fn handle_native_host(args: &NativeHostArgs) -> Result<()> {
     match args.action.to_lowercase().as_str() {
-        "install" => install_native_host_manifest(&args.browser),
-        "run" | "stdio" => {
-            let raw_args: Vec<String> = std::env::args().collect();
-            verify_and_run_native_host(&raw_args).await
-        }
+        "install" => install_native_host_manifest(&args.browser, args.extension_id.as_deref().ok_or_else(|| VaultError::InvalidFormat("Native-host installation requires --extension-id".into()))?),
+        "run" | "stdio" => run_native_host_loop().await,
         other => Err(VaultError::InvalidFormat(format!("Unknown native-host action '{}'. Allowed: run, install", other))),
     }
 }
 
 async fn handle_unlock(vault_path: &Path, password: Option<String>, keyfile: Option<PathBuf>) -> Result<()> {
-    if try_ipc_request(&IpcRequest::Ping).await.is_some() {
-        println!("{} Session IPC daemon is already active!", "✓".green().bold());
-        return Ok(());
+    match try_ipc_request(&IpcRequest::Ping).await {
+        Some(IpcResponse::Pong) => {
+            println!("{} Session IPC daemon is already active!", "✓".green().bold());
+            return Ok(());
+        }
+        Some(_) => return Err(VaultError::SyncError("An existing session could not be authenticated".into())),
+        None => {}
     }
     let pass = acquire_password(password)?;
     run_ipc_daemon(vault_path.to_path_buf(), pass, keyfile).await
 }
 
 async fn handle_lock() -> Result<()> {
-    let _ = clear_session_token();
-    if let Some(IpcResponse::LockSuccess) = try_ipc_request(&IpcRequest::Lock).await {
-        println!("{} Vault session locked. Key material zeroized.", "🔒".yellow().bold());
-    } else {
-        println!("No active IPC session daemon found.");
+    match try_ipc_request(&IpcRequest::Lock).await {
+        Some(IpcResponse::LockSuccess) => {
+            clear_session_token()?;
+            println!("{} Vault session locked. Key material zeroized.", "🔒".yellow().bold());
+        }
+        None => {
+            clear_session_token()?;
+            println!("No active IPC session daemon found.");
+        }
+        Some(_) => return Err(VaultError::SyncError("Session locking was not confirmed; the vault may still be unlocked".into())),
     }
     Ok(())
 }
@@ -664,10 +683,6 @@ fn handle_completions(shell: Shell) -> Result<()> {
 /// Helper to obtain master password interactively or from arguments/environment
 fn acquire_password(provided: Option<String>) -> Result<Zeroizing<String>> {
     if let Some(pass) = provided {
-        eprintln!(
-            "{} Security Warning: Passing passwords via CLI flags exposes them in system process lists. Use YNTRA_PASSWORD env var or interactive prompts.",
-            "⚠️".yellow().bold()
-        );
         return Ok(Zeroizing::new(pass));
     }
     if let Ok(env_pass) = env::var("YNTRA_PASSWORD")
@@ -1006,7 +1021,7 @@ async fn handle_add(
     };
 
     // Try IPC first for fast <5ms sync
-    if let Some(IpcResponse::AddEntrySuccess(id)) = try_ipc_request(&IpcRequest::AddEntry { new_entry: new_entry.clone() }).await {
+    if let Some(IpcResponse::AddEntrySuccess(id)) = try_ipc_mutation(&IpcRequest::AddEntry { new_entry: new_entry.clone() }).await? {
         println!("{} Entry '{}' added via IPC session daemon (UUID: {})!", "✓".green().bold(), args.title, id);
         return Ok(());
     }
@@ -1054,7 +1069,7 @@ async fn handle_edit(
 
     // Try IPC first
     if let Some(IpcResponse::GetEntry(existing)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await
-        && let Some(IpcResponse::UpdateEntrySuccess) = try_ipc_request(&IpcRequest::UpdateEntry { id: existing.id, update: update.clone() }).await {
+        && let Some(IpcResponse::UpdateEntrySuccess) = try_ipc_mutation(&IpcRequest::UpdateEntry { id: existing.id, update: update.clone() }).await? {
             println!("{} Entry updated via IPC session daemon!", "✓".green().bold());
             return Ok(());
         }
@@ -1076,7 +1091,7 @@ async fn handle_delete(
 ) -> Result<()> {
     // Try IPC first
     if let Some(IpcResponse::GetEntry(existing)) = try_ipc_request(&IpcRequest::GetEntry { query: args.query.clone() }).await
-        && let Some(IpcResponse::DeleteEntrySuccess) = try_ipc_request(&IpcRequest::DeleteEntry { id: existing.id, permanent: args.permanent }).await {
+        && let Some(IpcResponse::DeleteEntrySuccess) = try_ipc_mutation(&IpcRequest::DeleteEntry { id: existing.id, permanent: args.permanent }).await? {
             if args.permanent {
                 println!("{} Entry permanently deleted via IPC daemon!", "✓".red().bold());
             } else {
@@ -1313,8 +1328,7 @@ fn handle_export(
 
     match fmt_clean.as_str() {
         "vdb" => {
-            std::fs::copy(vault_path, &args.dest)
-                .map_err(|e| VaultError::VaultNotFound(format!("Export file write error: {}", e)))?;
+            manager.export_encrypted(&args.dest)?;
         }
         "csv" => {
             manager.export_csv(&args.dest)?;
@@ -1403,7 +1417,8 @@ async fn handle_sync(
 ) -> Result<()> {
     match &args.action {
         SyncAction::WebdavUpload { url, username, password: webdav_pass } => {
-            let etag = webdav_upload(url, username, webdav_pass.as_deref(), vault_path, None).await?;
+            let manager = open_vault(vault_path, password, keyfile)?;
+            let etag = webdav_upload_bytes(url, username, webdav_pass.as_deref(), manager.sync_bytes()?, None, false).await?;
             println!("{} WebDAV Upload Complete! Remote ETag: {}", "✓".green().bold(), etag.unwrap_or_default());
         }
         SyncAction::WebdavDownload { url, username, password: webdav_pass } => {
@@ -1411,21 +1426,10 @@ async fn handle_sync(
             println!("{} WebDAV Download Complete! Saved to {}", "✓".green().bold(), vault_path.display());
         }
         SyncAction::P2pListen { listen } => {
-            let mut manager = open_vault(vault_path, password, keyfile)?;
-            let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(&manager)?;
-            let subkeys = manager.get_subkeys()?;
-            println!("{} Starting P2P Sync Server on {}...", "→".blue().bold(), listen);
-            let (stats, data) = run_p2p_sync_listener(listen, subkeys, &snapshot.path())?;
-            yntra_vault_core::services::sync::merge_vault_data(&mut manager.data,data);manager.save()?;
-            println!("{} P2P Sync Completed! Added: {}, Updated: {}, Retained: {}", "✓".green().bold(), stats.entries_added, stats.entries_updated, stats.entries_kept_local);
+            reviewed_sync::run(open_vault(vault_path, password, keyfile)?, listen, true)?;
         }
         SyncAction::P2pConnect { server } => {
-            let mut manager = open_vault(vault_path, password, keyfile)?;
-            let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(&manager)?;
-            let subkeys = manager.get_subkeys()?;
-            let (stats, data) = run_p2p_sync_client(server, subkeys, &snapshot.path())?;
-            yntra_vault_core::services::sync::merge_vault_data(&mut manager.data,data);manager.save()?;
-            println!("{} P2P Sync Completed! Added: {}, Updated: {}, Retained: {}", "✓".green().bold(), stats.entries_added, stats.entries_updated, stats.entries_kept_local);
+            reviewed_sync::run(open_vault(vault_path, password, keyfile)?, server, false)?;
         }
         SyncAction::PairHost { listen, code } => {
             let pass = acquire_password(password)?;
@@ -1439,7 +1443,9 @@ async fn handle_sync(
             };
             println!("{} Starting Zero-Knowledge Device Pairing Host on {}...", "→".blue().bold(), listen);
             println!("{} Enter PIN '{}' on your other device to connect and merge vaults.", "ℹ".cyan().bold(), pin);
-            let (stats, _) = run_p2p_pairing_host(listen, &pass, &pin, vault_path, std::time::Duration::from_secs(60))?;
+            let (stats, _) = run_p2p_pairing_host_reviewed(listen, &pass, &pin, vault_path, std::time::Duration::from_secs(60), None, None, |manager, incoming| {
+                reviewed_sync::review_changes(&manager.data, incoming, manager.get_subkeys()?, manager.session_identity()).map(|(_, data)| data)
+            })?;
             println!("{} Device Pairing Completed! Sent: {}, Received: {}, Merged: {}, Total: {}", "✓".green().bold(), stats.entries_sent, stats.entries_received, stats.entries_merged, stats.total_entries);
         }
         SyncAction::PairConnect { code, server } => {

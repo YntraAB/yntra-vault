@@ -1,6 +1,7 @@
 name: SOTA Reproducible Builds CI & Attestation
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
@@ -11,6 +12,7 @@ permissions: {}
 
 jobs:
   verify-reproducible-linux:
+    if: github.repository == 'YntraAB/yntra-vault' || github.event_name == 'workflow_dispatch'
     name: Reproducible Build Verification (Linux / Docker)
     runs-on: ubuntu-latest
     permissions:
@@ -42,6 +44,9 @@ jobs:
           docker build -t yntra-vault-reproducible -f Dockerfile.reproducible .
           docker run --rm yntra-vault-reproducible
 
+      - name: Verify Unix socket isolation
+        run: cargo test --locked -p yntra-cli socket_security::tests
+
       - name: Execute Dual-Build Verification Suite (Linux Native)
         run: |
           chmod +x ./scripts/*.sh
@@ -52,9 +57,10 @@ jobs:
         with:
           name: reproducible-manifest-linux
           path: reproducible-dist/reproducible-manifest.json
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   verify-reproducible-windows:
+    if: github.repository == 'YntraAB/yntra-vault' || github.event_name == 'workflow_dispatch'
     name: Reproducible Build Verification (Windows MSVC)
     runs-on: windows-latest
     permissions:

@@ -5,7 +5,7 @@ use zeroize::{Zeroize, Zeroizing};
 use yntra_vault_core::totp::{self, TotpConfig};
 use yntra_vault_core::vault::{TrashedEntryPreview, VaultStorageMetrics};
 use yntra_vault_core::vault::history::DecryptedHistoryItem;
-use yntra_vault_core::vault::manager::{DecryptedEntry, NewEntry, UpdateEntry};
+use yntra_vault_core::vault::manager::{BulkEntryUpdate, DecryptedEntry, NewEntry, UpdateEntry};
 use yntra_vault_core::vault::types::*;
 
 use super::AppState;
@@ -71,6 +71,18 @@ pub async fn update_entry_breach_status(
     let manager = vault.as_mut().ok_or("Vault is locked")?;
     let uuid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     manager.update_entry_breach_status(uuid, breach_status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bulk_update_entries(ids: Vec<Uuid>, patch: BulkEntryUpdate, state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.as_mut().ok_or("Vault is locked")?.bulk_update_entries(&ids, patch).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bulk_delete_entries(ids: Vec<Uuid>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.as_mut().ok_or("Vault is locked")?.delete_entries(&ids).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -209,11 +221,12 @@ pub async fn add_tag(
     name: String,
     color: String,
     icon: String,
+    default_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
-    let id = manager.add_tag(&name, &color, &icon).map_err(|e| e.to_string())?;
+    let id = manager.add_tag_with_url(&name, &color, &icon, default_url.as_deref().unwrap_or_default()).map_err(|e| e.to_string())?;
     Ok(id.to_string())
 }
 
@@ -231,12 +244,13 @@ pub async fn update_tag(
     name: String,
     color: String,
     icon: String,
+    default_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
     let uuid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-    manager.update_tag(uuid, &name, &color, &icon).map_err(|e| e.to_string())
+    manager.update_tag_with_url(uuid, &name, &color, &icon, default_url.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -433,4 +447,28 @@ pub async fn autotype_entry_smart(
         char_delay_ms.unwrap_or(15),
         field_delay_ms.unwrap_or(300),
     ).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_conflict_history(entry_id: Uuid, state: State<'_, AppState>) -> Result<Vec<yntra_vault_core::vault::history::ConflictHistoryItem>, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.as_ref().ok_or("Vault is locked")?.list_conflict_history(entry_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn preview_conflict_history(entry_id: Uuid, version_id: Uuid, state: State<'_, AppState>) -> Result<yntra_vault_core::services::sync::review::SyncPreview, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.as_ref().ok_or("Vault is locked")?.preview_conflict_history(entry_id, version_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn inspect_conflict_history(entry_id: Uuid, version_id: Uuid, field: String, state: State<'_, AppState>) -> Result<String, String> {
+    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.as_ref().ok_or("Vault is locked")?.inspect_conflict_history(entry_id, version_id, &field).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn restore_conflict_history(entry_id: Uuid, version_id: Uuid, expected_revision: String, state: State<'_, AppState>) -> Result<(), String> {
+    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
+    vault.as_mut().ok_or("Vault is locked")?.restore_conflict_history(entry_id, version_id, &expected_revision).map_err(|e| e.to_string())
 }

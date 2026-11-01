@@ -2,6 +2,8 @@ import React from 'react';
 import { Info } from 'lucide-react';
 import { ActionTooltip } from '@/components/ui/tooltip';
 
+const SettingLabelContext = React.createContext<string | undefined>(undefined);
+
 export interface SettingSectionProps {
   label: string;
   tooltip?: string;
@@ -53,20 +55,22 @@ export function SettingRow({
         )}
       </div>
       <div className="shrink-0 flex items-center justify-end">
-        {children}
+        <SettingLabelContext.Provider value={label}>{children}</SettingLabelContext.Provider>
       </div>
     </div>
   );
 }
 
 
-export function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Toggle({ checked, onChange, disabled = false, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
+  const rowLabel = React.useContext(SettingLabelContext);
   return (
     <button
       type="button"
       onClick={() => onChange(!checked)}
       disabled={disabled}
       role="switch"
+      aria-label={label ?? rowLabel}
       aria-checked={checked}
       className={`shrink-0 relative h-5 w-9 rounded-full transition-colors cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed ${
         checked ? 'bg-[var(--text-primary)]' : 'bg-[var(--border)]'

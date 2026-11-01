@@ -17,6 +17,8 @@ fn removable_storage_loss_locks_only_the_observed_session() {
     let manager = VaultManager::create("Presence", password, &path).unwrap();
     let old = manager.presence_snapshot().unwrap();
     let state = AppState {
+        sync_review: Default::default(),
+            sync_progress: Default::default(),
         vault: Mutex::new(Some(manager)),
         minimize_to_tray: AtomicBool::new(false),
         lock_on_focus_loss: AtomicBool::new(false),
@@ -49,6 +51,8 @@ fn removable_storage_loss_locks_only_the_observed_session() {
 #[tokio::test]
 async fn test_app_state_and_atomic_settings() {
     let state = AppState {
+        sync_review: Default::default(),
+            sync_progress: Default::default(),
         vault: Mutex::new(None),
         minimize_to_tray: AtomicBool::new(true),
         lock_on_focus_loss: AtomicBool::new(false),
@@ -125,6 +129,8 @@ async fn test_app_state_vault_lifecycle() {
     let master_password = "TauriAppTestPassword123!";
 
     let state = AppState {
+        sync_review: Default::default(),
+            sync_progress: Default::default(),
         vault: Mutex::new(None),
         minimize_to_tray: AtomicBool::new(true),
         lock_on_focus_loss: AtomicBool::new(false),
@@ -190,6 +196,8 @@ async fn test_app_state_vault_reload() {
     let master_password = "TauriAppTestPassword123!";
 
     let state = AppState {
+        sync_review: Default::default(),
+            sync_progress: Default::default(),
         vault: Mutex::new(None),
         minimize_to_tray: AtomicBool::new(true),
         lock_on_focus_loss: AtomicBool::new(false),
@@ -269,6 +277,8 @@ async fn test_autotype_lock_release_invariant() {
     let master_password = "TauriAppTestPassword123!";
 
     let state = AppState {
+        sync_review: Default::default(),
+            sync_progress: Default::default(),
         vault: Mutex::new(None),
         minimize_to_tray: AtomicBool::new(true),
         lock_on_focus_loss: AtomicBool::new(true),

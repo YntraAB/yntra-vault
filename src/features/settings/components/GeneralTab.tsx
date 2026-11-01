@@ -69,7 +69,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
               <button
                 type="button"
                 onClick={() => {
-                  backend?.showInExplorer(currentVault.path).catch((err: any) => {
+                  backend?.showInExplorer(currentVault.path).catch((err: unknown) => {
                     addToast({ message: t('toast.open_explorer_failed', { err: String(err) }), type: 'error' });
                   });
                 }}
@@ -238,7 +238,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
 
 
       {/* Auto-Type Automation */}
-      {capabilities.automation && (<SettingSection
+      {capabilities.autoType && (<SettingSection
         label={t('settings.autotype_title')}
         tooltip={t('settings.tooltip_autotype')}
       >
@@ -291,7 +291,7 @@ export function GeneralTab({ launchOnStartup, onToggleLaunch }: GeneralTabProps)
         </div>
       </SettingSection>)}
 
-      {capabilities.automation && (<SettingRow
+      {capabilities.autoType && (<SettingRow
         label={t('settings.autotype_launch_browser')}
         description={t('settings.autotype_launch_browser_desc')}
         tooltip={t('settings.tooltip_autotype_launch_browser')}

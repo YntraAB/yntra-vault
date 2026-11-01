@@ -1,7 +1,11 @@
 //! Vault Synchronization Protocols (WebDAV cloud sync and local network P2P sync).
 
 pub mod lifecycle;
-mod identity;
+pub mod review;
+pub mod review_transport;
+#[cfg(test)]
+mod review_tests;
+pub(crate) mod identity;
 mod discovery;
 
 use std::fs;
@@ -34,10 +38,12 @@ impl SyncSnapshot {
     }
     /// The caller must hold its vault lock while saving and copying the source.
     pub fn create(path: &Path) -> crate::Result<Self> {
-        if crate::vault::storage::is_protected(&fs::read(path)?) { return Err(crate::error::VaultError::SyncError("Protected vaults require an unlocked sync snapshot".into())); }
+        let bytes = crate::vault::storage::read_bounded(path)?;
+        if crate::vault::storage::is_protected(&bytes) { return Err(crate::error::VaultError::SyncError("Protected vaults require an unlocked sync snapshot".into())); }
+        VaultFile::from_bytes(&bytes)?;
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let directory = tempfile::tempdir_in(parent)?;
-        fs::copy(path, directory.path().join("vault.vdb"))?;
+        fs::write(directory.path().join("vault.vdb"), bytes)?;
         Ok(Self { directory })
     }
 
@@ -67,6 +73,8 @@ pub use pairing::{
 /// Result of a 3-way item-level vault merge.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct MergeStats {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_device_id: Option<uuid::Uuid>,
     pub entries_added: usize,
     pub entries_updated: usize,
     pub entries_kept_local: usize,
@@ -368,6 +376,23 @@ pub async fn webdav_upload_conditional(
     if_match_etag: Option<&str>,
     create_only: bool,
 ) -> crate::Result<Option<String>> {
+    let bytes = crate::vault::storage::read_bounded(db_filepath)?;
+    webdav_upload_bytes(url, username, password, bytes, if_match_etag, create_only).await
+}
+
+/// Upload an encrypted sync snapshot, never a local hardware/recovery envelope.
+pub async fn webdav_upload_bytes(
+    url: &str,
+    username: &str,
+    password: Option<&str>,
+    bytes: Vec<u8>,
+    if_match_etag: Option<&str>,
+    create_only: bool,
+) -> crate::Result<Option<String>> {
+    if crate::vault::storage::is_protected(&bytes) {
+        return Err(crate::VaultError::SyncError("Protected vaults require an unlocked sync snapshot".into()));
+    }
+    VaultFile::from_bytes(&bytes)?;
     crate::services::network::run(async {
     validate_webdav_url(url)?;
 
@@ -378,10 +403,7 @@ pub async fn webdav_upload_conditional(
         .build()
         .map_err(|e| crate::error::VaultError::EncryptionError(format!("HTTP client init: {}", e)))?;
 
-    let file_data = fs::read(db_filepath)
-        .map_err(|e| crate::error::VaultError::SerializationError(format!("Read DB: {}", e)))?;
-
-    let mut req = client.put(url).body(file_data);
+    let mut req = client.put(url).body(bytes);
     if !username.is_empty() {
         req = req.basic_auth(username, password);
     }
@@ -428,76 +450,41 @@ pub async fn webdav_upload_conditional(
 }
 
 /// Download the encrypted database file from a WebDAV server with safety backup.
+pub fn restore_revision(path: &Path) -> crate::Result<Option<[u8; 32]>> {
+    if !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("vdb")) {
+        return Err(crate::VaultError::InvalidFormat("Destination database path must have a .vdb extension".into()));
+    }
+    if path.exists() {
+        let bytes = crate::vault::storage::read_bounded(path)?;
+        if crate::vault::storage::is_protected(&bytes) {
+            return Err(crate::VaultError::SyncError("Use unlocked synchronization to preserve this vault's USB and recovery protection".into()));
+        }
+        Ok(Some(*blake3::hash(&bytes).as_bytes()))
+    } else { Ok(None) }
+}
+
+pub fn restore_downloaded(bytes: &[u8], path: &Path, expected: Option<[u8; 32]>) -> crate::Result<()> {
+    VaultFile::from_bytes(bytes)?;
+    let _lock = crate::vault::storage::lock_vault_path(path)?;
+    if restore_revision(path)? != expected {
+        return Err(crate::VaultError::InvalidState("Vault changed during download; review the current contents before restoring".into()));
+    }
+    if expected.is_some() {
+        let previous = crate::vault::storage::read_bounded(path)?;
+        crate::vault::storage::atomic_write(&path.with_extension("vdb.bak"), &previous)?;
+        crate::vault::storage::atomic_write(path, bytes)
+    } else { crate::vault::storage::atomic_create(path, bytes) }
+}
+
 pub async fn webdav_download(
     url: &str,
     username: &str,
     password: Option<&str>,
     dest_db_filepath: &Path,
 ) -> crate::Result<()> {
-    crate::services::network::run(async {
-    validate_webdav_url(url)?;
-
-    if !dest_db_filepath.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vdb")) {
-        return Err(crate::error::VaultError::InvalidFormat(
-            "Destination database path must have a .vdb extension".into(),
-        ));
-    }
-    if let Some(parent) = dest_db_filepath.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            return Err(crate::error::VaultError::InvalidFormat(
-                "Destination directory does not exist".into(),
-            ));
-        }
-    }
-
-    let client = reqwest::Client::builder()
-        .user_agent("Yntra Vault-PasswordManager/1.0")
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| crate::error::VaultError::DecryptionError(format!("HTTP client init: {}", e)))?;
-
-    let mut req = client.get(url);
-    if !username.is_empty() {
-        req = req.basic_auth(username, password);
-    }
-
-    let response = req.send().await
-        .map_err(|e| crate::error::VaultError::DecryptionError(format!("WebDAV GET request failed: {}", e)))?;
-
-    if !response.status().is_success() {
-        return Err(crate::error::VaultError::DecryptionError(format!(
-            "WebDAV server returned failure status: {}",
-            response.status()
-        )));
-    }
-
-    let bytes = read_vault_response(response).await?;
-
-    // Pre-flight validation: verify downloaded payload is a valid .vdb vault file
-    VaultFile::from_bytes(&bytes).map_err(|e| {
-        crate::error::VaultError::InvalidFormat(format!("Downloaded file is not a valid vault database: {}", e))
-    })?;
-
-    if dest_db_filepath.exists() && crate::vault::storage::is_protected(&fs::read(dest_db_filepath)?) {
-        return Err(crate::error::VaultError::SyncError("Use unlocked synchronization to preserve this vault's USB and recovery protection".into()));
-    }
-    // Create a local backup (.vdb.bak) before overwriting current file
-    if dest_db_filepath.exists() {
-        let backup_path = dest_db_filepath.with_extension("vdb.bak");
-        let _ = fs::copy(dest_db_filepath, &backup_path);
-    }
-
-    // Atomic write using temp file
-    let tmp_path = dest_db_filepath.with_extension("vdb.sync.tmp");
-    fs::write(&tmp_path, &bytes)
-        .map_err(|e| crate::error::VaultError::SerializationError(format!("Write downloaded temp DB: {}", e)))?;
-
-    fs::rename(&tmp_path, dest_db_filepath)
-        .map_err(|e| crate::error::VaultError::SerializationError(format!("Replace local DB with downloaded DB: {}", e)))?;
-
-    Ok(())
-    }).await
+    let revision = restore_revision(dest_db_filepath)?;
+    let bytes = webdav_download_bytes(url, username, password).await?;
+    restore_downloaded(&bytes, dest_db_filepath, revision)
 }
 
 /// Download raw vault bytes from a WebDAV server into memory.
@@ -1382,12 +1369,13 @@ mod tests {
         let mut local=crate::vault::VaultManager::create("Local",password,&local_path).unwrap();
         let trusted=crate::vault::types::TrustedDevice {id:uuid::Uuid::new_v4(),signing_public_key:vec![1;32],..Default::default()};
         local.register_trusted_device(trusted.clone()).unwrap();
+        let original_authorization = local.data.settings.trusted_devices.clone();
         fs::copy(&local_path,&remote_path).unwrap();
         let mut remote=crate::vault::VaultManager::open(&remote_path,password).unwrap();
         remote.data.settings.trusted_devices=vec![crate::vault::types::TrustedDevice {id:uuid::Uuid::new_v4(),signing_public_key:vec![2;32],..Default::default()}];
         remote.save().unwrap();
         let (_,data,_)=apply_and_save_remote_vault(&fs::read(remote_path).unwrap(),local.get_subkeys().unwrap(),&local_path,None).unwrap();
-        assert_eq!(data.settings.trusted_devices,vec![trusted]);
+        assert_eq!(data.settings.trusted_devices, original_authorization);
     }
 
     #[test]
@@ -1580,6 +1568,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn webdav_upload_rejects_non_vault_and_local_envelope_without_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/vault.vdb", listener.local_addr().unwrap());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("private.txt");
+        for bytes in [b"private non-vault contents".as_slice(), b"YNS2local recovery envelope".as_slice()] {
+            fs::write(&path, bytes).unwrap();
+            assert!(webdav_upload(&url, "", None, &path, None).await.is_err());
+            assert!(matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+        }
+    }
+
+    #[tokio::test]
     async fn webdav_snapshot_rejects_missing_etag_without_uploading() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1746,10 +1748,10 @@ mod tests {
         let now = Utc::now();
         let older = now - chrono::Duration::minutes(5);
 
-        let t1 = Tag { id: Uuid::new_v4(), name: "Work".into(), color: "#f00".into(), icon: "briefcase".into() };
-        let t2 = Tag { id: Uuid::new_v4(), name: "Personal".into(), color: "#0f0".into(), icon: "user".into() };
-        let t3 = Tag { id: Uuid::new_v4(), name: "Finance".into(), color: "#00f".into(), icon: "wallet".into() };
-        let t4 = Tag { id: Uuid::new_v4(), name: "Crypto".into(), color: "#ff0".into(), icon: "key".into() };
+        let t1 = Tag { id: Uuid::new_v4(), name: "Work".into(), color: "#f00".into(), icon: "briefcase".into() , default_url: String::new(),};
+        let t2 = Tag { id: Uuid::new_v4(), name: "Personal".into(), color: "#0f0".into(), icon: "user".into() , default_url: String::new(),};
+        let t3 = Tag { id: Uuid::new_v4(), name: "Finance".into(), color: "#00f".into(), icon: "wallet".into() , default_url: String::new(),};
+        let t4 = Tag { id: Uuid::new_v4(), name: "Crypto".into(), color: "#ff0".into(), icon: "key".into() , default_url: String::new(),};
 
         // 1. Remote is newer: Remote order must win, with local-only tags appended
         let mut local = VaultData {

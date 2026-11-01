@@ -692,8 +692,8 @@ describe('secret and synchronization lifecycle', () => {
 
   it('uses the verified native desktop update path instead of opening a remote download', async () => {
     const { UpdaterProvider, useUpdater } = await import('@/features/updater/useUpdater');
-    const calls: Array<{command:string;args:any}> = [];
-    Object.assign(dom,{__TAURI_INTERNALS__:{invoke:async(command:string,args:any)=>{calls.push({command,args});return null;}}});
+    const calls: Array<{command:string;args:Record<string, unknown>}> = [];
+    Object.assign(dom,{__TAURI_INTERNALS__:{invoke:async(command:string,args:Record<string, unknown>)=>{calls.push({command,args});return null;}}});
     const backend=await getBackend();
     Object.assign(backend,{getAppVersion:async()=>'0.2.3',checkAppUpdate:async()=>({current_version:'0.2.3',latest_version:'0.2.4',has_update:true,target_platform:'windows-x86_64',download_url:'https://github.com/YntraAB/yntra-vault/releases/download/v0.2.4/app.exe',sha256:'a'.repeat(64),signature:null,release_notes:null,pub_date:null})});
     let updater!:ReturnType<typeof useUpdater>;

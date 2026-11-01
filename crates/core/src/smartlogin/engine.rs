@@ -15,6 +15,13 @@ use crate::smartlogin::{browser, analyzer, discovery, verifier};
 #[path = "keyboard_windows_tests.rs"]
 mod keyboard_windows_tests;
 
+fn identifier_kind(value: &str) -> &'static str {
+    if value.contains('@') { "email" }
+    else if value.chars().all(|c| c.is_ascii_digit() || matches!(c, '+' | ' ' | '-' | '(' | ')'))
+        && value.chars().any(|c| c.is_ascii_digit()) { "phone" }
+    else { "username" }
+}
+
 /// Google rejects some remotely controlled browser sessions before password entry.
 pub fn uses_native_browser(url: &str) -> bool {
     if !cfg!(target_os = "windows") { return false; }
@@ -561,14 +568,10 @@ impl SmartLoginEngine {
                 };
             }
 
-            // Wait for page content
-            analyzer::wait_for_page_ready(page, 5000).await;
             let _ = page.bring_to_front().await;
-
-            // Re-analyze the page
-            let snapshot = match analyzer::analyze_page(page, &self.logger).await {
+            let snapshot = match self.wait_for_login_controls(page, entry_url).await {
                 Ok(s) => s,
-                Err(e) => return LoginResult::BrowserError(format!("Analysis failed: {e}")),
+                Err(result) => return result,
             };
 
             // Verify domain is allowed before filling anything
@@ -666,7 +669,9 @@ impl SmartLoginEngine {
                 self.direct_submit(page, entry_url).await;
 
                 self.logger.log(LoginState::WaitingForPasswordStep, "Waiting for password step...");
-                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                if let Err(result) = verifier::wait_for_password_step(page, entry_url, identifier, &self.cancel_flag, &self.logger).await {
+                    return result;
+                }
                 continue;
             }
 
@@ -701,13 +706,38 @@ impl SmartLoginEngine {
         }
     }
 
+    async fn wait_for_login_controls(&self, page: &Page, entry_url: &str) -> Result<PageSnapshot, LoginResult> {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(8);
+        let mut last = None;
+        let mut stable = None;
+        loop {
+            if self.is_cancelled() { return Err(LoginResult::Cancelled); }
+            if let Ok(snapshot) = analyzer::analyze_page(page, &self.logger).await {
+                if !discovery::is_allowed_auth_domain(entry_url, &snapshot.url) {
+                    return Err(LoginResult::DomainMismatch { expected: "Saved website".into(), actual: "Unexpected website".into() });
+                }
+                let controls: Vec<_> = snapshot.inputs.iter().filter(|input| input.is_visible && !input.is_readonly && !self.is_search_field(input))
+                    .map(|input| (&input.id, &input.name, &input.input_type)).collect();
+                let signature = format!("{}:{controls:?}", snapshot.url);
+                if !controls.is_empty() && stable.as_ref() == Some(&signature) { return Ok(snapshot); }
+                if discovery::has_login_method_chooser(&snapshot) { return Ok(snapshot); }
+                stable = Some(signature);
+                last = Some(snapshot);
+            } else { stable = None; }
+            if tokio::time::Instant::now() >= deadline {
+                return last.ok_or(LoginResult::RequiresManualAction);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        }
+    }
+
     /// Check if an input is likely a search field (not a login field).
     fn is_search_field(&self, input: &InputInfo) -> bool {
         let all = format!(
             "{} {} {} {} {}",
             input.name, input.id, input.placeholder, input.aria_label, input.autocomplete
         ).to_lowercase();
-        all.contains("search") || all.contains("query") || all.contains("q")
+        all.contains("search") || all.contains("query") || input.name == "q" || input.id == "q"
             || input.input_type == "search"
     }
 
@@ -811,7 +841,8 @@ impl SmartLoginEngine {
         let expected_origin = serde_json::to_string(&discovery::credential_url(&expected_url).unwrap().origin().ascii_serialization()).unwrap();
         // A hidden password input must never leave the identifier focused while
         // the engine proceeds to type a password (Google includes such a decoy).
-        let find_js = format!("({})({})", include_str!("select_field.js"), serde_json::to_string(field_type).unwrap());
+        let kind = if field_type == "password" { "any" } else { identifier_kind(value) };
+        let find_js = format!("({})({},{})", include_str!("select_field.js"), serde_json::to_string(field_type).unwrap(), serde_json::to_string(kind).unwrap());
         let result = page.evaluate(find_js).await.map_err(|_| {
             crate::error::VaultError::SmartLoginError("Could not select the credential field".into())
         })?;
@@ -919,9 +950,10 @@ impl SmartLoginEngine {
         // Re-run the shared semantic selector after activation so the DOM and
         // UI Automation both point at the same verified credential field.
         let select_js = format!(
-            "({})({})",
+            "({})({},{})",
             include_str!("select_field.js"),
-            serde_json::to_string(if is_password { "password" } else { "identifier" }).unwrap()
+            serde_json::to_string(if is_password { "password" } else { "identifier" }).unwrap(),
+            serde_json::to_string(if is_password { "any" } else { identifier_kind(value) }).unwrap()
         );
         let selected = page.evaluate(select_js).await
             .ok()

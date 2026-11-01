@@ -32,7 +32,10 @@ export interface ChangeMasterPasswordModalProps {
 
 const STRENGTH_LEVELS: StrengthLevel[] = ['Critical', 'Weak', 'Fair', 'Strong', 'Excellent'];
 
-export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswordModalProps) {
+export function ChangeMasterPasswordModal(props: ChangeMasterPasswordModalProps) {
+  return <ChangeMasterPasswordForm key={String(props.open)} {...props} />;
+}
+function ChangeMasterPasswordForm({ open, onClose }: ChangeMasterPasswordModalProps) {
   const { t, language } = useTranslation();
   const { addToast } = useToast();
   const { backend } = useBackend();
@@ -79,37 +82,8 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
     onClose();
   };
   const [error, setError] = useState<string | null>(null);
-  const [strengthScore, setStrengthScore] = useState<StrengthScore | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      setStep(0);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setError(null);
-      setShowCurrentPassword(false);
-      setShowNewPassword(false);
-      setShowConfirmPassword(false);
-      setUseCurrentKeyFile(false);
-      setCurrentKeyFile('');
-      setUseNewKeyFile(false);
-      setNewKeyFile('');
-      setGenerateNewKeyFile(false);
-      setStrengthScore(null);
-      setReplacementKit(null);
-      replacementPending.current = false;
-    }
-    return () => {
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setCurrentKeyFile('');
-      setNewKeyFile('');
-      setGenerateNewKeyFile(false);
-      setStrengthScore(null);
-    };
-  }, [open]);
+  const [strengthResult, setStrengthResult] = useState<{ password: string; score: StrengthScore } | null>(null);
+  const strengthScore = strengthResult?.password === newPassword ? strengthResult.score : null;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -135,7 +109,6 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
   // Asynchronously evaluate password strength without external calls
   useEffect(() => {
     if (!newPassword || !backend) {
-      setStrengthScore(null);
       return;
     }
     let cancelled = false;
@@ -143,7 +116,7 @@ export function ChangeMasterPasswordModal({ open, onClose }: ChangeMasterPasswor
       try {
         const result = await backend.analyzePasswordStrength(newPassword);
         if (!cancelled && result) {
-          setStrengthScore(result);
+          setStrengthResult({ password: newPassword, score: result });
         }
       } catch {
         // Fallback

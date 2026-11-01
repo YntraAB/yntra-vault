@@ -49,7 +49,7 @@ export function AutotypeButton({ value = '', entryId, className = '', size = 14 
     [backend, autotyping, value, entryId, addToast, settings.autotypeCharDelayMs, settings.autotypeSettleDelayMs, t]
   );
 
-  if (!capabilities.automation) return null;
+  if (!capabilities.autoType) return null;
   return (
     <ActionTooltip content={autotyping ? t('autotype.autotyping') : t('autotype.tooltip')}>
       <button

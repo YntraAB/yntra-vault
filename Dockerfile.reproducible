@@ -56,8 +56,7 @@ RUN cargo fetch --locked && \
 
 # 6. Generate Verification Attestation Manifest
 RUN mkdir -p /dist && \
-    (sha256sum /yntra-vault/target/release/libyntra_vault_core.rlib || sha256sum /yntra-vault/crates/core/target/release/libyntra_vault_core.rlib) > /dist/SHA256SUMS 2>/dev/null || true && \
-    (sha256sum /yntra-vault/target/release/yntra-vault-app || sha256sum /yntra-vault/src-tauri/target/release/yntra-vault-app) >> /dist/SHA256SUMS 2>/dev/null || true && \
-    (sha256sum /yntra-vault/target/release/yntra || sha256sum /yntra-vault/crates/cli/target/release/yntra) >> /dist/SHA256SUMS 2>/dev/null || true
+    cd /yntra-vault/target/release && \
+    sha256sum libyntra_vault_core.rlib yntra-vault-app yntra > /dist/SHA256SUMS
 
 CMD ["cat", "/dist/SHA256SUMS"]

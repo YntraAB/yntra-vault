@@ -1,4 +1,4 @@
-use tauri::{Manager, State};
+use tauri::State;
 
 use super::AppState;
 
@@ -16,26 +16,6 @@ pub async fn cancel_p2p_sync_listener(state: State<'_ , AppState>) -> Result<(),
     stop_operation(&state.sync_listener_operation).await
 }
 
-
-fn ensure_sync_target(manager: &yntra_vault_core::vault::VaultManager, path: &std::path::Path, salt: &[u8; 32]) -> Result<(), String> {
-    if !manager.is_unlocked() || manager.path != path || manager.salt() != *salt {
-        return Err("Active vault changed during synchronization".into());
-    }
-    Ok(())
-}
-
-fn apply_p2p_result(state: &AppState, path: &std::path::Path, salt: &[u8; 32], data: yntra_vault_core::vault::VaultData) -> Result<(), String> {
-    let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-    let manager = vault.as_mut().ok_or("Vault is locked")?;
-    ensure_sync_target(manager, path, salt)?;
-    if manager.data.metadata.id != data.metadata.id {
-        return Err("Synchronized vault identity does not match the active vault".into());
-    }
-    // Preserve edits made while the network operation was running.
-    yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, data);
-    manager.rebuild_search_index();
-    manager.save().map_err(|e| e.to_string())
-}
 
 #[tauri::command]
 pub async fn webdav_test_connection(
@@ -57,14 +37,52 @@ pub async fn webdav_upload(
     password: Option<String>,
     db_path: String,
     if_match_etag: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    yntra_vault_core::services::sync::webdav_upload(
+    let bytes = {
+        let vault = state.vault.lock().map_err(|e| e.to_string())?;
+        active_upload_snapshot(vault.as_ref(), std::path::Path::new(&db_path))?
+    };
+    yntra_vault_core::services::sync::webdav_upload_bytes(
         &url,
         &username,
         password.as_deref(),
-        std::path::Path::new(&db_path),
+        bytes,
         if_match_etag.as_deref(),
+        false,
     ).await.map_err(|e| e.to_string())
+}
+
+fn active_upload_snapshot(
+    manager: Option<&yntra_vault_core::vault::VaultManager>,
+    target: &std::path::Path,
+) -> Result<Vec<u8>, String> {
+    let manager = manager.ok_or("Vault is locked")?;
+    let same_path = manager.path == target || matches!(
+        (std::fs::canonicalize(&manager.path), std::fs::canonicalize(target)),
+        (Ok(a), Ok(b)) if a == b
+    );
+    if !same_path { return Err("WebDAV upload is restricted to the active vault".into()); }
+    manager.sync_bytes().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    #[test]
+    fn upload_requires_active_session_and_uses_its_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("active.vdb");
+        assert!(active_upload_snapshot(None, &path).unwrap_err().contains("locked"));
+        let manager = yntra_vault_core::vault::VaultManager::create("Upload test", "test-password-only", &path).unwrap();
+        let other = dir.path().join("unrelated.vdb");
+        std::fs::write(&other, b"private file").unwrap();
+        assert!(active_upload_snapshot(Some(&manager), &other).unwrap_err().contains("active vault"));
+        let bytes = active_upload_snapshot(Some(&manager), &path).unwrap();
+        assert!(!yntra_vault_core::vault::storage::is_protected(&bytes));
+        yntra_vault_core::vault::format::VaultFile::from_bytes(&bytes).unwrap();
+    }
 }
 
 #[tauri::command]
@@ -78,49 +96,22 @@ pub async fn webdav_download(
 ) -> Result<(), String> {
     use tauri::Emitter;
 
-    let target_path = std::path::Path::new(&dest_db_path);
-    if dest_db_path.trim().is_empty() {
-        return Err("Destination database path cannot be empty".into());
-    }
-    if !target_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("vdb")) {
-        return Err("Destination database path must have a .vdb extension".into());
-    }
-
-    // When an active vault is in memory, restrict download destination
-    // strictly to the active vault to prevent arbitrary file overwrites.
-    {
-        let vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
-        if let Some(mgr) = vault_guard.as_ref() {
-            let is_same_vault = mgr.path == target_path
-                || match (std::fs::canonicalize(&mgr.path), std::fs::canonicalize(target_path)) {
-                    (Ok(c1), Ok(c2)) => c1 == c2,
-                    _ => false,
-                };
-            if !is_same_vault {
-                return Err("WebDAV restore is restricted to the active vault".into());
-            }
+    let target = std::path::Path::new(&dest_db_path);
+    let (session, revision) = {
+        let vault = state.vault.lock().map_err(|e| e.to_string())?;
+        let manager = vault.as_ref().ok_or("Vault is locked")?;
+        let same_path = manager.path == target || matches!((std::fs::canonicalize(&manager.path), std::fs::canonicalize(target)), (Ok(a), Ok(b)) if a == b);
+        if !same_path {
+            return Err("WebDAV restore is restricted to the active vault".into());
         }
-    }
-
-    // 1. Download and write file to dest_db_path with safety backup
-    yntra_vault_core::services::sync::webdav_download(
-        &url,
-        &username,
-        password.as_deref(),
-        target_path,
-    ).await.map_err(|e| e.to_string())?;
-
-    // 2. If the active in-memory vault corresponds to dest_db_path, reload it immediately
+        (manager.session_identity(), yntra_vault_core::services::sync::restore_revision(target).map_err(|e| e.to_string())?)
+    };
+    let bytes = yntra_vault_core::services::sync::webdav_download_bytes(&url, &username, password.as_deref()).await.map_err(|e| e.to_string())?;
     let mut vault_guard = state.vault.lock().map_err(|e| e.to_string())?;
-    if let Some(mgr) = vault_guard.as_mut() {
-        let is_same_vault = mgr.path == std::path::Path::new(&dest_db_path)
-            || match (std::fs::canonicalize(&mgr.path), std::fs::canonicalize(&dest_db_path)) {
-                (Ok(c1), Ok(c2)) => c1 == c2,
-                _ => false,
-            };
-
-        if is_same_vault
-            && let Err(err) = mgr.reload() {
+    let mgr = vault_guard.as_mut().filter(|manager| manager.session_identity() == session).ok_or("Vault session changed during download")?;
+    yntra_vault_core::services::sync::restore_downloaded(&bytes, target, revision).map_err(|e| e.to_string())?;
+    {
+        if let Err(err) = mgr.reload() {
                 // If reload fails (e.g. restored database has different credentials or salt),
                 // lock in-memory state to prevent stale data from overwriting the restored file.
                 mgr.lock();
@@ -135,160 +126,6 @@ pub async fn webdav_download(
     }
 
     Ok(())
-}
-
-#[tauri::command]
-pub async fn webdav_sync(
-    url: String,
-    username: String,
-    password: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<yntra_vault_core::services::sync::MergeStats, String> {
-    use yntra_vault_core::services::sync;
-    let password = password.map(zeroize::Zeroizing::new);
-    let credentials = password.as_ref().map(|p| p.as_str());
-    let (subkeys, path, salt, id) = {
-        let vault = state.vault.lock().map_err(|e| e.to_string())?;
-        let manager = vault.as_ref().ok_or("Vault is locked")?;
-        (manager.get_subkeys().map_err(|e| e.to_string())?.clone(), manager.path.clone(), manager.salt(), manager.data.metadata.id)
-    };
-    let mut total = sync::MergeStats::default();
-    for _ in 0..3 {
-        let snapshot = sync::webdav_download_snapshot(&url, &username, credentials)
-            .await.map_err(|e| e.to_string())?;
-        let remote = snapshot.as_ref().map(|(bytes, _)| {
-            sync::decrypt_remote_vault_bytes_checked(bytes, &subkeys, Some(&salt))
-        }).transpose().map_err(|e| e.to_string())?;
-        let upload_snapshot = {
-            let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-            let manager = vault.as_mut().ok_or("Vault is locked")?;
-            ensure_sync_target(manager, &path, &salt)?;
-            if let Some(remote) = remote {
-                if remote.metadata.id != id { return Err("Remote vault identity does not match".into()); }
-                let stats = sync::merge_vault_data(&mut manager.data, remote);
-                total.entries_added += stats.entries_added;
-                total.entries_updated += stats.entries_updated;
-                total.entries_kept_local += stats.entries_kept_local;
-                total.tags_merged += stats.tags_merged;
-                total.trash_merged += stats.trash_merged;
-            }
-            manager.rebuild_search_index();
-            manager.save().map_err(|e| e.to_string())?;
-            sync::SyncSnapshot::from_manager(manager).map_err(|e| e.to_string())?
-        };
-        let etag = snapshot.as_ref().map(|(_, etag)| etag.as_str());
-        match sync::webdav_upload_conditional(&url, &username, credentials, &upload_snapshot.path(), etag, snapshot.is_none()).await {
-            Ok(new_etag) => {
-                let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-                let manager = vault.as_mut().ok_or("Vault is locked")?;
-                ensure_sync_target(manager, &path, &salt)?;
-                manager.data.settings.webdav.last_etag = new_etag;
-                manager.data.settings.webdav.last_sync_at = Some(chrono::Utc::now());
-                manager.save().map_err(|e| e.to_string())?;
-                return Ok(total);
-            }
-            Err(error) if error.to_string().contains("412 Precondition Failed") => continue,
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Err("WebDAV changed during all three sync attempts; retry synchronization".into())
-}
-
-#[tauri::command]
-pub async fn run_p2p_sync_listener(
-    app: tauri::AppHandle,
-    listen_addr: String,
-    db_path: String,
-    state: State<'_, AppState>,
-) -> Result<yntra_vault_core::services::sync::MergeStats, String> {
-    // Reserve the operation before reading or saving a snapshot. Lock cleanup
-    // can then cancel this lease before any worker owns vault bytes.
-    let operation = std::sync::Arc::new(state.sync_listener_operation.begin()?);
-    let (subkeys, path, salt) = {
-        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
-        let manager = vault.as_mut().ok_or("Vault is locked")?;
-        manager.save().map_err(|e| e.to_string())?;
-        (manager.get_subkeys().map_err(|e| e.to_string())?.clone(), manager.path.clone(), manager.salt())
-    };
-
-    if !db_path.is_empty() && std::path::Path::new(&db_path) != path {
-        return Err("Synchronization is restricted to the active vault".into());
-    }
-    let target_path = path.clone();
-    let worker_operation = operation.clone();
-
-    let (stats, merged_data) = tokio::task::spawn_blocking(move || {
-        let _operation = worker_operation;
-        yntra_vault_core::services::sync::run_p2p_sync_listener_cancellable(
-            &listen_addr,
-            &subkeys,
-            _operation.cancel.clone(),
-            || { use tauri::Emitter; let _ = app.emit("p2p-listener-ready", ()); },
-            || {
-                use yntra_vault_core::{services::sync::SyncSnapshot, VaultError};
-                let state = app.state::<AppState>();
-                let mut vault = state.vault.lock().map_err(|e| VaultError::SyncError(e.to_string()))?;
-                let manager = vault.as_mut().ok_or(VaultError::VaultLocked)?;
-                ensure_sync_target(manager, &target_path, &salt).map_err(VaultError::SyncError)?;
-                manager.save()?;
-                SyncSnapshot::from_manager(manager)
-            },
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
-
-    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
-    apply_p2p_result(&state, &path, &salt, merged_data)?;
-
-    Ok(stats)
-}
-
-#[tauri::command]
-pub async fn run_p2p_sync_client(
-    server_addr: String,
-    db_path: String,
-    device_id: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<yntra_vault_core::services::sync::MergeStats, String> {
-    // Start the lease before snapshotting. A concurrent lock/network-policy
-    // change must be able to cancel the operation before it reads the vault.
-    let operation = std::sync::Arc::new(state.sync_client_operation.begin()?);
-    let (subkeys, path, salt, snapshot) = {
-        let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
-        if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
-        let manager = vault.as_mut().ok_or("Vault is locked")?;
-        manager.save().map_err(|e| e.to_string())?;
-        let snapshot = yntra_vault_core::services::sync::SyncSnapshot::from_manager(manager).map_err(|e| e.to_string())?;
-        (manager.get_subkeys().map_err(|e| e.to_string())?.clone(), manager.path.clone(), manager.salt(), snapshot)
-    };
-
-    if !db_path.is_empty() && std::path::Path::new(&db_path) != path {
-        return Err("Synchronization is restricted to the active vault".into());
-    }
-    let _ = device_id; // Kept for IPC compatibility; identity is resolved locally.
-    let dev_uuid = None;
-
-    let cancel = operation.cancel.clone();
-    let (stats, merged_data) = tokio::task::spawn_blocking(move || {
-        yntra_vault_core::services::sync::run_p2p_sync_client_cancellable(
-            &server_addr,
-            &subkeys,
-            &snapshot.path(),
-            dev_uuid,
-            Some(cancel),
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
-
-    if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Synchronization cancelled".into()); }
-    apply_p2p_result(&state, &path, &salt, merged_data)?;
-
-    Ok(stats)
 }
 
 #[tauri::command]
@@ -360,24 +197,30 @@ pub async fn revoke_trusted_device(
     let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_mut().ok_or("Vault is locked")?;
     manager.revoke_trusted_device(dev_uuid).map_err(|e| e.to_string())?;
+    state.sync_listener_operation.cancel();
+    state.sync_client_operation.cancel();
+    *state.sync_review.lock().map_err(|e| e.to_string())? = None;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn start_pairing_host(
+    app: tauri::AppHandle,
     listen_addr: String,
     password: String,
     pairing_code: String,
     device_name: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<yntra_vault_core::services::sync::PairingStats, String> {
+    let password = zeroize::Zeroizing::new(password);
+    let pairing_code = zeroize::Zeroizing::new(pairing_code);
     let operation = std::sync::Arc::new(state.pairing_operation.begin()?);
-    let host_db_path = {
+    let (host_db_path, session) = {
         let mut vault = state.vault.lock().map_err(|e| e.to_string())?;
         if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         let manager = vault.as_mut().ok_or("Vault is locked")?;
         manager.save().map_err(|e| e.to_string())?;
-        manager.path.clone()
+        (manager.path.clone(), manager.session_identity())
     };
 
     let worker_operation = operation.clone();
@@ -385,14 +228,20 @@ pub async fn start_pairing_host(
 
     let (stats, merged_data) = tokio::task::spawn_blocking(move || {
         let _operation = worker_operation;
-        yntra_vault_core::services::sync::pairing::run_p2p_pairing_host_with_device_and_cancel(
+        yntra_vault_core::services::sync::pairing::run_p2p_pairing_host_reviewed(
             &listen_addr,
             &password,
             &pairing_code,
             &host_db_path,
             std::time::Duration::from_secs(180),
             device_name,
-            Some(cancel_flag),
+            Some(cancel_flag.clone()),
+            |manager, incoming| {
+                let local = yntra_vault_core::services::sync::review_transport::Snapshot::capture(manager)?;
+                let remote = yntra_vault_core::services::sync::review_transport::Snapshot { revision: yntra_vault_core::services::sync::review::revision(incoming)?, data: incoming.clone(), observed_at: local.observed_at };
+                let reporter = super::sync_operation::Reporter::new(&app, session, "pairing");
+                super::sync_review::wait_for_review(&app, manager.get_subkeys()?, &cancel_flag, session, &local, &remote, false, &reporter).map(|(_, data)| data)
+            },
         )
     })
     .await
@@ -404,16 +253,8 @@ pub async fn start_pairing_host(
         if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         if let Some(manager) = vault.as_mut() {
             if manager.is_unlocked() && manager.data.metadata.id == merged_data.metadata.id {
-                // Pairing saved through a separate manager. Refresh the disk revision
-                // before merging any UI edits made while the operation was running.
-                let in_memory = manager.data.clone();
+                // Both managers persist edits with revision checks. The disk is authoritative.
                 manager.reload().map_err(|e| e.to_string())?;
-                yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, in_memory);
-                let trusted_devices = merged_data.settings.trusted_devices.clone();
-                yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, merged_data);
-                manager.data.settings.trusted_devices = trusted_devices;
-                manager.rebuild_search_index();
-                manager.save().map_err(|e| e.to_string())?;
             }
         }
     }
@@ -619,16 +460,8 @@ pub async fn start_qr_pairing_host(
         if operation.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err("Pairing cancelled".into()); }
         if let Some(manager) = vault.as_mut() {
             if manager.is_unlocked() && manager.data.metadata.id == merged_data.metadata.id {
-                // Pairing saved through a separate manager. Refresh the disk revision
-                // before merging any UI edits made while the operation was running.
-                let in_memory = manager.data.clone();
+                // Both managers persist edits with revision checks. The disk is authoritative.
                 manager.reload().map_err(|e| e.to_string())?;
-                yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, in_memory);
-                let trusted_devices = merged_data.settings.trusted_devices.clone();
-                yntra_vault_core::services::sync::merge_vault_data(&mut manager.data, merged_data);
-                manager.data.settings.trusted_devices = trusted_devices;
-                manager.rebuild_search_index();
-                manager.save().map_err(|e| e.to_string())?;
             }
         }
     }

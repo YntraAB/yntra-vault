@@ -60,6 +60,39 @@ async fn cdp_session_browser_regression() {
         assert!(matches!(engine.find_login_form(page.clone(), &local, "unknown-username").await, Err(LoginResult::RequiresManualAction)));
         assert!(matches!(engine.find_login_form(page.clone(), &local, "other@example.test").await, Err(LoginResult::DifferentAccount)));
         assert_eq!(page.url().await.unwrap().unwrap(), local);
+        page.set_content("<header><button aria-haspopup='menu' aria-label='demo@example.test'>Profile</button><a href='/logout'>退出</a></header>").await.unwrap();
+        let unknown = engine.find_login_form(page.clone(), &local, "unknown-username").await.err();
+        assert!(matches!(unknown, Some(LoginResult::RequiresManualAction)), "Unknown account result: {unknown:?}");
+        page.set_content("<nav><button>Help</button><button>Language</button></nav><input hidden name=decoy>").await.unwrap();
+        page.evaluate("setTimeout(() => { document.body.innerHTML='<input id=unique_login name=username><input type=password>' }, 650)").await.unwrap();
+        let snapshot = engine.wait_for_login_controls(&page, &local).await.unwrap();
+        assert!(snapshot.inputs.iter().any(|input| input.id == "unique_login"));
+        assert!(!engine.is_search_field(snapshot.inputs.iter().find(|input| input.id == "unique_login").unwrap()));
+        page.set_content("<input name=username value=fixture><button>Continue</button>").await.unwrap();
+        page.evaluate("setTimeout(() => { document.body.innerHTML='<p>Loading...</p>' }, 400); setTimeout(() => { document.body.innerHTML='<input type=password><button>Sign in</button>' }, 2600)").await.unwrap();
+        assert!(verifier::wait_for_password_step(&page, &local, "fixture", &cancel, &engine.logger).await.is_ok());
+        page.set_content("<div id=shadow></div>").await.unwrap();
+        page.evaluate("document.getElementById('shadow').attachShadow({mode:'open'}).innerHTML='<input type=password>'").await.unwrap();
+        assert!(verifier::wait_for_password_step(&page, &local, "fixture", &cancel, &engine.logger).await.is_ok());
+        page.set_content("<p role=alert>Incorrect password</p><input type=password>").await.unwrap();
+        assert!(matches!(verifier::wait_for_password_step(&page, &local, "fixture", &cancel, &engine.logger).await, Err(LoginResult::WrongCredentials { .. })));
+        page.set_content("<iframe hidden srcdoc='<input type=password><a href=/logout>Sign out</a>'></iframe>").await.unwrap();
+        let script = include_str!("verify_page.js").replace("__EXPECTED_IDENTIFIER__", "\"fixture\"");
+        let evidence: serde_json::Value = serde_json::from_str(&page.evaluate(script.clone()).await.unwrap().into_value::<String>().unwrap()).unwrap();
+        assert_eq!(evidence["has_password_input"], false);
+        assert_eq!(evidence["authenticated_control"], false);
+        page.set_content("<div id=hiddenhost hidden></div>").await.unwrap();
+        page.evaluate("document.getElementById('hiddenhost').attachShadow({mode:'open'}).innerHTML='<input type=password><a href=/logout>Sign out</a>'").await.unwrap();
+        let evidence: serde_json::Value = serde_json::from_str(&page.evaluate(script).await.unwrap().into_value::<String>().unwrap()).unwrap();
+        assert_eq!(evidence["has_password_input"], false);
+        assert_eq!(evidence["authenticated_control"], false);
+        page.set_content("<input type=tel autocomplete=username><input type=password>").await.unwrap();
+        assert!(engine.identifier_field_matches(&analyzer::analyze_page(&page, &engine.logger).await.unwrap().inputs[0], "+46700000000"));
+        page.set_content("<input id=mail type=email><input id=phone type=tel><input id=user name=username><input id=otp autocomplete=one-time-code>").await.unwrap();
+        for (kind, expected) in [("phone", "phone"), ("email", "mail"), ("username", "user")] {
+            assert_eq!(page.evaluate(format!("({})(\"identifier\",\"{kind}\")", include_str!("select_field.js"))).await.unwrap().into_value::<String>().unwrap(), "found");
+            assert_eq!(page.evaluate("document.activeElement.id").await.unwrap().into_value::<String>().unwrap(), expected);
+        }
         page.set_content("<p>Two-factor verification code</p><input autocomplete='one-time-code'>").await.unwrap();
         page.evaluate("setTimeout(() => {document.body.innerHTML='<p>Loading...</p>'}, 450); setTimeout(() => {document.body.innerHTML='<header><button aria-controls=account>Profile</button><div id=account hidden><a href=/logout>Sign out</a></div></header>'}, 900)").await.unwrap();
         assert!(matches!(verifier::verify_login_result(&page, &local, &local, "demo@example.test", true, &cancel, &engine.logger).await.unwrap(), LoginResult::Success { .. }));
@@ -358,8 +391,10 @@ async fn windows_keyboard_browser_smoke() {
         page.find_element("#identifierId").await.unwrap().click().await.unwrap();
         // Windows can refuse programmatic activation while the user operates another window.
         // Wait for this disposable test window; do not send keys into that other window.
-        let focus_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(25);
+        let focus_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(120);
+        eprintln!("Ready: activate the disposable Brave window titled Yntra keyboard test.");
         loop {
+            let _ = crate::services::autotype::activate_browser_window(&page.url().await.unwrap().unwrap());
             let mut title = [0u16; 256];
             let len = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(
                 windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow(), &mut title) };
@@ -448,7 +483,8 @@ async fn windows_keyboard_browser_smoke() {
         cancelled.store(false, Ordering::SeqCst);
         assert!(matches!(engine.find_login_form(page.clone(), &local, "demo@example.test").await, Err(LoginResult::AlreadySignedIn { .. })));
         assert_eq!(page.url().await.unwrap().unwrap(), local);
-        assert!(matches!(engine.find_login_form(page.clone(), &local, "unknown-username").await, Err(LoginResult::RequiresManualAction)));
+        let unknown = engine.find_login_form(page.clone(), &local, "unknown-username").await.err();
+        assert!(matches!(unknown, Some(LoginResult::RequiresManualAction)), "Unknown account result: {unknown:?}");
         assert_eq!(page.url().await.unwrap().unwrap(), local);
         page.evaluate("document.body.insertAdjacentHTML('beforeend', '<input type=password>')").await.unwrap();
         assert!(verifier::existing_session(&page, &local, "demo@example.test").await.is_none());

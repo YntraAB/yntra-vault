@@ -1,3 +1,4 @@
+import { SyncPolicySettings } from '@/features/sync/components/SyncPolicySettings';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FolderInput, AlertTriangle, FileSpreadsheet, FileCode, Smartphone, Laptop, Plus, Unlink, Loader2, RefreshCw, X } from 'lucide-react';
@@ -11,15 +12,17 @@ import { saveFileDialog, type TrustedDevice, type LocalDeviceInfo } from '@/lib/
 import { getTransientWebdavPassword, setTransientWebdavPassword } from '@/lib/sessionSecrets';
 import { DevicePairingWizard } from '@/features/sync';
 import { syncEndpoint } from '@/features/sync/utils/endpoint';
+import { useTrustedDevices } from '@/features/sync/hooks/useTrustedDevices';
 import { SettingSection, Toggle } from './SettingSection';
+import { appMetadata } from '@/lib/appMetadata';
 
 export interface BackupTabProps {
   onOpenImportModal: () => void;
 }
 
 export function BackupTab({ onOpenImportModal }: BackupTabProps) {
-  const { currentVault } = useAuth();
-  const { refreshEntries, refreshTags, setSelectedEntry, toggleP2pListener } = useEntries();
+  const { currentVault, setCurrentVault, getSessionGeneration, isSessionCurrent } = useAuth();
+  const { refreshEntries, refreshTags, setSelectedEntry, toggleP2pListener, p2pReceiverEnabled, isP2pListening, localLanIp } = useEntries();
   const { settings, updateSettings, networkAccessReady } = useSettings();
   const networkBlocked = settings.operationMode === 'airgap' || !networkAccessReady;
   const { addToast } = useToast();
@@ -40,29 +43,11 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
   const [showPairingWizard, setShowPairingWizard] = useState(false);
 
   // Trusted Devices State
-  const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
-  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const { trustedDevices, isLoadingDevices, loadTrustedDevices } = useTrustedDevices();
   const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null);
 
-  const loadTrustedDevices = useCallback(async () => {
-    if (!backend || !currentVault) return;
-    setIsLoadingDevices(true);
-    try {
-      const list = await backend.getTrustedDevices();
-      setTrustedDevices(list);
-    } catch (e) {
-      console.error('Failed to fetch trusted devices:', e);
-    } finally {
-      setIsLoadingDevices(false);
-    }
-  }, [backend, currentVault]);
-
-  useEffect(() => {
-    loadTrustedDevices();
-  }, [loadTrustedDevices]);
-
   const [localDevice, setLocalDevice] = useState<LocalDeviceInfo | null>(null);
-  const syncBusy = useRef(false);
+  const syncGate = useSyncGate();
   const [syncingDeviceId, setSyncingDeviceId] = useState<string | null>(null);
   const [ipPromptDevice, setIpPromptDevice] = useState<TrustedDevice | null>(null);
   const [promptIpValue, setPromptIpValue] = useState<string>('');
@@ -86,9 +71,8 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
     return list;
   }, [trustedDevices]);
 
-  const handleSyncDevice = async (device: TrustedDevice, targetIpOverride?: string) => {
-    if (!backend || !currentVault || syncBusy.current) return;
-    syncBusy.current = true;
+  const handleSyncDevice = useCallback(async (device: TrustedDevice, targetIpOverride?: string) => {
+    if (!backend || !currentVault || !syncGate.acquire()) return;
     setSyncingDeviceId(device.id);
     let targetAddr = targetIpOverride?.trim() || localStorage.getItem(`yntra_sync_endpoint_${device.id}`) || '';
     try {
@@ -101,7 +85,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       targetAddr = syncEndpoint(targetAddr);
       let stats;
       try {
-        stats = await backend.runP2pSyncClient(targetAddr, currentVault.path);
+        stats = await backend.runP2pSyncClient(targetAddr, currentVault.path, device.id);
       } catch (error) {
         // A stale DHCP address can be rediscovered. Never retry an authenticated
         // transfer or a rejected identity as though it were a connection failure.
@@ -109,7 +93,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         const discovered = await backend.scanP2pDiscovery(2500);
         if (!discovered || syncEndpoint(discovered) === targetAddr) throw error;
         targetAddr = syncEndpoint(discovered);
-        stats = await backend.runP2pSyncClient(targetAddr, currentVault.path);
+        stats = await backend.runP2pSyncClient(targetAddr, currentVault.path, device.id);
       }
       localStorage.setItem(`yntra_sync_endpoint_${device.id}`, targetAddr);
 
@@ -123,9 +107,13 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         type: 'success',
       });
       setIpPromptDevice(null);
-    } catch (err: any) {
-      const errMsg = typeof err === 'string' ? err : err?.message || String(err);
-      if (!targetIpOverride) {
+    } catch (err) {
+      const errMsg = typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || String(err);
+      if (errMsg.toLowerCase().includes('synchronization cancelled')) {
+        setIpPromptDevice(null);
+        return;
+      }
+      if (!targetIpOverride && errMsg.includes('Failed to connect to sync server')) {
         setPromptIpValue(targetAddr);
         setIpPromptDevice(device);
       } else {
@@ -135,10 +123,10 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         });
       }
     } finally {
-      syncBusy.current = false;
+      syncGate.release();
       setSyncingDeviceId(null);
     }
-  };
+  }, [backend, currentVault, refreshEntries, refreshTags, loadTrustedDevices, addToast, t, syncGate]);
 
   const handleRevokeDevice = async (device: TrustedDevice) => {
     if (!backend) return;
@@ -153,9 +141,9 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         type: 'success',
       });
       await loadTrustedDevices();
-    } catch (err: any) {
+    } catch (err) {
       addToast({
-        message: t('settings.revoke_device_failed', { err: typeof err === 'string' ? err : err?.message || String(err) }),
+        message: t('settings.revoke_device_failed', { err: typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || String(err) }),
         type: 'error',
       });
     } finally {
@@ -169,6 +157,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
 
   return (
     <div className="flex flex-col gap-6">
+      <SyncPolicySettings />
       {/* Competitor Importer */}
       <SettingSection
         label={t('settings.importer_title')}
@@ -207,6 +196,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               </span>
             </div>
             <Toggle
+              label={t('settings.enable_webdav')}
               checked={webdavEnabled}
               onChange={(v) => updateSettings({ webdavEnabled: v })}
             />
@@ -253,6 +243,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                   </span>
                 </div>
                 <Toggle
+                  label={t('settings.auto_sync_on_save')}
                   checked={Boolean(settings.webdavAutoSync)}
                   onChange={(v) => updateSettings({ webdavAutoSync: v })}
                 />
@@ -298,7 +289,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                       } else {
                         addToast({ message: t('settings.upload_backup'), type: 'success' });
                       }
-                    } catch (err: any) {
+                    } catch (err) {
                       addToast({ message: t('toast.sync_failed', { err: String(err) }), type: 'error' });
                     } finally {
                       setIsSyncingWebdav(false);
@@ -339,10 +330,10 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
       </fieldset>
       <SettingSection
         label={t('settings.trusted_devices_title')}
-        tooltip={t('settings.trusted_devices_desc')}
+        tooltip={t('sync.policy_description')}
       >
         <p className="mb-3.5 text-[12px] text-[var(--text-secondary)]">
-          {t('settings.trusted_devices_desc')}
+          {t('sync.policy_description')}
         </p>
 
         {/* Action Bar / Header */}
@@ -386,6 +377,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
               const pairedDate = device.paired_at ? new Date(device.paired_at).toLocaleDateString() : '';
               const lastSync = device.last_sync_at ? new Date(device.last_sync_at).toLocaleString() : null;
               const isCurrentDevice = localDevice?.id === device.id;
+              const sharedName = uniqueDevices.some(other => other.id !== device.id && other.name === device.name && other.os === device.os);
 
               return (
                 <div
@@ -401,6 +393,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                         <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
                           {device.name || t('common.device') || 'Device'}
                         </span>
+                        {sharedName && <span className="font-mono text-[10px] text-[var(--text-tertiary)]" title={device.id}>{device.id.slice(0, 8)}</span>}
                         {device.os && (
                           <span className="inline-flex items-center rounded-[2px] px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg-base)] border border-[var(--border)] text-[var(--text-secondary)]">
                             {device.os}
@@ -427,7 +420,7 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                       <button
                         type="button"
                         disabled={networkBlocked || syncingDeviceId !== null}
-                        onClick={() => handleSyncDevice(device)}
+                        onClick={() => { void handleSyncDevice(device); }}
                         className="flex h-7.5 items-center gap-1.5 rounded-[3px] bg-[var(--text-primary)] px-2.5 text-[11px] font-medium text-[var(--bg-base)] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
                         title={t('settings.sync_now_btn')}
                       >
@@ -453,6 +446,15 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
           )}
         </div>
 
+        <div className="mt-4 border-t border-[var(--border)] pt-3.5">
+          <button type="button" disabled={networkBlocked || !backend} onClick={() => toggleP2pListener(!p2pReceiverEnabled)}
+            className="min-h-[44px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] text-[var(--text-primary)] disabled:opacity-50">
+            {t(p2pReceiverEnabled ? 'sync.stop_receiving' : 'sync.receive_now')}
+          </button>
+          <p className="mt-2 text-[11px] text-[var(--text-secondary)]">{t('sync.receive_description')}</p>
+          {isP2pListening && <p role="status" className="mt-2 text-[12px] text-[var(--text-secondary)]">{t('settings.listener_active')}{localLanIp ? ` · ${localLanIp}` : ''}</p>}
+        </div>
+
         {/* Automatic Wi-Fi Sync Toggle */}
         <div className="mt-4 border-t border-[var(--border)] pt-3.5">
           <div className="flex items-center justify-between gap-4">
@@ -461,10 +463,11 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
                 {t('settings.auto_wifi_sync_toggle')}
               </span>
               <span className="text-[11px] text-[var(--text-secondary)] leading-relaxed mt-0.5">
-                {t('settings.auto_wifi_sync_desc')}
+                {t('sync.policy_description')}
               </span>
             </div>
             <Toggle
+              label={t('settings.auto_wifi_sync_toggle')}
               checked={!networkBlocked && Boolean(settings.p2pAutoSyncWifi && settings.p2pAutoListen)}
               disabled={networkBlocked}
               onChange={(v) => {
@@ -560,8 +563,16 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
         isOpen={showPairingWizard}
         onClose={() => setShowPairingWizard(false)}
         onSuccess={() => {
-          Promise.all([refreshEntries(), refreshTags()]).catch(() => {});
-          loadTrustedDevices();
+          const generation = getSessionGeneration();
+          void backend?.getVaultInfo().then(info => {
+            if (!info || !isSessionCurrent(generation) || info.path !== currentVault?.path) return;
+            const vault = { id: info.id, name: info.name, path: info.path };
+            setCurrentVault(vault, true);
+            let recent: unknown = [];
+            try { recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]'); } catch { /* Replace malformed optional history. */ }
+            const remaining = (Array.isArray(recent) ? recent : []).filter(value => value && typeof value.path === 'string' && value.path !== vault.path);
+            appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([vault, ...remaining.slice(0, 9)]));
+          }).catch(error => { if (isSessionCurrent(generation)) addToast({ message: String(error), type: 'error' }); });
         }}
       />
 
@@ -648,3 +659,11 @@ export function BackupTab({ onOpenImportModal }: BackupTabProps) {
 }
 
 export default BackupTab;
+
+function useSyncGate() {
+  const busy = useRef(false);
+  return useMemo(() => ({
+    acquire: () => { if (busy.current) return false; busy.current = true; return true; },
+    release: () => { busy.current = false; },
+  }), []);
+}

@@ -28,7 +28,10 @@ export interface CreateVaultModalProps {
   onCreated: (vault: Vault) => void;
 }
 
-export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalProps) {
+export function CreateVaultModal(props: CreateVaultModalProps) {
+  return <CreateVaultForm key={String(props.open)} {...props} />;
+}
+function CreateVaultForm({ open, onClose, onCreated }: CreateVaultModalProps) {
   const { t, language } = useTranslation();
   const c=(sv:string,en:string)=>language==='sv'?sv:en;
   const [bindUsb,setBindUsb]=useState(false);
@@ -37,8 +40,10 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
   const [pendingKit,setPendingKit]=useState<EmergencyKit|null>(null);
   const [pendingVault,setPendingVault]=useState<Vault|null>(null);
   const [name, setName] = useState('');
-  const [path, setPath] = useState('');
+  const [customPath, setPath] = useState('');
   const [pathModified, setPathModified] = useState(false);
+  const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+  const path = pathModified ? customPath : safeName ? (isTauri() ? safeName + '.vdb' : '~/.yntra-vault/' + safeName + '.db') : '';
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -77,23 +82,6 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     }
   }, [open]);
 
-  // Clear sensitive fields on close
-  useEffect(() => {
-    if (!open) {
-      setPassword('');
-      setConfirmPassword('');
-      setError(null);
-      setShowPassword(false);
-      setName('');
-      setPath('');
-      setPathModified(false);
-      setUseKeyFile(false);
-      setKeyFilePath('');
-      setGenerateNewKeyFile(false);
-      setBindUsb(false);setUsbId('');setPendingKit(null);setPendingVault(null);
-    }
-  }, [open]);
-
   // Esc to close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -102,22 +90,6 @@ export function CreateVaultModal({ open, onClose, onCreated }: CreateVaultModalP
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [open, onClose, pendingKit, loading]);
-
-  // Auto-generate path from name
-  useEffect(() => {
-    if (!pathModified) {
-      const safeName = name ? name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-') : '';
-      if (safeName) {
-        if (isTauri()) {
-          setPath(`${safeName}.vdb`);
-        } else {
-          setPath(`~/.yntra-vault/${safeName}.db`);
-        }
-      } else {
-        setPath('');
-      }
-    }
-  }, [name, pathModified]);
 
   const handleBrowse = useCallback(async () => {
     if (!isTauri()) return;

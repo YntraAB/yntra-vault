@@ -1,13 +1,24 @@
 //! Security attributes and DACL management for Windows Named Pipes.
 //!
-//! Enforces that local pipes (SSH Agent, IPC Daemon) can only be opened by
-//! the current user token SID, SYSTEM, and Administrators, rejecting all
-//! cross-user access, low-integrity sandboxes, and remote/network connections.
+//! Limits pipe access to the current user, SYSTEM and Administrators.
+//! Callers also set PIPE_REJECT_REMOTE_CLIENTS when creating each instance.
 
 #[cfg(windows)]
 pub struct PipeSecurityAttributes {
     sa: windows::Win32::Security::SECURITY_ATTRIBUTES,
     sd: windows::Win32::Security::PSECURITY_DESCRIPTOR,
+}
+
+pub fn create_pipe(name: &str, first: bool) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    let mut attributes = PipeSecurityAttributes::new_current_user_only()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    // Windows copies the security descriptor during creation; no pointer survives this call.
+    unsafe {
+        tokio::net::windows::named_pipe::ServerOptions::new()
+            .first_pipe_instance(first)
+            .reject_remote_clients(true)
+            .create_with_security_attributes_raw(name, attributes.as_mut_ptr())
+    }
 }
 
 #[cfg(windows)]
@@ -38,7 +49,7 @@ impl PipeSecurityAttributes {
                 return Err(yntra_vault_core::VaultError::SyncError("Failed to query token user size".into()));
             }
 
-            let mut buffer = vec![0u8; return_length as usize];
+            let mut buffer = vec![0usize; (return_length as usize).div_ceil(std::mem::size_of::<usize>())];
             if let Err(e) = GetTokenInformation(token, TokenUser, Some(buffer.as_mut_ptr() as *mut _), return_length, &mut return_length) {
                 let _ = CloseHandle(token);
                 return Err(yntra_vault_core::VaultError::SyncError(format!("Failed to get token user: {}", e)));

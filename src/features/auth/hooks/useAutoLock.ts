@@ -23,10 +23,10 @@ export interface UseAutoLockOptions {
  *    the vault locks immediately upon resume/wake if the timeout was reached.
  */
 export function useAutoLock({ autoLockMinutes, isLocked = false, onLock }: UseAutoLockOptions) {
-  const lastActivityRef = useRef<number>(Date.now());
+  const lastActivityRef = useRef<number>(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onLockRef = useRef(onLock);
-  onLockRef.current = onLock;
+  useEffect(() => { onLockRef.current = onLock; }, [onLock]);
 
   const triggerLock = useCallback(() => {
     if (timerRef.current) {

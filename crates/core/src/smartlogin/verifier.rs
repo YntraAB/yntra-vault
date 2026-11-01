@@ -82,6 +82,38 @@ pub(crate) async fn existing_session(page: &Page, entry_url: &str, identifier: &
 }
 
 /// Observe until actual evidence settles, including delayed redirects after TOTP.
+pub(crate) async fn wait_for_password_step(
+    page: &Page, entry_url: &str, identifier: &str, cancel: &AtomicBool, logger: &SmartLoginLogger,
+) -> Result<(), LoginResult> {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(12);
+    let script = verification_script(identifier);
+    let mut stable = None;
+    loop {
+        if cancel.load(Ordering::Relaxed) { return Err(LoginResult::Cancelled); }
+        if let Some(state) = observe(page, &script).await {
+            if state.ready != "loading" && trusted_result(entry_url, &state.url) {
+                let outcome = state.outcome();
+                let key = (state.url.clone(), state.has_password_input, format!("{outcome:?}"));
+                if stable.as_ref() == Some(&key) {
+                    if outcome != Outcome::Unconfirmed {
+                        return Err(finish(state, logger).unwrap_or(LoginResult::RequiresManualAction));
+                    }
+                    if state.has_password_input { return Ok(()); }
+                }
+                stable = Some(key);
+            } else {
+                stable = None;
+                if state.ready != "loading" && state.url.starts_with("https://") {
+                    return Err(LoginResult::DomainMismatch { expected: "Saved website".into(), actual: "Unexpected website".into() });
+                }
+            }
+        } else { stable = None; }
+        if tokio::time::Instant::now() >= deadline { return Err(LoginResult::RequiresManualAction); }
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    }
+}
+
+/// Observe until actual evidence settles, including delayed redirects after TOTP.
 /// A transient JS execution-context error or a first Unconfirmed frame is not final.
 pub async fn verify_login_result(
     page: &Page,

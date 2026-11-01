@@ -56,7 +56,10 @@ function getFileCategory(mimeType: string = '', fileName: string = ''): 'image' 
   return 'other';
 }
 
-export function AttachmentPreviewModal({
+export function AttachmentPreviewModal(props: AttachmentPreviewModalProps) {
+  return <AttachmentPreviewContent key={String(props.open) + ':' + (props.attachment?.id ?? '')} {...props} />;
+}
+function AttachmentPreviewContent({
   open,
   onClose,
   attachment,
@@ -70,14 +73,6 @@ export function AttachmentPreviewModal({
   const [zipSearch, setZipSearch] = useState('');
   const [contrastBg, setContrastBg] = useState(false);
   const [closedLocally, setClosedLocally] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setClosedLocally(false);
-      setContrastBg(false);
-      setZoom(1);
-    }
-  }, [open, attachment]);
 
   const handleClose = useCallback(() => {
     setClosedLocally(true);

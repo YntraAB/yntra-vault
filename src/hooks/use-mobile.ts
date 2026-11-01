@@ -1,52 +1,25 @@
-import * as React from "react";
+import { useSyncExternalStore } from 'react';
 import { useSettings } from '@/features/settings';
 
-const MOBILE_BREAKPOINT = 768
-const TABLET_BREAKPOINT = 1024
+const MOBILE_QUERY = '(max-width: 767px)';
+const TABLET_QUERY = '(min-width: 768px) and (max-width: 1023px)';
+function subscribe(query: string, notify: () => void) {
+  const media = window.matchMedia(query);
+  media.addEventListener('change', notify);
+  return () => media.removeEventListener('change', notify);
+}
+const subscribeMobile = (notify: () => void) => subscribe(MOBILE_QUERY, notify);
+const subscribeTablet = (notify: () => void) => subscribe(TABLET_QUERY, notify);
+const subscribeTouch = (notify: () => void) => subscribe('(any-pointer: coarse)', notify);
+const noMatch = () => false;
 
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.innerWidth < MOBILE_BREAKPOINT;
-  });
-
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-    mql.addEventListener("change", onChange);
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    return () => mql.removeEventListener("change", onChange);
-  }, []);
-
-  return isMobile;
+  return useSyncExternalStore(subscribeMobile, () => window.matchMedia(MOBILE_QUERY).matches, noMatch);
 }
-
 export function useMobile() {
   const isMobileScreen = useIsMobile();
   const { settings } = useSettings();
-  const [isTouch, setIsTouch] = React.useState<boolean>(false);
-  const [isTablet, setIsTablet] = React.useState<boolean>(false);
-
-  React.useEffect(() => {
-    setIsTouch('ontouchstart' in window || navigator.maxTouchPoints > 0);
-    const updateTablet = () => {
-      const w = window.innerWidth;
-      setIsTablet(w >= MOBILE_BREAKPOINT && w < TABLET_BREAKPOINT);
-    };
-    updateTablet();
-    window.addEventListener('resize', updateTablet);
-    return () => window.removeEventListener('resize', updateTablet);
-  }, []);
-
-  return {
-    isMobile: Boolean(settings?.forceMobileView || isMobileScreen),
-    isTablet,
-    isTouchDevice: isTouch,
-  };
+  const isTablet = useSyncExternalStore(subscribeTablet, () => window.matchMedia(TABLET_QUERY).matches, noMatch);
+  const isTouchDevice = useSyncExternalStore(subscribeTouch, () => 'ontouchstart' in window || navigator.maxTouchPoints > 0, noMatch);
+  return { isMobile: Boolean(settings?.forceMobileView || isMobileScreen), isTablet, isTouchDevice };
 }
-
-
-
-

@@ -115,9 +115,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   const qrQueue = useRef<Promise<void>>(Promise.resolve());
   const [qrRevision, setQrRevision] = useState(0);
   const listenerToggleRef = useRef(toggleP2pListener);
-  listenerToggleRef.current = toggleP2pListener;
+  useEffect(() => { listenerToggleRef.current = toggleP2pListener; }, [toggleP2pListener]);
   const qrView = useRef({ addToast, t });
-  qrView.current = { addToast, t };
+  useEffect(() => { qrView.current = { addToast, t }; }, [addToast, t]);
   const adoptedVaultPathRef = useRef<string | null>(null);
 
   const handleCopyIp = async (ipToCopy: string) => {
@@ -145,13 +145,10 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     }
   }, [backend, isOpen]);
 
-  // Reset state when opening & pause background listener to avoid port contention
-  useEffect(() => {
+  const [resetSource, setResetSource] = useState({ isOpen, defaultRole });
+  if (resetSource.isOpen !== isOpen || resetSource.defaultRole !== defaultRole) {
+    setResetSource({ isOpen, defaultRole });
     if (isOpen) {
-      listenerToggleRef.current(false);
-      attemptRef.current += 1;
-      isCancelledRef.current = false;
-      adoptedVaultPathRef.current = null;
       setErrorMsg(null);
       setPairingStats(null);
       setPassword('');
@@ -178,6 +175,17 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         setStep('role');
       }
     }
+  }
+
+  // Reset state when opening & pause background listener to avoid port contention
+  useEffect(() => {
+    if (isOpen) {
+      listenerToggleRef.current(false);
+      attemptRef.current += 1;
+      isCancelledRef.current = false;
+      adoptedVaultPathRef.current = null;
+
+    }
   }, [isOpen, defaultRole]);
 
   // Autofocus password input on step transition to password
@@ -198,6 +206,22 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     }
   }, [step, selectedRole, pairingMode, isOpen]);
 
+  const handleClose = useCallback(() => {
+    isCancelledRef.current = true;
+    attemptRef.current += 1;
+    qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelPairingHost()).catch(() => {});
+    qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
+    setPassword('');
+    setInputDigits(['', '', '', '', '', '']);
+    setCanEnrollBiometric(false);
+    setClientSas(null);
+    setIsManualPasswordAdoption(false);
+    if (settings.p2pAutoListen) {
+      toggleP2pListener(true);
+    }
+    onClose();
+  }, [backend, settings.p2pAutoListen, toggleP2pListener, onClose]);
+
   // Handle ESC to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -207,7 +231,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, handleClose]);
 
   // Fetch host local IPs
   useEffect(() => {
@@ -244,11 +268,10 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
   useEffect(() => {
     if (!backend || !isOpen || step !== 'code' || selectedRole !== 'host' || pairingMode !== 'qr') return;
     let disposed = false;
-    setQrSession(null);
-    setErrorMsg(null);
     qrQueue.current = qrQueue.current.catch(() => {}).then(async () => {
       await backend.cancelQrPairingHost();
       if (disposed) return;
+      setQrSession(null); setErrorMsg(null);
       const session = await backend.generateQrPairingSession();
       if (disposed) return;
       setQrSession(session);
@@ -260,10 +283,10 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         const { addToast, t } = qrView.current;
         addToast({ message: stats.peer_saved === false ? t('pairing.received_pending_password') : t('pairing.success_toast', { count: stats.total_entries }), type: 'success' });
       }).catch((error) => {
-        if (!disposed) setErrorMsg(String(error?.message || error));
+        if (!disposed) setErrorMsg(String((error instanceof Error ? error.message : String(error)) || error));
       });
     }).catch((error) => {
-      if (!disposed) setErrorMsg(String(error?.message || error));
+      if (!disposed) setErrorMsg(String((error instanceof Error ? error.message : String(error)) || error));
     });
     return () => {
       disposed = true;
@@ -310,9 +333,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
           type: 'success',
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       if (isCancelledRef.current || attempt !== attemptRef.current) return;
-      setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_connect_failed') || 'Kunde inte ansluta via QR-kod'));
+      setErrorMsg(typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || (t('pairing.err_connect_failed') || 'Kunde inte ansluta via QR-kod'));
       setStep('code');
     }
   }, [backend, addToast, t]);
@@ -341,9 +364,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         message: t('pairing.success_toast', { count: stats.total_entries }),
         type: 'success',
       });
-    } catch (err: any) {
+    } catch (err) {
       if (isCancelledRef.current || attempt !== attemptRef.current) return;
-      setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_failed') || 'Kunde inte spara valvet'));
+      setErrorMsg(typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || (t('pairing.err_failed') || 'Kunde inte spara valvet'));
       setStep('password');
     }
   }, [backend, password, addToast, t]);
@@ -399,9 +422,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         message: t('pairing.success_toast', { count: stats.total_entries }),
         type: 'success',
       });
-    } catch (err: any) {
+    } catch (err) {
       if (isCancelledRef.current || attempt !== attemptRef.current) return;
-      setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_failed') || 'Pairing failed'));
+      setErrorMsg(typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || (t('pairing.err_failed') || 'Pairing failed'));
       setStep('code');
     }
   }, [backend, pairingCode, password, addToast, t]);
@@ -473,9 +496,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         message: t('pairing.success_toast', { count: stats.total_entries }),
         type: 'success',
       });
-    } catch (err: any) {
+    } catch (err) {
       if (isCancelledRef.current || attempt !== attemptRef.current) return;
-      setErrorMsg(typeof err === 'string' ? err : err.message || (t('pairing.err_connect_failed') || 'Could not connect to device'));
+      setErrorMsg(typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || (t('pairing.err_connect_failed') || 'Could not connect to device'));
       setStep('code');
     }
   }, [backend, password, inputDigits, manualIp, currentVault, isAdoptMode, isLocked, addToast, t]);
@@ -532,9 +555,9 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
         message: t('pairing.biometric_enrolled_success') || 'Biometrisk inloggning aktiverad!',
         type: 'success',
       });
-    } catch (err: any) {
+    } catch (err) {
       addToast({
-        message: typeof err === 'string' ? err : err.message || 'Kunde inte aktivera biometri',
+        message: typeof err === 'string' ? err : (err instanceof Error ? err.message : String(err)) || 'Kunde inte aktivera biometri',
         type: 'error',
       });
     } finally {
@@ -557,21 +580,6 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
     };
   }, [backend]);
 
-  const handleClose = () => {
-    isCancelledRef.current = true;
-    attemptRef.current += 1;
-    qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelPairingHost()).catch(() => {});
-    qrQueue.current = qrQueue.current.catch(() => {}).then(() => backend?.cancelQrPairingHost()).catch(() => {});
-    setPassword('');
-    setInputDigits(['', '', '', '', '', '']);
-    setCanEnrollBiometric(false);
-    setClientSas(null);
-    setIsManualPasswordAdoption(false);
-    if (settings.p2pAutoListen) {
-      toggleP2pListener(true);
-    }
-    onClose();
-  };
 
   const handleFinishSuccess = () => {
     const listenAfterPairing = autoListenChecked || (selectedRole === 'client' && autoSyncChecked);
@@ -962,6 +970,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                                 </span>
                               </div>
                               <Toggle
+                                label={t('pairing.include_password_label')}
                                 checked={includePasswordChecked}
                                 onChange={(val) => {
                                   setIncludePasswordChecked(val);
@@ -1360,6 +1369,7 @@ export const DevicePairingWizard: React.FC<DevicePairingWizardProps> = ({
                         </span>
                       </div>
                       <Toggle
+                        label={t(selectedRole === 'host' ? 'pairing.auto_listen_label' : 'pairing.auto_sync_label')}
                         checked={selectedRole === 'host' ? autoListenChecked : autoSyncChecked}
                         onChange={(v) => {
                           if (selectedRole === 'host') setAutoListenChecked(v);

@@ -8,6 +8,21 @@ use crate::error::VaultError;
 use crate::vault::manager::VaultManager;
 use crate::vault::types::Tag;
 
+fn normalize_tag_url(value: &str) -> crate::Result<String> {
+    let value = value.trim();
+    if value.is_empty() { return Ok(String::new()); }
+    if value.len() > 2048 || value.chars().any(|c| c.is_control()) || value.contains('\\') {
+        return Err(VaultError::InvalidState("Invalid default URL".into()));
+    }
+    let candidate = if value.contains("://") { value.to_string() } else { format!("https://{value}") };
+    let url = url::Url::parse(&candidate).map_err(|_| VaultError::InvalidState("Invalid default URL".into()))?;
+    if !matches!(url.scheme(), "https" | "http") || url.host_str().is_none()
+        || !url.username().is_empty() || url.password().is_some() {
+        return Err(VaultError::InvalidState("Use an HTTP or HTTPS URL without embedded credentials".into()));
+    }
+    Ok(url.to_string())
+}
+
 impl VaultManager {
     /// Return slice of all tags registered in the vault.
     pub fn tags(&self) -> &[Tag] {
@@ -16,9 +31,21 @@ impl VaultManager {
 
     /// Add a new tag to the vault.
     pub fn add_tag(&mut self, name: &str, color: &str, icon: &str) -> crate::Result<Uuid> {
+        self.add_tag_with_url(name, color, icon, "")
+    }
+
+    pub fn add_tag_with_url(&mut self, name: &str, color: &str, icon: &str, default_url: &str) -> crate::Result<Uuid> {
+        let url = normalize_tag_url(default_url)?;
+        self.transactional_data_change(|manager| manager.add_tag_inner(name, color, icon, &url))
+    }
+
+    fn add_tag_inner(&mut self, name: &str, color: &str, icon: &str, default_url: &str) -> crate::Result<Uuid> {
         crate::vault::validation::validate_display_name(name)?;
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
+        }
+        if self.data.tags.iter().any(|tag| tag.name == name) {
+            return Err(VaultError::InvalidState("A tag with this name already exists".into()));
         }
         let id = Uuid::new_v4();
         self.data.tags.push(Tag {
@@ -26,6 +53,7 @@ impl VaultManager {
             name: name.to_string(),
             color: color.to_string(),
             icon: icon.to_string(),
+            default_url: default_url.to_string(),
         });
         self.save()?;
         Ok(id)
@@ -33,6 +61,10 @@ impl VaultManager {
 
     /// Delete a tag and remove it from all entries referencing it.
     pub fn delete_tag(&mut self, id: Uuid) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.delete_tag_inner(id))
+    }
+
+    fn delete_tag_inner(&mut self, id: Uuid) -> crate::Result<()> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -47,7 +79,7 @@ impl VaultManager {
             Some(name) => {
                 self.data.tags.retain(|t| t.id != id);
                 let mut entries_changed = false;
-                for entry in &mut self.data.entries {
+                for entry in self.data.entries.iter_mut().chain(self.data.trash.iter_mut().map(|t| &mut t.entry)) {
                     let initial_len = entry.tags.len();
                     entry.tags.retain(|t| t != &name);
                     if entry.tags.len() != initial_len {
@@ -66,8 +98,20 @@ impl VaultManager {
 
     /// Update tag name, color, or icon, and update all entries referencing the old name.
     pub fn update_tag(&mut self, id: Uuid, name: &str, color: &str, icon: &str) -> crate::Result<()> {
+        self.update_tag_with_url(id, name, color, icon, None)
+    }
+
+    pub fn update_tag_with_url(&mut self, id: Uuid, name: &str, color: &str, icon: &str, default_url: Option<&str>) -> crate::Result<()> {
+        let url = default_url.map(normalize_tag_url).transpose()?;
+        self.transactional_data_change(|manager| manager.update_tag_inner(id, name, color, icon, url.as_deref()))
+    }
+
+    fn update_tag_inner(&mut self, id: Uuid, name: &str, color: &str, icon: &str, default_url: Option<&str>) -> crate::Result<()> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
+        }
+        if self.data.tags.iter().any(|tag| tag.id != id && tag.name == name) {
+            return Err(VaultError::InvalidState("A tag with this name already exists".into()));
         }
         if let Some(tag) = self.data.tags.iter_mut().find(|t| t.id == id) {
             if tag.name != name {
@@ -77,11 +121,12 @@ impl VaultManager {
             tag.name = name.to_string();
             tag.color = color.to_string();
             tag.icon = icon.to_string();
+            if let Some(url) = default_url { tag.default_url = url.to_string(); }
 
             // Update all entries referencing this tag if the name changed
             if old_name != tag.name {
                 let mut entries_changed = false;
-                for entry in &mut self.data.entries {
+                for entry in self.data.entries.iter_mut().chain(self.data.trash.iter_mut().map(|t| &mut t.entry)) {
                     for t in &mut entry.tags {
                         if *t == old_name {
                             *t = tag.name.clone();
@@ -94,12 +139,18 @@ impl VaultManager {
                 }
             }
             self.save()?;
+        } else {
+            return Err(VaultError::EntryNotFound(format!("Tag {} not found", id)));
         }
         Ok(())
     }
 
     /// Reorder tags according to the provided list of IDs.
     pub fn reorder_tags(&mut self, tag_ids: &[Uuid]) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.reorder_tags_inner(tag_ids))
+    }
+
+    fn reorder_tags_inner(&mut self, tag_ids: &[Uuid]) -> crate::Result<()> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -124,31 +175,31 @@ impl VaultManager {
                 id: Uuid::new_v4(),
                 name: "Work".into(),
                 color: "#5b8def".into(),
-                icon: "briefcase".into(),
+                icon: "briefcase".into(), default_url: String::new(),
             },
             Tag {
                 id: Uuid::new_v4(),
                 name: "Personal".into(),
                 color: "#5acf7e".into(),
-                icon: "user".into(),
+                icon: "user".into(), default_url: String::new(),
             },
             Tag {
                 id: Uuid::new_v4(),
                 name: "Finance".into(),
                 color: "#f5a623".into(),
-                icon: "credit-card".into(),
+                icon: "credit-card".into(), default_url: String::new(),
             },
             Tag {
                 id: Uuid::new_v4(),
                 name: "Social".into(),
                 color: "#bd7ee8".into(),
-                icon: "users".into(),
+                icon: "users".into(), default_url: String::new(),
             },
             Tag {
                 id: Uuid::new_v4(),
                 name: "Development".into(),
                 color: "#ef6b6b".into(),
-                icon: "code".into(),
+                icon: "code".into(), default_url: String::new(),
             },
         ]
     }
@@ -177,6 +228,21 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
         }
+    }
+
+    #[test]
+    fn duplicate_tag_names_and_missing_updates_leave_disk_unchanged() {
+        let fixture = TestVault::new();
+        let mut manager = VaultManager::create("Tags", "Synthetic-Tags-2026!", &fixture.path).unwrap();
+        let first = manager.add_tag("One", "red", "tag").unwrap();
+        let second = manager.add_tag("Two", "blue", "tag").unwrap();
+        let before = fs::read(&fixture.path).unwrap();
+        assert!(manager.add_tag("One", "green", "tag").is_err());
+        assert!(manager.update_tag(second, "One", "green", "tag").is_err());
+        assert!(manager.update_tag(Uuid::new_v4(), "Missing", "green", "tag").is_err());
+        assert_eq!(fs::read(&fixture.path).unwrap(), before);
+        assert_eq!(manager.tags().iter().find(|tag| tag.id == first).unwrap().name, "One");
+        assert_eq!(manager.tags().iter().find(|tag| tag.id == second).unwrap().name, "Two");
     }
 
     #[test]

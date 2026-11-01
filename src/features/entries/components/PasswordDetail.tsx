@@ -1,3 +1,6 @@
+import { loginFields } from '../loginFields';
+import { useMutationGate } from '@/hooks/useMutationGate';
+import { ConflictHistoryButton } from './ConflictHistory';
 import { useCapabilities } from '@/lib/platform';
 import { saveFileDialog } from '@/lib/backend';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
@@ -48,6 +51,7 @@ import { useBackend } from '@/lib/useBackend';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 import { Favicon } from './Favicon';
 import { formatDate, getFieldLayout, openExternalUrl, isAppPath } from '@/lib/utils';
+import { entryStandardFields } from '../entryFields';
 import { formatBytes, getAttachmentIcon } from '@/lib/formatters';
 import type { Tag, AttachmentInfo } from '@/types';
 import { ActionTooltip } from '@/components/ui/tooltip';
@@ -93,11 +97,12 @@ export function PasswordDetail() {
 
   // Wipe and clear preview cache on entry change or unmount
   useEffect(() => {
+    const cache = previewCacheRef.current;
     return () => {
-      for (const buf of previewCacheRef.current.values()) {
+      for (const buf of cache.values()) {
         buf.fill(0);
       }
-      previewCacheRef.current.clear();
+      cache.clear();
     };
   }, [selectedEntry?.id]);
 
@@ -352,6 +357,8 @@ export function PasswordDetail() {
     selectedEntry,
     isEditing,
     settings.keybinds,
+    settings.clipboardClearSeconds,
+    t,
     settingsOpen,
     isEntryModalOpen,
     showDelConfirm,
@@ -361,77 +368,34 @@ export function PasswordDetail() {
     backend,
   ]);
 
+  const [editSource, setEditSource] = useState({ selectedEntry, isEditing });
+  if (editSource.selectedEntry !== selectedEntry || editSource.isEditing !== isEditing) {
+    setEditSource({ selectedEntry, isEditing }); setEditData(selectedEntry);
+    setShowRecovery(false); setShowPassword(false); setShowCustomPasswords({});
+    setShowTemporaryStats(Boolean(selectedEntry));
+  }
   useEffect(() => {
-    if (!showDelConfirm) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowDelConfirm(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showDelConfirm]);
-
-  useEffect(() => {
-    if (selectedEntry) {
-      setEditData({ ...selectedEntry });
-      setShowRecovery(false);
-      setShowPassword(false);
-
-      // Check if entry was newly created/updated (within 5 seconds)
-      const ageMs = Date.now() - new Date(selectedEntry.updatedAt).getTime();
-      if (ageMs < 5000) {
-        setShowTemporaryStats(true);
-        const timer = setTimeout(() => {
-          setShowTemporaryStats(false);
-        }, 3000);
-        return () => clearTimeout(timer);
-      } else {
-        setShowTemporaryStats(false);
-      }
-    }
+    const timer = setTimeout(() => setShowTemporaryStats(false), 3000);
+    return () => clearTimeout(timer);
   }, [selectedEntry, isEditing]);
 
-  const handleSave = useCallback(() => {
-    if (editData) {
-      updateEntry(editData);
+  const { busy: saving, run: save } = useMutationGate();
+  const handleSave = useCallback(async () => {
+    if (editData && await save(() => updateEntry(editData))) {
       setIsEditing(false);
     }
-  }, [editData, setIsEditing, updateEntry]);
+  }, [editData, setIsEditing, updateEntry, save]);
 
   const data = isEditing && editData && editData.id === selectedEntry?.id ? editData : selectedEntry;
   const entryTags = data
     ? (data.tags.map((t) => tags.find((tag) => tag.name === t)).filter(Boolean) as Tag[])
     : [];
 
-  const activeStandard: string[] = [];
-  if (data) {
-    const layoutCf = data.customFields.find(cf => cf.name === '_field_order');
-    if (layoutCf && layoutCf.value) {
-      const savedOrder = layoutCf.value.split(',').map(s => s.trim()).filter(Boolean);
-      savedOrder.forEach(f => {
-        if (['username', 'password', 'url', 'email', 'notes', 'totpSecret'].includes(f)) {
-          if (isEditing) {
-            activeStandard.push(f);
-          } else {
-            if (f === 'username' && data.username?.trim()) activeStandard.push(f);
-            else if (f === 'password' && data.password && data.password !== '••••••••') activeStandard.push(f);
-            else if (f === 'url' && data.url?.trim()) activeStandard.push(f);
-            else if (f === 'email' && data.email?.trim()) activeStandard.push(f);
-            else if (f === 'notes' && data.notes?.trim()) activeStandard.push(f);
-            else if (f === 'totpSecret' && data.totpSecret && data.totpSecret !== 'has-totp') activeStandard.push(f);
-          }
-        }
-      });
-    } else {
-      if (data.username?.trim()) activeStandard.push('username');
-      if (data.password && data.password !== '••••••••') activeStandard.push('password');
-      if (data.url?.trim()) activeStandard.push('url');
-      if (data.email?.trim()) activeStandard.push('email');
-      if (data.notes?.trim()) activeStandard.push('notes');
-      if (data.totpSecret && data.totpSecret !== 'has-totp') activeStandard.push('totpSecret');
-    }
-  }
+  const activeStandard = data ? entryStandardFields(data, '').filter(field => {
+    if (field === 'passkey' || field === 'attachments') return false;
+    const value = data[field];
+    return isEditing || Boolean(value?.trim() && value !== '••••••••' && value !== 'has-totp');
+  }) : [];
 
   const effectiveRecoveryCodes = useMemo(() => {
     if (!data) return undefined;
@@ -453,7 +417,7 @@ export function PasswordDetail() {
           (isEditing || (cf.value && cf.value.trim() !== ''))
       )
     : [];
-  const layoutOrder = data ? getFieldLayout(displayCustomFields, activeStandard) : [];
+  const layoutOrder = data ? getFieldLayout([...displayCustomFields, ...data.customFields.filter(field => field.name === '_field_order')], activeStandard) : [];
 
   const handleCopyTitle = useCallback(async () => {
     if (!data?.title) return;
@@ -468,7 +432,7 @@ export function PasswordDetail() {
     } catch {
       addToast({ message: t('toast.copied_title_failed'), type: 'error' });
     }
-  }, [data?.title, addToast, t]);
+  }, [data, addToast, t]);
 
   let fieldsContainerClass = 'flex flex-col gap-[2px] p-4';
   let fieldItemPaddingClass = 'px-3 py-2.5';
@@ -623,7 +587,8 @@ export function PasswordDetail() {
                 {isEditing ? (
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     <button
-                      onClick={handleSave}
+                      disabled={saving}
+                      onClick={() => void handleSave()}
                       className="flex-1 sm:flex-initial h-8.5 rounded-[3px] bg-[var(--text-primary)] px-4 text-[13px] font-medium text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-hover)] cursor-pointer"
                     >
                       {t('common.save')}
@@ -668,10 +633,11 @@ export function PasswordDetail() {
                       <SmartLoginButton
                         entryId={data.id}
                         entryTitle={data.title}
-                        hasUrl={Boolean(data.url && !isAppPath(data.url))}
+                        hasUrl={Boolean(loginFields(data).url?.value && !isAppPath(loginFields(data).url!.value))}
                       />
                     )}
 
+                    {backend && <ConflictHistoryButton key={data.id} entryId={data.id} backend={backend} />}
                     <ActionTooltip content={t('common.edit')}>
                       <button
                         onClick={() => selectedEntry && openEditModal(selectedEntry)}
@@ -961,6 +927,7 @@ export function PasswordDetail() {
                   }
 
                   const isPassword = cf.type === 'password';
+                  const isSensitive = isPassword || cf.sensitive === true;
                   const isUrl = cf.type === 'url';
                   const isEmail = cf.type === 'email';
                   const isUsername = cf.type === 'username';
@@ -990,7 +957,7 @@ export function PasswordDetail() {
                         </div>
                         {isEditing && editData ? (
                           <input
-                            type={isPassword && !showCustomPasswords[cf.id] ? 'password' : 'text'}
+                            type={isSensitive && !showCustomPasswords[cf.id] ? 'password' : 'text'}
                             value={cf.value}
                             onChange={(e) => {
                               const updatedCustom = editData.customFields.map(f => f.id === cf.id ? { ...f, value: e.target.value } : f);
@@ -999,14 +966,14 @@ export function PasswordDetail() {
                             className="w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-0.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono"
                           />
                         ) : (
-                          <div className={`truncate text-[13px] text-[var(--text-primary)] ${isPassword ? 'font-mono' : ''} ${isPassword && !showCustomPasswords[cf.id] ? 'select-none' : 'select-text'}`}>
-                            {isPassword ? (showCustomPasswords[cf.id] ? cf.value : '••••••••') : cf.value}
+                          <div className={`truncate text-[13px] text-[var(--text-primary)] ${isPassword ? 'font-mono' : ''} ${isSensitive && !showCustomPasswords[cf.id] ? 'select-none' : 'select-text'}`}>
+                            {isSensitive ? (showCustomPasswords[cf.id] ? cf.value : '••••••••') : cf.value}
                           </div>
                         )}
                       </div>
                       {!isEditing && (
                         <div className="flex items-center gap-1">
-                          {isPassword && (
+                          {isSensitive && (
                             <ActionTooltip content={showCustomPasswords[cf.id] ? t('login.hide_password') : t('login.show_password')}>
                               <button
                                 type="button"
@@ -1073,7 +1040,7 @@ export function PasswordDetail() {
                         if (!selectedEntry) return;
                         if (!window.confirm('Remove the passkey from this entry?')) return;
                         try {
-                          await updateEntry({ ...selectedEntry, passkeyAction: 'remove' });
+                          if (!await updateEntry({ ...selectedEntry, passkeyAction: 'remove' })) return;
                           addToast({ message: t('toast.passkey_removed'), type: 'success' });
                         } catch (err) {
                           addToast({ message: t('toast.remove_passkey_failed', { err: String(err) }), type: 'error' });
@@ -1198,11 +1165,7 @@ export function PasswordDetail() {
       <DeleteEntryModal
         entry={showDelConfirm ? selectedEntry : null}
         onClose={() => setShowDelConfirm(false)}
-        onConfirm={() => {
-          if (selectedEntry) {
-            deleteEntry(selectedEntry.id);
-          }
-        }}
+        onConfirm={async () => selectedEntry ? deleteEntry(selectedEntry.id) : false}
       />
 
 
@@ -1460,15 +1423,14 @@ const PasswordSafetySection: React.FC<{
   showTemporaryStats: boolean;
   entryId?: string;
 }> = ({ password, status, showTemporaryStats, entryId }) => {
-  const [breachStatus, setBreachStatus] = useState<BreachStatus | null>(status || null);
+  const [localStatus, setBreachStatus] = useState<BreachStatus | null>(null);
+  const [statusSource, setStatusSource] = useState(status);
+  if (statusSource !== status) { setStatusSource(status); setBreachStatus(null); }
+  const breachStatus = localStatus ?? status;
   const { selectedEntry, updateBreachStatus, saveVault } = useEntries();
   const { audit } = useSecurityAudit();
 
-  useEffect(() => {
-    if (status) {
-      setBreachStatus(status);
-    }
-  }, [status]);
+
 
   if (!password) return null;
 

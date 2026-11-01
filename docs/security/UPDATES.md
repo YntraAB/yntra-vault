@@ -6,6 +6,8 @@ Updated for 0.2.5 (in preparation). The application identity and permanent Andro
 
 Automatic checking is opt-in. When enabled, one check runs after app startup, including on the vault-selection/login screen. It no longer depends on opening Settings. Closed System mode blocks manual and automatic network checks in the native engine. Automatic checks wait for settings to be applied. No platform installs an update without the user's action.
 
+In the unreleased CLI source, ordinary vault commands do not check for updates by default. Use `--check-updates` for a particular command, set `YNTRA_CHECK_UPDATES=true` to opt in, or run `yntra update --check` explicitly. This setting does not enable unattended installation.
+
 The official channel fetches `latest.json` and `latest.json.sig` from the YntraAB/yntra-vault GitHub release. Exact manifest bytes and validity timestamps are authenticated with Ed25519 using the public key embedded in the application. Missing, invalid or expired signatures are rejected; there is no unsigned GitHub API fallback. Custom endpoints require the same pinned identity. Checks use HTTPS, a timeout and a bounded response. Package downloads are also time/size bounded. Stable installations are not offered prereleases. Invalid versions, mixed release/package versions, malformed checksums and asset URLs outside the versioned official release repository are rejected. A missing compatible asset is displayed as unavailable, not installed successfully.
 
 | Platform | Update behavior and verification |

@@ -20,11 +20,36 @@
         ready: document.readyState,
     };
 
-    const visible = el => el.getClientRects().length > 0 && !el.hidden &&
-        (!el.checkVisibility || el.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}));
-    result.has_password_input = Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
-    result.has_identifier_input = Array.from(document.querySelectorAll('input[autocomplete~="username"], input[type="email"]')).some(visible);
-    result.has_error_message = Array.from(document.querySelectorAll('input[aria-invalid="true"]')).some(visible);
+    function walk(root, seen = new Set()) {
+        if (!root || seen.has(root)) return [];
+        seen.add(root);
+        const nodes = [];
+        for (const el of root.querySelectorAll('*')) {
+            nodes.push(el);
+            if (el.shadowRoot) nodes.push(...walk(el.shadowRoot, seen));
+            if (el.tagName === 'IFRAME') {
+                try { if (el.contentDocument) nodes.push(...walk(el.contentDocument, seen)); } catch (_) {}
+            }
+        }
+        return nodes;
+    }
+    const nodes = walk(document);
+    const all = selector => nodes.filter(el => el.matches(selector));
+
+    const visible = el => {
+        if (!el || !el.getClientRects().length || el.hidden ||
+            (el.checkVisibility && !el.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))) return false;
+        const host = el.getRootNode()?.host;
+        if (host && !visible(host)) return false;
+        try {
+            const frame = el.ownerDocument.defaultView?.frameElement;
+            if (frame && !visible(frame)) return false;
+        } catch { return false; }
+        return true;
+    };
+    result.has_password_input = Array.from(all('input[type="password"]')).some(visible);
+    result.has_identifier_input = Array.from(all('input[autocomplete~="username"], input[type="email"], input[type="tel"]')).some(visible);
+    result.has_error_message = Array.from(all('input[aria-invalid="true"]')).some(visible);
     // Absence of a password field is not success: loading/error/identifier pages also lack one.
     const logoutAction = el => {
         const label = (el.getAttribute('aria-label') || el.textContent || '').trim().toLowerCase();
@@ -38,12 +63,12 @@
         return /(^|\/)(logout|signout|sign-out|log-out)(\/|$)/i.test(action)
             || ['sign out','log out','logout','logga ut','abmelden','se déconnecter','cerrar sesión'].includes(label);
     };
-    result.authenticated_control = [...document.querySelectorAll('a[href], button, [role="button"], form[action]')].some(el => visible(el) && logoutAction(el));
+    result.authenticated_control = [...all('a[href], button, [role="button"], form[action]')].some(el => visible(el) && logoutAction(el));
     // Closed account menus still describe a signed-in UI when a visible trigger
     // explicitly owns the menu containing a same-origin logout action.
-    const triggers = [...document.querySelectorAll('button[aria-controls], [aria-haspopup][aria-controls], [aria-owns], details > summary')].filter(visible);
+    const triggers = [...all('button[aria-controls], [aria-haspopup][aria-controls], [aria-owns], details > summary')].filter(visible);
     result.authenticated_control ||= triggers.some(trigger => {
-        const targets = (trigger.getAttribute('aria-controls') || trigger.getAttribute('aria-owns') || '').split(/\s+/).filter(Boolean).map(id => document.getElementById(id)).filter(Boolean);
+        const targets = (trigger.getAttribute('aria-controls') || trigger.getAttribute('aria-owns') || '').split(/\s+/).filter(Boolean).map(id => trigger.getRootNode().getElementById?.(id)).filter(Boolean);
         if (trigger.tagName === 'SUMMARY') targets.push(trigger.parentElement);
         return targets.some(target => [...target.querySelectorAll('a[href], button, form[action]')].some(logoutAction));
     });
@@ -62,7 +87,7 @@
     }
     if (expected.includes('@')) {
         const identities = new Set();
-        for (const el of document.querySelectorAll('header button, header a, [role="banner"] button, [role="navigation"] button, [aria-haspopup="menu"], [role="menuitem"]')) {
+        for (const el of all('header button, header a, [role="banner"] button, [role="navigation"] button, [aria-haspopup="menu"], [role="menuitem"]')) {
             if (!visible(el)) continue;
             const label = (el.getAttribute('aria-label') || el.getAttribute('title') || '').toLowerCase();
             const emails = label.split(/[^\p{L}\p{N}@._+\-]+/u).filter(part => part.includes('@'));
@@ -85,7 +110,7 @@
         '.flash-error', '.error-message', '.login-error',
     ];
     for (const selector of errorSelectors) {
-        const els = document.querySelectorAll(selector);
+        const els = all(selector);
         for (const el of els) {
             if (!visible(el)) continue;
             const text = (el.textContent || '').trim().toLowerCase();
@@ -109,9 +134,9 @@
         '.g-recaptcha', '.h-captcha', '[data-sitekey]',
         '#captcha', '.captcha',
     ];
-    const captchaCompleted = Array.from(document.querySelectorAll('[name="g-recaptcha-response"], [name="h-captcha-response"], [name="cf-turnstile-response"]')).some(el => !!el.value);
+    const captchaCompleted = Array.from(all('[name="g-recaptcha-response"], [name="h-captcha-response"], [name="cf-turnstile-response"]')).some(el => !!el.value);
     for (const sel of captchaSelectors) {
-        if (!captchaCompleted && Array.from(document.querySelectorAll(sel)).some(visible)) {
+        if (!captchaCompleted && Array.from(all(sel)).some(visible)) {
             result.has_captcha = true;
             if (sel.includes('recaptcha')) result.captcha_type = 'reCAPTCHA';
             else if (sel.includes('hcaptcha')) result.captcha_type = 'hCaptcha';
@@ -122,7 +147,7 @@
     }
 
     // MFA — detect OTP input fields or 2FA page markers
-    const otpInputs = document.querySelectorAll(
+    const otpInputs = all(
         'input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="totp" i], input[name*="mfa" i], input[name*="2fa" i], input[name*="code" i], input[name*="pin" i], input[name*="otc" i], input[name*="two_factor" i], input[name*="app_totp" i], input[name*="token" i], input[id*="otp" i], input[id*="totp" i], input[id*="mfa" i], input[id*="2fa" i], input[id*="code" i], input[id*="pin" i], input[id*="otc" i], input[id*="app_totp" i], input[inputmode="numeric"]'
     );
     if (Array.from(otpInputs).some(visible)) {

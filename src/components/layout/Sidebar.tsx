@@ -158,22 +158,24 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
     setUnusedTagsToDelete(unused);
   }, [tags]);
 
-  const confirmDeleteUnused = useCallback(() => {
-    if (unusedTagsToDelete.length === 0) return;
-    const deletedCount = unusedTagsToDelete.length;
-    unusedTagsToDelete.forEach((t) => {
-      if (filterCategory === t.name) {
+  const confirmDeleteUnused = useCallback(async () => {
+    const deletedIds = new Set<string>();
+    for (const tag of unusedTagsToDelete) {
+      if (!await removeTag(tag.id)) break;
+      deletedIds.add(tag.id);
+      if (filterCategory === tag.name) {
         setFilterCategory('all');
       }
-      removeTag(t.id);
-    });
-    addToast({
+    }
+    const deletedCount = deletedIds.size;
+    if (deletedCount > 0) addToast({
       message: deletedCount === 1
         ? (t('toast.unused_tag_deleted') || 'Deleted 1 unused tag')
         : (t('toast.unused_tags_deleted', { count: deletedCount }) || `Deleted ${deletedCount} unused tags`),
       type: 'info',
     });
-    setUnusedTagsToDelete([]);
+    setUnusedTagsToDelete(current => current.filter(tag => !deletedIds.has(tag.id)));
+    return deletedCount === unusedTagsToDelete.length;
   }, [unusedTagsToDelete, filterCategory, setFilterCategory, removeTag, addToast, t]);
 
   const handleTagContextMenu = useCallback((e: React.MouseEvent, tag: Tag) => {
@@ -202,15 +204,16 @@ export function Sidebar({ onResizeStart }: SidebarProps) {
     }
   }, [contextMenu.tag]);
 
-  const confirmDelete = useCallback(() => {
-    if (deleteConfirmTag) {
+  const confirmDelete = useCallback(async () => {
+    if (deleteConfirmTag && await removeTag(deleteConfirmTag.id)) {
       if (filterCategory === deleteConfirmTag.name) {
         setFilterCategory('all');
       }
-      removeTag(deleteConfirmTag.id);
       addToast({ message: t('toast.tag_deleted', { name: deleteConfirmTag.name }), type: 'info' });
       setDeleteConfirmTag(null);
+      return true;
     }
+    return false;
   }, [deleteConfirmTag, removeTag, addToast, filterCategory, setFilterCategory, t]);
 
   return (

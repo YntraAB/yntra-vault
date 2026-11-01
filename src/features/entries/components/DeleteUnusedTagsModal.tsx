@@ -1,3 +1,4 @@
+import { useMutationGate } from '@/hooks/useMutationGate';
 /**
  * DeleteUnusedTagsModal — Unified confirmation modal for deleting unused tags.
  *
@@ -6,7 +7,7 @@
  * typography, and neutral button palette.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Tag as TagIcon } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -17,16 +18,24 @@ export interface DeleteUnusedTagsModalProps {
   tags: Tag[];
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<boolean>;
 }
 
 export const DeleteUnusedTagsModal: React.FC<DeleteUnusedTagsModalProps> = ({
   tags,
   isOpen,
-  onClose,
+  onClose: requestClose,
   onConfirm,
 }) => {
   const { t } = useTranslation();
+  const { busy, run, close } = useMutationGate();
+  const [error, setError] = useState('');
+  const onClose = useCallback(() => close(requestClose), [close, requestClose]);
+  const confirm = async () => {
+    setError('');
+    try { if (await run(onConfirm)) requestClose(); }
+    catch (reason) { setError(String(reason)); }
+  };
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -68,6 +77,9 @@ export const DeleteUnusedTagsModal: React.FC<DeleteUnusedTagsModalProps> = ({
           onClick={onClose}
         >
           <motion.div
+            role="alertdialog"
+            aria-modal="true"
+            aria-label={t('menu.delete_tag')}
             initial={{ scale: 0.97, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.97, opacity: 0 }}
@@ -90,6 +102,7 @@ export const DeleteUnusedTagsModal: React.FC<DeleteUnusedTagsModalProps> = ({
               <ActionTooltip content={t('common.close')}>
                 <button
                   type="button"
+                  aria-label={t('common.close')} disabled={busy}
                   onClick={onClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                 >
@@ -149,9 +162,11 @@ export const DeleteUnusedTagsModal: React.FC<DeleteUnusedTagsModalProps> = ({
               )}
             </div>
 
+            {error && <p role="alert" className="px-4 py-2 text-[12px]">{error}</p>}
             {/* Footer */}
             <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
               <button
+                disabled={busy}
                 ref={cancelBtnRef}
                 type="button"
                 onClick={onClose}
@@ -162,10 +177,8 @@ export const DeleteUnusedTagsModal: React.FC<DeleteUnusedTagsModalProps> = ({
               <button
                 ref={deleteBtnRef}
                 type="button"
-                onClick={() => {
-                  onConfirm();
-                  onClose();
-                }}
+                disabled={busy}
+                onClick={() => void confirm()}
                 className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
               >
                 {t('common.delete')}

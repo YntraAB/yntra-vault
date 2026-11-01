@@ -1,3 +1,4 @@
+import { useMutationGate } from '@/hooks/useMutationGate';
 /**
  * DeleteEntryModal — Unified confirmation modal for deleting an entry
  *
@@ -5,7 +6,7 @@
  * Features red action button, highlighted entry name badge, and focus trapping.
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Trash2 } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -15,11 +16,15 @@ import { ActionTooltip } from '@/components/ui/tooltip';
 export interface DeleteEntryModalProps {
   entry: PasswordEntry | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<boolean>;
 }
 
-export function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEntryModalProps) {
+export function DeleteEntryModal({ entry, onClose: requestClose, onConfirm }: DeleteEntryModalProps) {
   const { t } = useTranslation();
+  const { busy, run, close } = useMutationGate();
+  const [error, setError] = useState('');
+  const onClose = useCallback(() => close(requestClose), [close, requestClose]);
+  const confirm = async () => { setError(''); try { if (await run(onConfirm)) requestClose(); } catch (reason) { setError(String(reason)); } };
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -77,7 +82,7 @@ export function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEntryModal
                 </h3>
               </div>
               <ActionTooltip content={t('common.close')}>
-                <button
+                <button disabled={busy}
                   type="button"
                   onClick={onClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
@@ -98,9 +103,10 @@ export function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEntryModal
               </p>
             </div>
 
+            {error && <p role="alert">{error}</p>}
             {/* Footer */}
             <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
-              <button
+              <button disabled={busy}
                 ref={cancelBtnRef}
                 type="button"
                 onClick={onClose}
@@ -108,13 +114,10 @@ export function DeleteEntryModal({ entry, onClose, onConfirm }: DeleteEntryModal
               >
                 {t('common.cancel')}
               </button>
-              <button
+              <button disabled={busy}
                 ref={deleteBtnRef}
                 type="button"
-                onClick={() => {
-                  onConfirm();
-                  onClose();
-                }}
+                onClick={() => void confirm()}
                 className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
               >
                 {t('common.delete')}

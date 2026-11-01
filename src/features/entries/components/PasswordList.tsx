@@ -80,8 +80,6 @@ export function PasswordList({ onResizeStart, mobile = false }: PasswordListProp
 
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<PasswordEntry | null>(null);
 
-  const deleteBtnRef = useRef<HTMLButtonElement>(null);
-  const cancelBtnRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Focus search input on configured keybind (default: Ctrl+K) unless in a dialog or settings
@@ -129,34 +127,6 @@ export function PasswordList({ onResizeStart, mobile = false }: PasswordListProp
     return () => window.removeEventListener('keydown', handleBulkEditShortcut);
   }, [selectedEntryIds]);
 
-  // Auto-focus and focus trap for delete confirmation dialog
-  useEffect(() => {
-    if (deleteConfirmEntry) {
-      const timer = setTimeout(() => deleteBtnRef.current?.focus(), 50);
-
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          e.stopPropagation();
-          setDeleteConfirmEntry(null);
-        } else if (e.key === 'Tab') {
-          e.preventDefault();
-          if (document.activeElement === deleteBtnRef.current) {
-            cancelBtnRef.current?.focus();
-          } else {
-            deleteBtnRef.current?.focus();
-          }
-        }
-      };
-
-      window.addEventListener('keydown', handleKeyDown, true);
-      return () => {
-        clearTimeout(timer);
-        window.removeEventListener('keydown', handleKeyDown, true);
-      };
-    }
-  }, [deleteConfirmEntry]);
-
   const handleEntryContextMenu = useCallback((e: React.MouseEvent, entry: PasswordEntry) => {
     e.preventDefault();
     e.stopPropagation();
@@ -179,13 +149,13 @@ export function PasswordList({ onResizeStart, mobile = false }: PasswordListProp
     setDeleteConfirmEntry(entry);
   }, []);
 
-  const confirmDeleteEntry = useCallback(() => {
-    if (deleteConfirmEntry) {
-      deleteEntry(deleteConfirmEntry.id);
-      addToast({ message: t('toast.entry_deleted', { title: deleteConfirmEntry.title }), type: 'info' });
+  const confirmDeleteEntry = useCallback(async () => {
+    if (deleteConfirmEntry && await deleteEntry(deleteConfirmEntry.id)) {
       setDeleteConfirmEntry(null);
+      return true;
     }
-  }, [deleteConfirmEntry, deleteEntry, addToast, t]);
+    return false;
+  }, [deleteConfirmEntry, deleteEntry]);
 
   const handleAutotype = useCallback(async (entry: PasswordEntry) => {
     if (!backend) return;

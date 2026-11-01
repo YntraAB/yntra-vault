@@ -14,6 +14,22 @@ pub use crate::vault::trash::TrashedEntryPreview;
 
 // ─── DTOs for frontend communication ────────────────────────────────
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct BulkEntryUpdate {
+    pub title: Option<String>,
+    pub username: Option<String>,
+    pub url: Option<String>,
+    pub favorite: Option<bool>,
+    pub pinned: Option<bool>,
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub append_notes: bool,
+    #[serde(default)]
+    pub tags_to_add: Vec<String>,
+    #[serde(default)]
+    pub tags_to_remove: Vec<String>,
+}
+
 /// Data for creating a new entry.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NewEntry {
@@ -735,6 +751,20 @@ impl VaultManager {
 
     /// Soft-delete: Move entry to trash (recoverable for 30 days).
     pub fn delete_entry(&mut self, id: Uuid) -> crate::Result<()> {
+        self.delete_entries(&[id])
+    }
+
+    pub fn delete_entries(&mut self, ids: &[Uuid]) -> crate::Result<()> {
+        self.transactional_data_change(|manager| {
+            for id in ids.iter().copied().collect::<std::collections::BTreeSet<_>>() {
+                manager.delete_entry_inner(id)?;
+            }
+            if !ids.is_empty() { manager.save()?; }
+            Ok(())
+        })
+    }
+
+    fn delete_entry_inner(&mut self, id: Uuid) -> crate::Result<()> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -755,8 +785,29 @@ impl VaultManager {
             deleted_at: Utc::now(),
         });
 
-        self.save()?;
         Ok(())
+    }
+
+    pub fn bulk_update_entries(&mut self, ids: &[Uuid], patch: BulkEntryUpdate) -> crate::Result<()> {
+        self.transactional_data_change(|manager| {
+            for id in ids.iter().copied().collect::<std::collections::BTreeSet<_>>() {
+                let current = manager.get_entry(id)?;
+                let mut tags = current.tags.clone();
+                for tag in &patch.tags_to_add { if !tags.contains(tag) { tags.push(tag.clone()); } }
+                tags.retain(|tag| !patch.tags_to_remove.contains(tag));
+                let notes = patch.notes.as_ref().map(|notes| {
+                    if patch.append_notes && !current.notes.is_empty() { format!("{}\n{}", current.notes, notes) }
+                    else { notes.clone() }
+                });
+                manager.update_entry_inner(id, UpdateEntry {
+                    title: patch.title.clone(), username: patch.username.clone(), url: patch.url.clone(),
+                    favorite: patch.favorite, pinned: patch.pinned, notes, tags: Some(tags),
+                    ..Default::default()
+                }, false)?;
+            }
+            if !ids.is_empty() { manager.save()?; }
+            Ok(())
+        })
     }
 
     /// Get entries filtered by tag name.
@@ -773,6 +824,10 @@ impl VaultManager {
 
     /// Toggle favorite status for an entry.
     pub fn toggle_favorite(&mut self, id: Uuid) -> crate::Result<bool> {
+        self.transactional_data_change(|manager| manager.toggle_favorite_inner(id))
+    }
+
+    fn toggle_favorite_inner(&mut self, id: Uuid) -> crate::Result<bool> {
         if !self.is_unlocked() {
             return Err(crate::error::VaultError::VaultLocked);
         }
@@ -792,6 +847,10 @@ impl VaultManager {
 
     /// Toggle pinned status for an entry.
     pub fn toggle_pin(&mut self, id: Uuid) -> crate::Result<bool> {
+        self.transactional_data_change(|manager| manager.toggle_pin_inner(id))
+    }
+
+    fn toggle_pin_inner(&mut self, id: Uuid) -> crate::Result<bool> {
         if !self.is_unlocked() {
             return Err(crate::error::VaultError::VaultLocked);
         }

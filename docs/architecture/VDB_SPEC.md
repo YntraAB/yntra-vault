@@ -1,8 +1,8 @@
-# Yntra Vault Database Format Specification (`YNTR` v4/v5 and `YNS2` v2)
+# Yntra Vault Database Format Specification (`YNTR` v6/v7 and `YNS2` v2)
 
-**Document Version**: 1.2 (0.2.5 security remediation working tree; unpublished)
+**Document Version**: 1.3 (reviewed synchronization working tree; unpublished)
 
-**Target Formats**: ordinary `YNTR` v4, hardware-bound `YNTR` v5, local-protection `YNS2` v2
+**Target Formats**: ordinary `YNTR` v6, hardware-bound `YNTR` v7, local-protection `YNS2` v2
 **Classification**: Public Specification  
 **Reference Codebase**: [crates/core/src/vault/format.rs](../../crates/core/src/vault/format.rs)
 
@@ -10,15 +10,50 @@
 
 ## 0. Current format boundaries
 
-| Framing | Role in 0.2.5 | Key distinction |
+| Framing | Role in the unreleased working tree | Key distinction |
 | --- | --- | --- |
-| `YNTR`, version 4 | Ordinary vault representation and encrypted sync snapshots | Existing format remains supported; transport snapshots omit local factor/recovery records. |
-| `YNTR`, version 5 | Newly enrolled/re-enrolled hardware security-key vaults | Random payload key wrapped with the password/hardware factor; local encrypted `hardware_password_key` supports deliberate factor removal. Older readers must reject v5. |
+| `YNTR`, version 6 | Ordinary vault representation and encrypted sync snapshots | Requires causal sync metadata support; transport snapshots omit local factor/recovery records. Versions 1–5 remain readable for migration. |
+| `YNTR`, version 7 | Hardware security-key vaults with causal sync metadata | Retains v5's random payload key and factor wrapping. Older clients reject the new version rather than discarding sync metadata. |
 | `YNS2`, header version 2 | Local USB/recovery protection and protected replicas | Separate authenticated storage envelope with independent storage key and password/keyfile/optional USB and recovery slots. Implemented in [storage.rs](../../crates/core/src/vault/storage.rs). |
 
-The layout and password-derived key diagram below describe ordinary `YNTR` storage. They must not be used to implement password-only opening of hardware v5 or to treat `YNS2` as a renamed v4 header. USB binding is based on a public/spoofable device serial; it is not a non-exportable hardware key. Recovery v2 and hardware-key enrollment are currently separate incompatible protection modes. See [USB/recovery](../security/USB-RECOVERY.md) and [recovery specification](../security/EMERGENCY_RECOVERY.md).
+The layout and password-derived key diagram below describe ordinary `YNTR` storage. They must not be used to implement password-only opening of hardware v5/v7 or to treat `YNS2` as a renamed YNTR header. USB binding is based on a public/spoofable device serial; it is not a non-exportable hardware key. Recovery v2 and hardware-key enrollment are currently separate incompatible protection modes. See [USB/recovery](../security/USB-RECOVERY.md) and [recovery specification](../security/EMERGENCY_RECOVERY.md).
 
 `YNS2` framing is magic, a little-endian u32 JSON-header length, the bounded versioned header, and nonce/ciphertext/tag. Its header and wrapping context are authenticated; verify before deserializing inner vault content. Current limits and exact domain strings live in `storage.rs`; preserve them for already-written version-2 files. Local wrapper policy is never copied from a synchronization peer. Atomic local saves use a staged/flushed sibling file and a whole-file revision check under an adjacent OS write lock. The `.vdb.lock` sidecar contains no vault contents or keys. Protected password/keyfile changes rotate the outer key and replace any active recovery kit; USB-binding changes also return replacement shares. Old snapshots retain their previous credentials.
+
+### Reviewed synchronization metadata
+
+The encrypted payload contains `settings.sync` version 2: a vector clock, per-field
+revisions, deletion markers, encrypted conflict versions and operation receipts.
+A field revision records causal context, a keyed content fingerprint, device
+identity, recorded time and clock reliability. Plaintext equality is used for
+ID-bound encrypted fields; randomized ciphertext does not itself indicate an edit.
+Entry identities, custom-field identities and attachment identities are stable.
+Tag memberships are compared separately using stable tag identities. Entry-facing
+names are projected from the selected tag definitions after reconciliation, so a
+rename can combine with an independent membership change. Legacy names without a
+registered definition retain a separate name reference. Ambiguous duplicate tag
+definitions require renaming before synchronization.
+
+Permanent deletion retains revision information without entry content. The usual
+trash expiry does not expire these markers. Conflict history is limited to ten
+encrypted versions per entry and is removed by permanent deletion. History stores
+causal context for retention ordering, so an old version with a future timestamp
+does not displace a causally newer one. Restoring history creates a new reviewed
+revision and retains the replaced current version. Local review
+preferences, trusted-device policy and pending storage confirmations are not
+ordinary synchronized fields.
+
+Pending confirmations are encrypted local records keyed by operation ID and
+bound to the authenticated peer. A new approved result can supersede that peer's
+older pending result; other peers remain pending. A late acknowledgement cannot
+clear a newer operation. These receipts do not constitute a durable journal for
+every protocol preparation step.
+
+The first write of an older `YNTR` vault creates an exact encrypted sibling backup
+named `*.vdb.before-sync-<uuid>.bak` before replacing the original atomically.
+Existing copies without common causal history require review of divergent values;
+their timestamps do not establish ancestry. Both applications must support the
+new format and reviewed protocol. These changes do not replace published 0.2.6.
 
 ## 1. Overview & Architectural Principles
 
@@ -40,7 +75,7 @@ A `.vdb` file consists of an unencrypted header, optional embedded authenticatio
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Magic Bytes: "YNTR" (4 bytes)                                           │
 ├────────────────────────────────────────────────────────────────────────┤
-│ Format Version: u16 LE (2 bytes) -> Current: 4                        │
+│ Format Version: u16 LE (2 bytes) -> Current: 6 (hardware: 7)           │
 ├────────────────────────────────────────────────────────────────────────┤
 │ Flags: u16 LE (2 bytes)                                                │
 │   - 0x0001 = FLAG_HAS_BIOMETRIC                                        │
@@ -69,7 +104,7 @@ A `.vdb` file consists of an unencrypted header, optional embedded authenticatio
 | Field | Type | Size | Description |
 |---|---|---|---|
 | `magic` | `[u8; 4]` | 4 bytes | Literal ASCII string `b"YNTR"`. |
-| `version` | `u16` | 2 bytes | `4` for ordinary files; `5` for the new hardware-bound payload-key model. |
+| `version` | `u16` | 2 bytes | `6` for ordinary files; `7` for the hardware-bound payload-key model. |
 | `flags` | `u16` | 2 bytes | Bitmask flags (`0x0001` Biometrics enrolled, `0x0002` Hardware 2FA enabled). |
 | `salt` | `[u8; 32]` | 32 bytes | Cryptographically random salt generated via OS CPRNG (`rand::rng`). |
 | `kdf_len` | `u32` | 4 bytes | Byte length of the serialized `KdfParams` structure. |
@@ -169,9 +204,8 @@ Sensitive inner fields use `EncryptedBlob`:
 
 ```rust
 pub struct EncryptedBlob {
-    pub nonce: [u8; 24],      // XChaCha20 192-bit random nonce
-    pub ciphertext: Vec<u8>,  // Ciphertext
-    pub tag: [u8; 16],        // Poly1305 128-bit authentication tag
+    pub nonce: Vec<u8>,       // 24 bytes for XChaCha20; legacy readers also support AES-GCM
+    pub ciphertext: Vec<u8>,  // Ciphertext with the 16-byte authentication tag appended
 }
 ```
 
@@ -181,10 +215,13 @@ pub struct EncryptedBlob {
 
 | Version | Payload Format | Integrity Mechanism | Migration Behavior |
 |---|---|---|---|
-| `1` | `bincode` | Outer HMAC-SHA512 | Read-only; auto-upgraded to v4 on write. |
-| `2` | MessagePack | Outer HMAC-SHA512 | Read-only; auto-upgraded to v4 on write. |
+| `1` | `bincode` | Outer HMAC-SHA512 | Read-only; upgraded to v6/v7 on write after an encrypted backup. |
+| `2` | MessagePack | Outer HMAC-SHA512 | Read-only; upgraded to v6/v7 on write after an encrypted backup. |
 | `3` | MessagePack | Header AAD Binding | Supported legacy format; upgraded on save. |
-| `4` | MessagePack | Header AAD Binding + Bio/HW2FA Containers | **Current standard format.** |
+| `4` | MessagePack | Header AAD Binding + Bio/HW2FA Containers | Supported legacy format; upgraded on save. |
+| `5` | MessagePack | Header AAD Binding + hardware-bound random payload key | Supported legacy hardware format; upgraded to v7 on save. |
+| `6` | MessagePack | Header AAD Binding + causal sync metadata | Current ordinary format, unreleased. |
+| `7` | MessagePack | Header AAD Binding + hardware-bound random payload key + causal sync metadata | Current hardware format, unreleased. |
 
 ---
 
@@ -192,7 +229,7 @@ pub struct EncryptedBlob {
 
 When implementing an independent parser or validator for `.vdb` files:
 1. ✅ **Validate Magic Bytes**: Ensure file starts with `YNTR`.
-2. ✅ **Check Format Version**: Reject files with version $> 4$.
+2. ✅ **Check Format Version**: Reject unsupported versions above 7. Enforce hardware-factor handling for hardware-bound payloads.
 3. ✅ **Enforce KDF Bounds**: Reject parameters outside secure operational bounds (`65_536 <= memory_kb <= 1_048_576`, `2 <= iterations <= 64`, `1 <= parallelism <= 32`).
 4. ✅ **Construct Header AAD**: Assemble canonical header bytes before invoking AEAD decrypt.
 5. ✅ **Zero Sensitive Memory**: Immediately clear derived subkeys and decrypted fields using volatile zeroing (`Zeroize`).
@@ -203,7 +240,7 @@ When implementing an independent parser or validator for `.vdb` files:
 
 ### Storage Footprint & Compaction (`compact_vault`)
 Vault storage lifecycle maintains optimal binary footprint via:
-1. **Trash Compaction**: Automatic purge of tombstones older than 30 days (`purge_expired_trash(30)`).
+1. **Trash Compaction**: Normal saves purge trash content older than 30 days; reviewed saves apply exactly the approved result. Permanent deletion markers remain.
 2. **Search Index Garbage Collection**: Prunes empty trigram buckets and rebuilds inverted token indexes on save.
 3. **Storage Analytics**: `VaultStorageMetrics` provides real-time counts and byte footprints of active entries, attachments, and soft-deleted records.
 

@@ -3,6 +3,7 @@ pub mod validation;
 pub mod format;
 pub mod manager;
 pub mod entry;
+pub mod credentials;
 pub mod history;
 pub mod search;
 pub mod attachments;

@@ -237,6 +237,8 @@ pub struct Tag {
     pub name: String,
     pub color: String,
     pub icon: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_url: String,
 }
 
 // ─── Vault Metadata ────────────────────────────────────────────────────
@@ -305,6 +307,19 @@ pub struct VaultSettings {
     /// Allows deliberate removal of the hardware factor from an unlocked vault.
     #[serde(default)]
     pub hardware_password_key: Option<EncryptedBlob>,
+    #[serde(default)]
+    pub sync: crate::services::sync::review::SyncMetadata,
+    #[serde(default)]
+    pub sync_policy: crate::services::sync::review::SyncPolicy,
+    #[serde(default)]
+    pub sync_pending: Option<uuid::Uuid>,
+    #[serde(default)]
+    pub sync_pending_receipts: std::collections::BTreeMap<uuid::Uuid, PendingSyncReceipt>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct PendingSyncReceipt {
+    pub peer_device_id: Option<uuid::Uuid>,
 }
 
 /// Audit trail and status of cryptographic emergency recovery kit generation.

@@ -19,7 +19,7 @@ export function TrashTab() {
   const { backend } = useBackend();
 
   const [trashItems, setTrashItems] = useState<TrashedEntryPreview[]>([]);
-  const [loadingTrash, setLoadingTrash] = useState(false);
+  const [loadingTrash, setLoadingTrash] = useState(true);
   const [metrics, setMetrics] = useState<VaultStorageMetrics | null>(null);
   const [compacting, setCompacting] = useState(false);
 
@@ -34,28 +34,17 @@ export function TrashTab() {
     mode: 'single',
   });
 
-  const fetchTrash = useCallback(async () => {
-    if (!backend || !currentVault) return;
-    setLoadingTrash(true);
-    try {
-      const items = await backend.listTrash();
-      setTrashItems(items);
-    } catch (e) {
-      console.error('Failed to fetch trash previews:', e);
-    } finally {
-      setLoadingTrash(false);
-    }
-  }, [backend, currentVault]);
+  const fetchTrash = useCallback(() => {
+    if (!backend || !currentVault) return Promise.resolve();
+    return backend.listTrash().then(setTrashItems)
+      .catch(error => addToast({ message: String(error), type: 'error' }))
+      .finally(() => setLoadingTrash(false));
+  }, [backend, currentVault, addToast]);
 
-  const fetchMetrics = useCallback(async () => {
-    if (!backend || !currentVault) return;
-    try {
-      const m = await backend.getStorageMetrics();
-      setMetrics(m);
-    } catch (e) {
-      console.error('Failed to fetch storage metrics:', e);
-    }
-  }, [backend, currentVault]);
+  const fetchMetrics = useCallback(() => {
+    if (!backend || !currentVault) return Promise.resolve();
+    return backend.getStorageMetrics().then(setMetrics).catch(error => addToast({ message: String(error), type: 'error' }));
+  }, [backend, currentVault, addToast]);
 
   useEffect(() => {
     fetchTrash();

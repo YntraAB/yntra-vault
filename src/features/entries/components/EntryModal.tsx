@@ -1,3 +1,5 @@
+import { loginFields } from '../loginFields';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import { useCapabilities } from '@/lib/platform';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
 /**
@@ -7,8 +9,8 @@ import { MAX_DISPLAY_NAME_LENGTH } from '@/lib/displayLimits';
  * live PasswordStrength, tag selector, custom fields.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence, Reorder } from 'framer-motion';
+import { useState, useEffect, useRef, useCallback, type ReactNode, type PointerEvent } from 'react';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import {
   X, Plus, Eye, EyeOff, Wand2, GripVertical,
   Globe, User, Mail, Smartphone, Key, FileText, ShieldCheck, Loader2,
@@ -23,6 +25,7 @@ import { PasswordGenerator } from '@/features/generator';
 import { CreateTagModal } from './CreateTagModal';
 import type { PasswordEntry, CustomField, Tag, FieldType, AttachmentInfo } from '@/types';
 import { getFieldLayout, deriveTitle } from '@/lib/utils';
+import { applyFieldPreset, entryStandardFields, fieldOrderMetadata, type StandardFieldKey } from '../entryFields';
 import { formatBytes, getAttachmentIcon } from '@/lib/formatters';
 import { getBackend } from '@/lib/backend';
 import { ActionTooltip } from '@/components/ui/tooltip';
@@ -63,8 +66,6 @@ const EMPTY_ENTRY: Omit<PasswordEntry, 'id' | 'createdAt' | 'updatedAt'> = {
   passkeyAction: undefined,
 };
 
-type StandardFieldKey = 'username' | 'password' | 'email' | 'url' | 'notes' | 'totpSecret' | 'passkey' | 'attachments';
-
 const PRESETS = [
   { id: 'login-user', nameKey: 'preset.login_user', fields: ['username', 'password', 'url'] as StandardFieldKey[] },
   { id: 'login-email', nameKey: 'preset.login_email', fields: ['email', 'password', 'url'] as StandardFieldKey[] },
@@ -73,33 +74,67 @@ const PRESETS = [
   { id: 'custom', nameKey: 'preset.custom', fields: [] as StandardFieldKey[] },
 ];
 
-export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
+function initialEntryForm(target: PasswordEntry | null | undefined, category: string) {
+  if (!target) return { form: { ...EMPTY_ENTRY, tags: category !== 'all' && category !== 'favorites' ? [category] : [], favorite: category === 'favorites', customFields: [] }, fieldsOrder: ['username', 'password', 'url'], originalPassword: null, existingAttachments: [] as AttachmentInfo[] };
+  let recoveryCodes = target.recoveryCodes ?? '';
+  const customFields = (target.customFields ?? []).filter(field => {
+    if (!isRecoveryField(field.name)) return true;
+    if (field.value.trim()) recoveryCodes += (recoveryCodes ? '\n' : '') + field.value.trim();
+    return false;
+  }).map(field => ({ ...field }));
+  const standard = entryStandardFields({ ...target, customFields }, recoveryCodes);
+  const form: typeof EMPTY_ENTRY = {
+    ...EMPTY_ENTRY, title: target.title, username: target.username, password: target.password === '••••••••' ? '' : target.password,
+    url: target.url, email: target.email, notes: target.notes, tags: [...target.tags], favorite: target.favorite, pinned: target.pinned,
+    totpSecret: target.totpSecret === 'has-totp' ? '' : target.totpSecret, recoveryCodes: recoveryCodes || undefined, customFields,
+    hasPasskey: target.hasPasskey, passkeyPublicKey: target.passkeyPublicKey,
+  };
+  return { form, fieldsOrder: getFieldLayout(customFields, standard), originalPassword: form.password || null, existingAttachments: target.attachments ?? [] };
+}
+
+function ReorderField({ id, children }: { id: string; children: (start: (event: PointerEvent) => void) => ReactNode }) {
+  const controls = useDragControls();
+  return <Reorder.Item value={id} dragListener={false} dragControls={controls} className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 shadow-2xs hover:border-[var(--border)] transition-colors cursor-default select-none">{children(event => controls.start(event))}</Reorder.Item>;
+}
+
+export function EntryModal(props: EntryModalProps) { return <EntryForm key={String(props.open) + ':' + (props.editEntry?.id ?? '')} {...props} />; }
+function EntryForm({ open, onClose: requestClose, editEntry }: EntryModalProps) {
   const capabilities = useCapabilities();
+  const savingRef = useRef(false);
+  const onClose = useCallback(() => { if (!savingRef.current) requestClose(); }, [requestClose]);
   const { t } = useTranslation();
   const { addEntry, updateEntry, tags: allTags } = useEntries();
   const { filterCategory } = useUi();
   const { addToast } = useToast();
   const isEdit = !!editEntry;
 
-  const [form, setForm] = useState(EMPTY_ENTRY);
-  const [originalPassword, setOriginalPassword] = useState<string | null>(null);
+  const [initial] = useState(() => initialEntryForm(editEntry, filterCategory));
+  const [form, setForm] = useState<typeof EMPTY_ENTRY>(initial.form);
+  const [originalPassword, setOriginalPassword] = useState<string | null>(initial.originalPassword);
   const [showPassword, setShowPassword] = useState(false);
   const [showCustomPasswords, setShowCustomPasswords] = useState<Record<string, boolean>>({});
   const [showGenerator, setShowGenerator] = useState(false);
   const [customGeneratorId, setCustomGeneratorId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(editEntry && editEntry.password === '••••••••'));
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [fieldsOrder, setFieldsOrder] = useState<string[]>(['username', 'password', 'url']);
+  const [fieldsOrder, setFieldsOrder] = useState<string[]>(initial.fieldsOrder);
+  const primaryLogin = loginFields(form, fieldsOrder);
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
   const [showAppPicker, setShowAppPicker] = useState(false);
   const [isTotpScannerOpen, setIsTotpScannerOpen] = useState(false);
 
   const [stagedAttachments, setStagedAttachments] = useState<{ name: string; mimeType: string; data: Uint8Array; size: number }[]>([]);
-  const [existingAttachments, setExistingAttachments] = useState<AttachmentInfo[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<AttachmentInfo[]>(initial.existingAttachments);
   const [deleteAttachmentIds, setDeleteAttachmentIds] = useState<string[]>([]);
   const [previewStagedAtt, setPreviewStagedAtt] = useState<{ att: AttachmentInfo; data: Uint8Array } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrFileInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeOrCollapseGenerator = useCallback(() => {
+    if (showGenerator || customGeneratorId) { setShowGenerator(false); setCustomGeneratorId(null); }
+    else onClose();
+  }, [showGenerator, customGeneratorId, onClose]);
+  useModalFocus(open && !showCreateTagModal && !showAppPicker && !isTotpScannerOpen && !previewStagedAtt, dialogRef, closeOrCollapseGenerator);
 
   const applyTotpSecret = useCallback((rawSecret: string) => {
     let secret = rawSecret.trim();
@@ -192,7 +227,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
       setStagedAttachments(prev => [...prev, ...newStaged]);
       setFieldsOrder(prev => prev.includes('attachments') ? prev : [...prev, 'attachments']);
     }
-  }, [addToast]);
+  }, [addToast, t]);
 
   const prevTagsRef = useRef<Tag[]>(allTags);
   useEffect(() => {
@@ -211,147 +246,20 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
     ['username', 'password', 'email', 'url', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(f)
   );
 
-  // Populate form on open
   useEffect(() => {
-    let isCancelled = false;
-
-    if (open) {
-      if (editEntry) {
-        const populateForm = (target: PasswordEntry) => {
-          let recoveryCodes = target.recoveryCodes || '';
-          const cleanedCustomFields = (target.customFields || []).filter((f) => {
-            if (isRecoveryField(f.name)) {
-              if (f.value && f.value.trim()) {
-                recoveryCodes = recoveryCodes ? `${recoveryCodes}\n${f.value.trim()}` : f.value.trim();
-              }
-              return false;
-            }
-            return true;
-          });
-
-          const layoutCf = cleanedCustomFields.find(cf => cf.name === '_field_order');
-          let initialStandard: StandardFieldKey[] = [];
-
-          if (layoutCf && layoutCf.value) {
-            const savedOrder = layoutCf.value.split(',').map(s => s.trim()).filter(Boolean);
-            initialStandard = savedOrder.filter((f): f is StandardFieldKey =>
-              ['username', 'password', 'url', 'email', 'notes', 'totpSecret', 'passkey', 'attachments'].includes(f)
-            );
-          } else {
-            if (target.username) initialStandard.push('username');
-            if (target.password && target.password !== '••••••••') initialStandard.push('password');
-            if (target.url) initialStandard.push('url');
-            if (target.email) initialStandard.push('email');
-            if (target.notes) initialStandard.push('notes');
-            if ((target.totpSecret && target.totpSecret !== 'has-totp') || recoveryCodes) initialStandard.push('totpSecret');
-            if (target.hasPasskey) initialStandard.push('passkey');
-            if (target.attachments && target.attachments.length > 0) initialStandard.push('attachments');
-            if (initialStandard.length === 0) {
-              initialStandard.push('username', 'password', 'url');
-            }
-          }
-
-          const hasAttachments = (target.attachments && target.attachments.length > 0) || ((target.attachmentCount || 0) > 0);
-          if (hasAttachments && !initialStandard.includes('attachments')) {
-            initialStandard.push('attachments');
-          }
-
-          const layout = getFieldLayout(cleanedCustomFields, initialStandard);
-          setFieldsOrder(layout);
-
-          setForm({
-            title: target.title,
-            username: target.username,
-            password: target.password === '••••••••' ? '' : target.password,
-            url: target.url,
-            email: target.email,
-            notes: target.notes,
-            tags: [...target.tags],
-            favorite: target.favorite,
-            pinned: target.pinned,
-            totpSecret: target.totpSecret === 'has-totp' ? '' : target.totpSecret,
-            recoveryCodes: recoveryCodes || undefined,
-            customFields: cleanedCustomFields.map(f => ({ ...f })),
-            hasPasskey: target.hasPasskey,
-            passkeyPublicKey: target.passkeyPublicKey,
-            generatePasskey: undefined,
-            passkeyAction: undefined,
-          });
-          if (target.password && target.password !== '••••••••') {
-            setOriginalPassword(target.password);
-          }
-          setExistingAttachments(target.attachments || []);
-        };
-
-        // Populate with current target first
-        populateForm(editEntry);
-
-        // Fetch full decrypted entry to guarantee complete customFields metadata
-        getBackend().then(backend => {
-          return backend.getEntry(editEntry.id);
-        }).then((decrypted: any) => {
-          if (isCancelled || !decrypted) return;
-          const fullEntry = decryptedEntryToPasswordEntry(decrypted);
-          populateForm(fullEntry);
-        }).catch(() => {});
-      } else {
-        setOriginalPassword(null);
-        setFieldsOrder(['username', 'password', 'url']);
-        const initialTags: string[] = [];
-        let initialFavorite = false;
-
-        if (filterCategory === 'favorites') {
-          initialFavorite = true;
-        } else if (filterCategory && filterCategory !== 'all') {
-          initialTags.push(filterCategory);
-        }
-
-        setForm({
-          ...EMPTY_ENTRY,
-          tags: initialTags,
-          favorite: initialFavorite,
-          customFields: [],
-        });
-        setExistingAttachments([]);
-      }
-      setStagedAttachments([]);
-      setDeleteAttachmentIds([]);
-      setErrors({});
-      setShowGenerator(false);
-      setTimeout(() => titleRef.current?.focus(), 100);
-    }
-
-    return () => {
-      isCancelled = true;
-      stagedAttachments.forEach(att => {
-        try { att.data.fill(0); } catch {}
-      });
-    };
-  }, [open, editEntry, filterCategory]);
-
+    if (!open || !editEntry || editEntry.password !== '••••••••') return;
+    let active = true;
+    void getBackend().then(backend => backend.getEntry(editEntry.id)).then(decrypted => {
+      if (!active) return;
+      const initial = initialEntryForm(decryptedEntryToPasswordEntry(decrypted), filterCategory);
+      setForm(initial.form); setFieldsOrder(initial.fieldsOrder); setOriginalPassword(initial.originalPassword); setExistingAttachments(initial.existingAttachments); setLoading(false);
+    }).catch(error => { if (active) addToast({ message: String(error), type: 'error' }); });
+    return () => { active = false; };
+  }, [open, editEntry, filterCategory, addToast]);
   const stagedAttachmentsRef = useRef(stagedAttachments);
-  stagedAttachmentsRef.current = stagedAttachments;
-
-  // Clear sensitive data on close and zeroize staged attachment buffers in RAM
-  useEffect(() => {
-    if (!open) {
-      setForm(prev => ({ ...prev, password: '' }));
-      setShowPassword(false);
-      if (stagedAttachmentsRef.current.length > 0) {
-        stagedAttachmentsRef.current.forEach(att => att.data.fill(0));
-        setStagedAttachments([]);
-      }
-    }
-  }, [open]);
-
-  // Esc to close
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open && !showGenerator) onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose, showGenerator]);
+  useEffect(() => { stagedAttachmentsRef.current = stagedAttachments; }, [stagedAttachments]);
+  useEffect(() => () => { for (const attachment of stagedAttachmentsRef.current) attachment.data.fill(0); }, []);
+  useEffect(() => { if (!open) return; const timer = setTimeout(() => titleRef.current?.focus(), 100); return () => clearTimeout(timer); }, [open]);
 
   const updateField = useCallback(<K extends keyof typeof form>(key: K, value: typeof form[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -426,10 +334,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
   }, []);
 
   const applyTemplatePreset = useCallback((presetFields: StandardFieldKey[]) => {
-    setFieldsOrder(prev => {
-      const hasAttachments = prev.includes('attachments');
-      return hasAttachments ? [...presetFields, 'attachments'] : presetFields;
-    });
+    setFieldsOrder(prev => applyFieldPreset(form, prev, presetFields));
 
     setForm(prev => {
       let updatedEmail = prev.email;
@@ -444,7 +349,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
         email: updatedEmail,
       };
     });
-  }, []);
+  }, [form]);
 
   const addCustomField = useCallback((type: FieldType = 'text', defaultName: string = '') => {
     const id = crypto.randomUUID();
@@ -497,6 +402,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
       else if (key === 'url') type = 'url';
       else if (key === 'totpSecret' || key === 'totp') type = 'totp';
       else if (key === 'notes') type = 'notes';
+      else if (key === 'phone') type = 'phone';
       else if (key === 'text') type = 'text';
 
       const count = getFieldCount(type);
@@ -527,7 +433,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (activeFields.includes('password') && !form.password.trim() && !isEdit) {
+    if (activeFields.includes('password') && !primaryLogin.password && !isEdit) {
       errs.password = 'Password is required';
     }
     setErrors(errs);
@@ -536,8 +442,10 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading || savingRef.current) return;
     if (!validate()) return;
 
+    savingRef.current = true;
     setLoading(true);
     try {
       const now = new Date().toISOString();
@@ -572,12 +480,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
 
       // Save fields order as metadata
       const customFields = form.customFields.filter(cf => cf.name !== '_field_order' && !isRecoveryField(cf.name));
-      customFields.push({
-        id: crypto.randomUUID(),
-        name: '_field_order',
-        type: 'text',
-        value: fieldsOrder.join(','),
-      });
+      customFields.push(fieldOrderMetadata(form.customFields, fieldsOrder, editEntry?.id));
       cleanedForm.customFields = customFields;
 
       if (stagedAttachments.length > 0) {
@@ -597,7 +500,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
           ...cleanedForm,
           updatedAt: now,
         };
-        await updateEntry(updated);
+        if (!await updateEntry(updated)) return;
         addToast({ message: t('toast.entry_updated'), type: 'success' });
       } else {
         const newEntry: PasswordEntry = {
@@ -606,13 +509,14 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
           createdAt: now,
           updatedAt: now,
         };
-        await addEntry(newEntry);
+        if (!await addEntry(newEntry)) return;
         addToast({ message: t('toast.entry_created'), type: 'success' });
       }
-      onClose();
-    } catch (err: any) {
+      requestClose();
+    } catch (err) {
       addToast({ message: t('toast.action_failed', { err: String(err) }), type: 'error' });
     } finally {
+      savingRef.current = false;
       setLoading(false);
     }
   };
@@ -626,15 +530,20 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 p-3 sm:p-4 touch-pan-y overscroll-contain"
+            className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-black/50 px-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:p-4 touch-pan-y overscroll-contain"
             onClick={onClose}
           >
             <motion.div
+              ref={dialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="entry-dialog-title"
+              tabIndex={-1}
               initial={{ scale: 0.97, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.97, opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="flex max-h-[calc(100dvh-1.5rem)] sm:max-h-[90vh] my-auto w-full max-w-[520px] flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
+              className="flex max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] sm:max-h-[90vh] my-auto w-full max-w-[520px] flex-col rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -643,11 +552,12 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                   <div className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-primary)]">
                     {isEdit ? <FileText size={14} /> : <Plus size={14} />}
                   </div>
-                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                  <h2 id="entry-dialog-title" className="text-[13px] font-semibold text-[var(--text-primary)]">
                     {isEdit ? t('common.edit') : t('list.new_entry')}
                   </h2>
                 </div>
                 <button
+                  aria-label={t('common.close')}
                   onClick={onClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                 >
@@ -655,7 +565,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                 </button>
               </div>
               {/* Form */}
-              <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0 touch-pan-y overscroll-contain">
+              <motion.form layoutScroll onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto p-4 flex-1 min-h-0 touch-pan-y overscroll-contain">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -696,7 +606,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           type="button"
                           onClick={() => {
                             if (p.id === 'custom') {
-                              setFieldsOrder(prev => prev.includes('attachments') ? ['attachments'] : []);
+                              setFieldsOrder(prev => applyFieldPreset(form, prev, []));
                             } else {
                               applyTemplatePreset(p.fields);
                             }
@@ -733,6 +643,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                   {errors.title && <span className="text-[11px] text-[var(--destructive)]">{errors.title}</span>}
                 </div>
 
+                <p className="text-[11px] text-[var(--text-tertiary)]">{t('entry.login_order_hint')}</p>
                 {/* Reorderable Fields list */}
                 <Reorder.Group axis="y" values={fieldsOrder} onReorder={setFieldsOrder} className="flex flex-col gap-3">
                   {fieldsOrder
@@ -1084,34 +995,37 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                       const suffix = getFieldSuffix(cf.type);
                       const currentPrefix = getPrefix(cf.name, suffix);
                       const isPasswordType = cf.type === 'password';
+                      const isSensitive = isPasswordType || cf.sensitive === true;
 
                       content = (
-                        <div className="flex gap-1.5 items-center w-full">
+                        <div className="grid grid-cols-2 sm:grid-cols-[120px_auto_minmax(0,1fr)] gap-1.5 items-start w-full">
                           <input
                             type="text"
                             maxLength={MAX_DISPLAY_NAME_LENGTH}
-                    value={currentPrefix}
+                    aria-label={t('entry.custom_field')}
+                            value={currentPrefix}
                             onChange={(e) => {
                               const newPrefix = e.target.value;
                               const otherFields = form.customFields.filter(f => f.type === cf.type && f.id !== cf.id);
-                              const count = otherFields.length + (fieldsOrder.includes(cf.type as any) ? 1 : 0);
+                              const count = otherFields.length + (fieldsOrder.some(field => field === cf.type) ? 1 : 0);
                               const defaultOrd = getOrdinal(count);
                               const updatedName = formatFullName(newPrefix, suffix, defaultOrd);
                               updateCustomField(cf.id, { name: updatedName });
                             }}
                             placeholder={currentPrefix || suffix}
-                            className="h-9 w-[120px] rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-medium shrink-0"
+                            className="h-9 w-full min-w-0 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-medium shrink-0"
                           />
                           <select
+                            aria-label={t('entry.custom_field') + ': ' + suffix}
                             value={cf.type || 'text'}
                             onChange={(e) => {
                               const newType = e.target.value as FieldType;
                               const newSuffix = getFieldSuffix(newType);
                               const otherFields = form.customFields.filter(f => f.type === newType && f.id !== cf.id);
-                              const count = otherFields.length + (fieldsOrder.includes(newType as any) ? 1 : 0);
+                              const count = otherFields.length + (fieldsOrder.some(field => field === newType) ? 1 : 0);
                               const defaultOrd = getOrdinal(count);
                               const updatedName = formatFullName(currentPrefix, newSuffix, defaultOrd);
-                              updateCustomField(cf.id, { type: newType, name: updatedName });
+                              updateCustomField(cf.id, { type: newType, name: updatedName, sensitive: newType === 'password' || cf.sensitive === true });
                             }}
                             className="h-9 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-2 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--border-focus)] shrink-0"
                           >
@@ -1124,17 +1038,18 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                             <option value="totp">{t('detail.totp')}</option>
                             <option value="text">{t('entry.custom_field')}</option>
                           </select>
-                          <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                          <div className="col-span-2 sm:col-span-1 flex flex-col gap-1.5 min-w-0">
                             <div className="flex items-center gap-1.5">
                               <div className="relative flex-1 min-w-0">
                                 <input
-                                  type={isPasswordType && !showCustomPasswords[cf.id] ? 'password' : 'text'}
+                                  type={isSensitive && !showCustomPasswords[cf.id] ? 'password' : cf.type === 'phone' ? 'tel' : 'text'}
+                                  aria-label={cf.name || suffix}
                                   value={cf.value}
                                   onChange={(e) => updateCustomField(cf.id, { value: e.target.value })}
                                   placeholder={isPasswordType ? '••••••••' : 'Value'}
                                   className="h-9 w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] pl-2.5 pr-8 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)] font-mono"
                                 />
-                                {isPasswordType && (
+                                {isSensitive && (
                                   <ActionTooltip content={showCustomPasswords[cf.id] ? t('login.hide_password') : t('login.show_password')}>
                                     <button
                                       type="button"
@@ -1190,33 +1105,31 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                     }
 
                     return (
-                      <Reorder.Item
-                        key={id}
-                        value={id}
-                        className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 shadow-2xs hover:border-[var(--border)] transition-colors cursor-default select-none"
-                      >
+                      <ReorderField key={id} id={id}>{startDrag => <>
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)]">
-                            <span className="cursor-grab text-[var(--text-tertiary)] active:cursor-grabbing hover:text-[var(--text-primary)] transition-colors p-0.5">
+                            <span onPointerDown={startDrag} className="touch-none cursor-grab text-[var(--text-tertiary)] active:cursor-grabbing hover:text-[var(--text-primary)] transition-colors p-0.5">
                               <GripVertical size={13} />
                             </span>
                             <span className="flex items-center gap-1.5">
                               {icon} {label}
+                              {[primaryLogin.identifier?.id, primaryLogin.password?.id, primaryLogin.url?.id].includes(id) && <span className="text-[10px] text-[var(--text-tertiary)]">{t('entry.used_for_login')}</span>}
                             </span>
                           </div>
+                          <div className="flex items-center gap-1">{[-1, 1].map(direction => <button key={direction} type="button" aria-label={t(direction < 0 ? 'entry.move_up' : 'entry.move_down', { field: label })} disabled={fieldsOrder.indexOf(id) + direction < 0 || fieldsOrder.indexOf(id) + direction >= fieldsOrder.length} onClick={() => setFieldsOrder(previous => { const next = [...previous]; const from = next.indexOf(id); const to = from + direction; if (to >= 0 && to < next.length) [next[from], next[to]] = [next[to], next[from]]; return next; })} className="p-1 text-[var(--text-secondary)] disabled:opacity-30">{direction < 0 ? '↑' : '↓'}</button>)}
                           <ActionTooltip content={t('common.delete')}>
-                            <button
+                            <button aria-label={t('common.delete') + ': ' + label}
                               type="button"
                               onClick={onRemove}
                               className="rounded-[3px] p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                             >
                               <X size={13} />
                             </button>
-                          </ActionTooltip>
+                          </ActionTooltip></div>
                         </div>
 
                         {content}
-                      </Reorder.Item>
+                      </>}</ReorderField>
                     );
                   })}
                 </Reorder.Group>
@@ -1259,6 +1172,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                   </div>
                 </div>
 
+                {allTags.filter(tag => form.tags.includes(tag.name) && tag.default_url && tag.default_url !== form.url).map(tag => <div key={tag.id} className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]"><span>{tag.name}: {tag.default_url}</span><button type="button" className="underline" onClick={() => { updateField('url', tag.default_url!); setFieldsOrder(previous => ['url', ...previous.filter(id => id !== 'url')]); }}>{t('tags.use_default_url')}</button></div>)}
                 {/* Add Field Dropdown */}
                 <div className="flex gap-2 pt-1">
                   <DropdownMenu>
@@ -1272,7 +1186,8 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-48">
-                      {!fieldsOrder.includes('username') && (
+                      <DropdownMenuItem onSelect={() => handleAddField('password')} className="flex items-center gap-2 text-[12px] cursor-pointer"><Key size={13} /><span>{t('detail.password')}</span></DropdownMenuItem>
+                      {(
                         <DropdownMenuItem
                           onSelect={() => handleAddField('username')}
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
@@ -1281,7 +1196,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           <span>{t('detail.username')}</span>
                         </DropdownMenuItem>
                       )}
-                      {!fieldsOrder.includes('email') && (
+                      {(
                         <DropdownMenuItem
                           onSelect={() => handleAddField('email')}
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
@@ -1290,7 +1205,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                           <span>{t('detail.email')}</span>
                         </DropdownMenuItem>
                       )}
-                      {!fieldsOrder.includes('url') && (
+                      {(
                         <DropdownMenuItem
                           onSelect={() => handleAddField('url')}
                           className="flex items-center gap-2 text-[12px] cursor-pointer"
@@ -1353,7 +1268,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                         <span>Custom Hidden / PIN Field</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onSelect={() => addCustomField('phone', t('detail.phone'))}
+                        onSelect={() => handleAddField('phone')}
                         className="flex items-center gap-2 text-[12px] cursor-pointer"
                       >
                         <Smartphone size={13} />
@@ -1401,7 +1316,7 @@ export function EntryModal({ open, onClose, editEntry }: EntryModalProps) {
                     </button>
                   </div>
                 </div>
-              </form>
+              </motion.form>
             </motion.div>
           </motion.div>
         )}

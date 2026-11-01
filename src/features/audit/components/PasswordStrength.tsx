@@ -26,24 +26,17 @@ export const PasswordStrength: React.FC<PasswordStrengthProps> = ({
 }) => {
   const { analyzeStrength } = usePasswordGenerator();
   const { t } = useTranslation();
-  const [score, setScore] = useState<StrengthScore | null>(null);
-  const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-
+  const [analysis, setAnalysis] = useState<{ password: string; score: StrengthScore } | null>(null);
+  const score = analysis?.password === password ? analysis.score : null;
   useEffect(() => {
-    if (!password) {
-      setScore(null);
-      return;
-    }
-
-    if (debounceTimer) clearTimeout(debounceTimer);
+    if (!password) return;
+    let cancelled = false;
     const timer = setTimeout(async () => {
       const result = await analyzeStrength(password);
-      if (result) setScore(result);
+      if (!cancelled && result) setAnalysis({ password, score: result });
     }, 150);
-    setDebounceTimer(timer);
-
-    return () => clearTimeout(timer);
-  }, [password]);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [password, analyzeStrength]);
 
   if (!password || !score) return null;
 

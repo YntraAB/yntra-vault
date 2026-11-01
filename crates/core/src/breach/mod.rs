@@ -154,18 +154,9 @@ mod tests {
     #[ignore = "Explicit live HIBP network test"]
     async fn test_known_breached_password() {
         // "password" is definitely in HIBP
-        let result = check_password_breach("password").await;
-        if let Ok(result) = result {
-            assert!(result.is_breached);
-            assert!(result.breach_count > 0);
-        }
-
-        // Test "Nicolina02" as well
-        let result2 = check_password_breach("Nicolina02").await;
-        if let Ok(result2) = result2 {
-            assert!(result2.is_breached);
-            assert!(result2.breach_count > 0);
-        }
+        let result = check_password_breach("password").await.expect("Live breach lookup must succeed");
+        assert!(result.is_breached);
+        assert!(result.breach_count > 0);
     }
 
     #[test]
@@ -190,11 +181,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "Explicit live HIBP network test"]
     async fn test_safe_password_bloom_short_circuit() {
-        let result = check_password_breach("highly_secure_non_existent_password_12345!").await;
-        if let Ok(result) = result {
-            assert!(!result.is_breached);
-            assert_eq!(result.breach_count, 0);
-        }
+        let result = check_password_breach("highly_secure_non_existent_password_12345!").await.expect("Live breach lookup must succeed");
+        assert!(!result.is_breached);
+        assert_eq!(result.breach_count, 0);
     }
 
     #[test]

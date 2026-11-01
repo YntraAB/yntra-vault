@@ -4,13 +4,12 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use yntra_vault_core::smartlogin::{
     self, PreCheckResult, SmartLoginConfig, SmartLoginEngine, SmartLoginEvent,
     logging::{EventCallback, SmartLoginLogger},
 };
-use yntra_vault_core::vault::types::FieldType;
 
 use super::AppState;
 
@@ -30,27 +29,15 @@ fn prepare_login(state: &AppState, entry_id: &str) -> Result<LoginCredentials, S
     let vault = state.vault.lock().map_err(|e| e.to_string())?;
     let manager = vault.as_ref().ok_or("Vault is locked")?;
     let uuid = Uuid::parse_str(entry_id).map_err(|e| e.to_string())?;
-    let mut entry = manager.get_entry(uuid).map_err(|e| e.to_string())?;
-    let native_browser = smartlogin::engine::uses_native_browser(&entry.url);
-    let phone = entry.custom_fields.iter_mut()
-        .find(|field| field.field_type == FieldType::Phone && !field.value.is_empty())
-        .map(|field| std::mem::take(&mut field.value))
-        .unwrap_or_default();
+    let entry = manager.get_entry(uuid).map_err(|e| e.to_string())?;
+    let native_browser = smartlogin::engine::uses_native_browser(entry.login_fields(false).url);
+    let selected = entry.login_fields(native_browser);
     let credentials = LoginCredentials {
-        url: std::mem::take(&mut entry.url),
-        identifier: Zeroizing::new(if native_browser && !entry.email.is_empty() {
-            std::mem::take(&mut entry.email)
-        } else if !entry.username.is_empty() {
-            std::mem::take(&mut entry.username)
-        } else {
-            let email = std::mem::take(&mut entry.email);
-            if email.is_empty() { phone } else { email }
-        }),
-        password: Zeroizing::new(std::mem::take(&mut entry.password)),
-        totp_secret: entry.totp_secret.take().map(Zeroizing::new),
+        url: selected.url.to_owned(),
+        identifier: Zeroizing::new(selected.identifier.to_owned()),
+        password: Zeroizing::new(selected.password.to_owned()),
+        totp_secret: entry.totp_secret.clone().map(Zeroizing::new),
     };
-    entry.username.zeroize();
-    entry.email.zeroize();
     if credentials.url.is_empty() {
         return Err("Entry has no URL".into());
     }
@@ -68,9 +55,8 @@ pub async fn smart_login_precheck(entry_id: Option<String>, state: State<'_, App
         let vault = state.vault.lock().map_err(|e| e.to_string())?;
         let manager = vault.as_ref().ok_or("Vault is locked")?;
         let uuid = Uuid::parse_str(&entry_id).map_err(|e| e.to_string())?;
-        let entry = manager.list_entries().map_err(|e| e.to_string())?.into_iter()
-            .find(|entry| entry.id == uuid).ok_or("Entry not found")?;
-        if smartlogin::engine::uses_native_browser(&entry.url) { result.needs_close = false; }
+        let entry = manager.get_entry(uuid).map_err(|e| e.to_string())?;
+        if smartlogin::engine::uses_native_browser(entry.login_fields(false).url) { result.needs_close = false; }
     }
     Ok(result)
 }
@@ -153,6 +139,8 @@ mod tests {
             entry_type: None, generate_passkey: None, attachments: None,
         }).unwrap().to_string();
         let state = AppState {
+            sync_review: Default::default(),
+            sync_progress: Default::default(),
             vault: Mutex::new(Some(manager)),
             minimize_to_tray: AtomicBool::new(false),
             lock_on_focus_loss: AtomicBool::new(false),

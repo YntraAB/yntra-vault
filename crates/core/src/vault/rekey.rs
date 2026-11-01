@@ -130,6 +130,9 @@ impl VaultManager {
             Self::reencrypt_entry(&mut trashed.entry, &current_keys.entry_key, &new_keys.entry_key)?;
         }
 
+        Self::reencrypt_sync_history(&mut self.data, &current_keys.entry_key, &new_keys.entry_key)?;
+        crate::services::sync::review::rehash(&mut self.data, &new_keys)?;
+
         // Update salt and keys
         self.salt = new_salt;
         self.keys = Some(new_keys.clone());
@@ -180,8 +183,21 @@ impl VaultManager {
         self.rebuild_search_index();
         Ok(kit)
     }
-}
 
+    pub(crate) fn reencrypt_sync_history(data: &mut super::types::VaultData, current_key: &EntryKey, new_key: &EntryKey) -> crate::Result<()> {
+        for (id, history) in &mut data.settings.sync.history {
+            for version in history {
+                let blob = &mut version.encrypted_entry;
+                let bytes = Self::decrypt_entry_field(blob, current_key, id, "sync-history")?;
+                let mut entry: Entry = rmp_serde::from_slice(&bytes).map_err(|_| VaultError::IntegrityError)?;
+                Self::reencrypt_entry(&mut entry, current_key, new_key)?;
+                let bytes = zeroize::Zeroizing::new(rmp_serde::to_vec(&entry).map_err(|_| VaultError::IntegrityError)?);
+                *blob = Self::encrypt_entry_field(&bytes, new_key, id, "sync-history")?;
+            }
+        }
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +228,13 @@ mod tests {
         }).unwrap();
 
         let old_keys = manager.get_subkeys().unwrap().clone();
+        let history_entry = zeroize::Zeroizing::new(rmp_serde::to_vec(&manager.data.entries[0]).unwrap());
+        manager.data.settings.sync.history.insert(entry_id, vec![crate::services::sync::review::ConflictVersion {
+            id: uuid::Uuid::new_v4(), saved_at: chrono::Utc::now(), clock: Default::default(),
+            encrypted_entry: VaultManager::encrypt_entry_field(&history_entry, &old_keys.entry_key, &entry_id, "sync-history").unwrap(),
+        }]);
+        manager.save().unwrap();
+        let old_salt = manager.salt;
         let old_blob = manager.get_entry(entry_id).unwrap().password.clone();
         assert_eq!(old_blob, "TopSecretPassword123!");
 
@@ -222,6 +245,7 @@ mod tests {
         let _ = manager.change_master_password("old password 2026", "new password 2026").unwrap();
 
         let new_keys = manager.get_subkeys().unwrap().clone();
+        assert_ne!(old_salt, manager.salt);
         // Subkeys must be different!
         assert!(!bool::from(old_keys.entry_key.ct_eq(&new_keys.entry_key)));
         assert!(!bool::from(old_keys.vault_key.ct_eq(&new_keys.vault_key)));
@@ -241,6 +265,11 @@ mod tests {
         // Reopening from disk with new password succeeds and verifies entry
         let reopened = VaultManager::open(&path, "new password 2026").unwrap();
         assert_eq!(reopened.get_entry(entry_id).unwrap().password, "TopSecretPassword123!");
+        let history = &reopened.data.settings.sync.history[&entry_id][0].encrypted_entry;
+        assert!(VaultManager::decrypt_entry_field(history, &old_keys.entry_key, &entry_id, "sync-history").is_err());
+        let bytes = VaultManager::decrypt_entry_field(history, &new_keys.entry_key, &entry_id, "sync-history").unwrap();
+        let entry: Entry = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(&*VaultManager::decrypt_entry_field(&entry.encrypted_password, &new_keys.entry_key, &entry_id, "password").unwrap(), b"TopSecretPassword123!");
 
         // Reopening from disk with old password fails
         assert!(VaultManager::open(&path, "old password 2026").is_err());

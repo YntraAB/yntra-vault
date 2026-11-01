@@ -18,8 +18,8 @@ export function useVault() {
       setVaultInfo(info);
       setIsLocked(false);
       return info;
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -35,8 +35,8 @@ export function useVault() {
       setVaultInfo(info);
       setIsLocked(false);
       return info;
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -52,8 +52,8 @@ export function useVault() {
       setVaultInfo(info);
       setIsLocked(false);
       return info;
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -68,8 +68,8 @@ export function useVault() {
       await backend.lockVault();
       setVaultInfo(null);
       setIsLocked(true);
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);

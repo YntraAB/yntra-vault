@@ -37,6 +37,8 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const hasScannedRef = useRef<boolean>(false);
+  const cameraRequest = useRef(0);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Checks if scanned QR matches expected prefix if configured
   const isValidPayload = useCallback((payload: string): boolean => {
@@ -46,6 +48,8 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
 
   // Stop camera tracks and clean up
   const stopCamera = useCallback(() => {
+    cameraRequest.current++;
+    if (successTimer.current) clearTimeout(successTimer.current);
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -84,15 +88,16 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     setIsSuccess(true);
     stopCamera();
 
-    setTimeout(() => {
+    successTimer.current = setTimeout(() => {
       onScan(payload);
     }, 280);
   }, [onScan, stopCamera]);
 
   // Live video frame scanning loop
-  const scanLoop = useCallback(() => {
+  const scanLoop = useCallback(function scanFrame() {
     if (hasScannedRef.current || !videoRef.current || !canvasRef.current) return;
 
+    const request = cameraRequest.current;
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -107,7 +112,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         try {
           const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
           detector.detect(video).then((barcodes) => {
-            if (barcodes && barcodes.length > 0 && !hasScannedRef.current) {
+            if (request === cameraRequest.current && barcodes && barcodes.length > 0 && !hasScannedRef.current) {
               const rawValue = barcodes[0].rawValue;
               if (rawValue && isValidPayload(rawValue)) {
                 handleSuccess(rawValue.trim());
@@ -139,61 +144,40 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     }
 
     if (!hasScannedRef.current) {
-      animationFrameRef.current = requestAnimationFrame(scanLoop);
+      animationFrameRef.current = requestAnimationFrame(scanFrame);
     }
   }, [handleSuccess, isValidPayload]);
 
   // Start selected camera stream and request permissions
-  const startCamera = useCallback(async (deviceId?: string) => {
+  const startCamera = useCallback((deviceId?: string) => {
     stopCamera();
-    setError(null);
+    const request = ++cameraRequest.current;
     hasScannedRef.current = false;
-    setIsScanning(true);
-    setIsSuccess(false);
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError(t('pairing.err_camera_unsupported') || 'Kameran stöds inte i denna miljö eller saknar behörighet. Välj en bild istället.');
-      return;
-    }
-
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : {
-              facingMode: { ideal: 'environment' },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const constraints: MediaStreamConstraints = { video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+    const pending = navigator.mediaDevices?.getUserMedia
+      ? navigator.mediaDevices.getUserMedia(constraints)
+      : Promise.reject(new Error(t('pairing.err_camera_unsupported')));
+    return pending.then(async stream => {
+      if (request !== cameraRequest.current) { stream.getTracks().forEach(track => track.stop()); return; }
       streamRef.current = stream;
-
+      setError(null); setIsScanning(true); setIsSuccess(false);
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.srcObject = stream; videoRef.current.setAttribute('playsinline', 'true');
         await videoRef.current.play();
-        detectCameras();
-        animationFrameRef.current = requestAnimationFrame(scanLoop);
+        if (request !== cameraRequest.current) return;
+        void detectCameras(); animationFrameRef.current = requestAnimationFrame(scanLoop);
       }
-    } catch (err: unknown) {
-      const errName = (err instanceof Error || (typeof err === 'object' && err !== null && 'name' in err))
-        ? (err as { name?: string }).name
-        : '';
-      const isDenied = errName === 'NotAllowedError' || errName === 'PermissionDeniedError';
-      const msg = isDenied
-        ? (t('pairing.err_camera_permission') || 'Kamerabehörighet nekades. Tillåt kameraåtkomst i enhetens inställningar eller välj en bild nedan.')
-        : (t('pairing.err_camera_init') || 'Kunde inte starta kameran. Kontrollera att ingen annan app använder den.');
-      setError(msg);
-    }
+    }).catch(error => {
+      if (request !== cameraRequest.current) return;
+      stopCamera(); setIsScanning(false);
+      const denied = error instanceof Error && ['NotAllowedError', 'PermissionDeniedError'].includes(error.name);
+      setError(t(denied ? 'pairing.err_camera_permission' : 'pairing.err_camera_init'));
+    });
   }, [detectCameras, scanLoop, stopCamera, t]);
 
   useEffect(() => {
     if (isOpen) {
       hasScannedRef.current = false;
-      setIsSuccess(false);
-      setIsDecodingImage(false);
       startCamera(selectedCameraId || undefined);
     } else {
       stopCamera();
@@ -210,16 +194,18 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     const nextIndex = (currentIndex + 1) % cameras.length;
     const nextId = cameras[nextIndex].deviceId;
     setSelectedCameraId(nextId);
-    startCamera(nextId);
   };
 
   // Robust decoding of image files (photos, gallery, screenshots)
   const handleProcessFile = useCallback(async (file: File | Blob) => {
+    const request = cameraRequest.current;
     setError(null);
     setIsDecodingImage(true);
 
     try {
       const result = await decodeQrFromImage(file);
+      if (request !== cameraRequest.current) return;
+      setIsDecodingImage(false);
 
       if (result.success && result.text) {
         const code = result.text.trim();
@@ -238,12 +224,13 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         );
       }
     } catch {
+      if (request !== cameraRequest.current) return;
       setError(
         t('pairing.err_decode_failed') ||
         'Kunde inte läsa bilden. Försök med en annan bild eller rikta kameran direkt mot QR-koden.'
       );
     } finally {
-      setIsDecodingImage(false);
+      if (request === cameraRequest.current) setIsDecodingImage(false);
     }
   }, [handleSuccess, isValidPayload, t]);
 

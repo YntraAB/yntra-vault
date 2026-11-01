@@ -75,15 +75,8 @@ pub fn protect_vault_destination(vault: &std::path::Path, destination: &str) -> 
     if destination.starts_with("content://") {
         return Ok(());
     }
-    let target = std::path::Path::new(destination);
-    if target == vault
-        || matches!((target.canonicalize(), vault.canonicalize()), (Ok(a), Ok(b)) if a == b)
-    {
-        return Err(
-            "Choose a different file: exporting here would overwrite the active vault".into(),
-        );
-    }
-    Ok(())
+    yntra_vault_core::vault::import_export::reject_vault_destination(vault, std::path::Path::new(destination))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -116,19 +109,23 @@ pub async fn export_attachment(
     path: String,
     state: tauri::State<'_, super::AppState>,
 ) -> Result<(), String> {
-    let bytes = {
+    let (bytes, vault_path) = {
         let vault = state.vault.lock().map_err(|e| e.to_string())?;
         let manager = vault.as_ref().ok_or("Vault is locked")?;
         protect_vault_destination(&manager.path, &path)?;
-        Zeroizing::new(
+        (Zeroizing::new(
             manager
                 .get_attachment_data(
                     entry_id.parse().map_err(|_| "Invalid entry ID")?,
                     attachment_id.parse().map_err(|_| "Invalid attachment ID")?,
                 )
                 .map_err(|e| e.to_string())?,
-        )
+        ), manager.path.clone())
     };
+    if !path.starts_with("content://") {
+        return yntra_vault_core::vault::import_export::write_export_file(&vault_path, std::path::Path::new(&path), &bytes)
+            .map_err(|error| error.to_string());
+    }
     write(&app, &path, &bytes)
 }
 
@@ -143,6 +140,9 @@ mod tests {
         assert!(protect_vault_destination(&path, &path.to_string_lossy()).is_err());
         let alias = directory.path().join(".").join("vault.vdb");
         assert!(protect_vault_destination(&path, &alias.to_string_lossy()).is_err());
+        let hardlink = directory.path().join("hardlink.bin");
+        std::fs::hard_link(&path, &hardlink).unwrap();
+        assert!(protect_vault_destination(&path, &hardlink.to_string_lossy()).is_err());
         assert!(
             protect_vault_destination(
                 &path,

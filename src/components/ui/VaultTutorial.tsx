@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Shield, ArrowRight, ArrowDown,
@@ -50,65 +50,28 @@ export function VaultTutorial() {
   const { t } = useTranslation();
   const { setIsEntryModalOpen, setIsCreateTagOpen } = useUi();
   const { tags, entries } = useEntries();
-  const [phase, setPhase] = useState<'hidden' | 'prompt' | 'guide' | 'waiting'>('hidden');
-  const [stepIndex, setStepIndex] = useState(0);
-
-  // Track counts to detect when user completes an action
-  const prevTagCount = useRef<number>(tags.length);
-  const prevEntryCount = useRef<number>(entries.length);
-  const waitingForStep = useRef<StepId | null>(null);
-
-  // Initialize from localStorage
+  const [initial] = useState(() => {
+    const stored = localStorage.getItem(RESUME_KEY);
+    const index = stored === null ? -1 : Number(stored);
+    const valid = Number.isInteger(index) && index >= 0 && index < STEP_ORDER.length;
+    return { index: valid ? index : 0, phase: valid ? 'waiting' as const : localStorage.getItem(STORAGE_KEY) === 'true' ? 'prompt' as const : 'hidden' as const };
+  });
+  const [phase, setPhase] = useState<'hidden' | 'prompt' | 'guide' | 'waiting'>(initial.phase);
+  const [stepIndex, setStepIndex] = useState(initial.index);
+  const [waitingForStep, setWaitingForStep] = useState<StepId | null>(initial.phase === 'waiting' ? STEP_ORDER[initial.index - 1] ?? null : null);
+  const [counts, setCounts] = useState({ tags: tags.length, entries: entries.length });
   useEffect(() => {
-    const resumeStep = localStorage.getItem(RESUME_KEY);
-    if (resumeStep !== null) {
-      // Resuming after an action
-      const idx = parseInt(resumeStep, 10);
-      if (!isNaN(idx) && idx < STEP_ORDER.length) {
-        setStepIndex(idx);
-        waitingForStep.current = STEP_ORDER[idx - 1] || null;
-        setPhase('waiting');
-      }
-    } else if (localStorage.getItem(STORAGE_KEY) === 'true') {
-      setPhase('prompt');
-    }
-  }, []);
-
-  // Watch for tag creation completion
-  useEffect(() => {
-    if (phase === 'waiting' && waitingForStep.current === 'create-tag') {
-      if (tags.length > prevTagCount.current) {
-        // Tag was created, resume tutorial
-        const resumeIdx = parseInt(localStorage.getItem(RESUME_KEY) || '2', 10);
-        localStorage.removeItem(RESUME_KEY);
-        waitingForStep.current = null;
-        setStepIndex(resumeIdx);
-        // Brief delay so user sees the tag created and tag modal closed
-        setTimeout(() => setPhase('guide'), 500);
-      }
-    }
-    prevTagCount.current = tags.length;
-  }, [tags.length, phase]);
-
-  // Watch for entry creation completion (entry modal closes after adding)
-  useEffect(() => {
-    if (phase === 'waiting' && waitingForStep.current === 'create-entry') {
-      if (entries.length > prevEntryCount.current) {
-        // Entry was added, resume tutorial
-        const resumeIdx = parseInt(localStorage.getItem(RESUME_KEY) || '3', 10);
-        localStorage.removeItem(RESUME_KEY);
-        waitingForStep.current = null;
-        setStepIndex(resumeIdx);
-        setTimeout(() => setPhase('guide'), 500);
-      }
-    }
-    prevEntryCount.current = entries.length;
-  }, [entries.length, phase]);
+    if (phase !== 'waiting' || !(waitingForStep === 'create-tag' && tags.length > counts.tags || waitingForStep === 'create-entry' && entries.length > counts.entries)) return;
+    const timer = setTimeout(() => {
+      localStorage.removeItem(RESUME_KEY); setWaitingForStep(null); setPhase('guide');
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [phase, waitingForStep, tags.length, entries.length, counts]);
 
   const dismiss = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(RESUME_KEY);
-    waitingForStep.current = null;
+    setWaitingForStep(null);
     setPhase('hidden');
   }, []);
 
@@ -118,7 +81,7 @@ export function VaultTutorial() {
   };
 
   const resumeGuideManually = () => {
-    waitingForStep.current = null;
+    setWaitingForStep(null);
     const resumeIdx = parseInt(localStorage.getItem(RESUME_KEY) || String(stepIndex), 10);
     localStorage.removeItem(RESUME_KEY);
     setStepIndex(resumeIdx);
@@ -128,9 +91,9 @@ export function VaultTutorial() {
   // Trigger an action and wait for completion
   const triggerAction = (nextStepIndex: number, waitFor: StepId) => {
     localStorage.setItem(RESUME_KEY, String(nextStepIndex));
-    waitingForStep.current = waitFor;
-    prevTagCount.current = tags.length;
-    prevEntryCount.current = entries.length;
+    setWaitingForStep(waitFor);
+    setCounts({ tags: tags.length, entries: entries.length });
+    setStepIndex(nextStepIndex);
     setPhase('waiting');
   };
 
@@ -332,7 +295,7 @@ export function VaultTutorial() {
 
   // Waiting state: show a floating hint with option to open guide or skip
   if (phase === 'waiting') {
-    const waitStep = waitingForStep.current;
+    const waitStep = waitingForStep;
     const hintText = waitStep === 'create-tag'
       ? t('tutorial.waiting_tag')
       : t('tutorial.waiting_entry');

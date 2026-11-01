@@ -6,12 +6,16 @@ An offline-first, zero-knowledge desktop password manager engineered with Rust, 
 [![Security Policy](https://img.shields.io/badge/Security-Policy-red.svg)](SECURITY.md)
 [![Format Spec](https://img.shields.io/badge/.vdb-Format_Spec-purple.svg)](docs/architecture/VDB_SPEC.md)
 [![Languages: 24](https://img.shields.io/badge/Languages-24%20Supported-brightgreen.svg)](#internationalization-24-languages)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.95.0-orange.svg)](https://www.rust-lang.org/)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue.svg)](https://tauri.app/)
 
 All credentials remain fully local on your device. Yntra Vault operates with zero cloud servers, zero telemetry, and zero mandatory third-party network connections. Full binary format specification is available in [VDB_SPEC.md](docs/architecture/VDB_SPEC.md).
 
-For current source behavior, see [USB binding and recovery v2](docs/security/USB-RECOVERY.md) and [updates and preserved application data](docs/security/UPDATES.md). See the 0.2.5 changelog for the source changes; published packages are listed separately on GitHub Releases. Implementation, package publication, and real-device verification are distinct; see those guides for the verified scope and remaining limits.
+For current source behavior, see [USB binding and recovery v2](docs/security/USB-RECOVERY.md), [updates and preserved application data](docs/security/UPDATES.md) and the [changelog](CHANGELOG.md). Published packages are listed separately on GitHub Releases. Implementation, package publication, and real-device verification are distinct; see those guides for the verified scope and remaining limits.
+
+The 0.2.8 preview makes Windows downloads available before Android and Linux finish. Other packages are added after their checks, with separate platform checksum files. The preview is installed manually; automatic updates continue to use the stable release. Both sync peers must upgrade for reviewed field synchronization. The first save migrates older vaults and creates an encrypted backup; older applications cannot open the migrated file.
+
+Entries can contain multiple usernames, emails, phone numbers, passwords and websites. Reorder them to choose the first non-empty identifier, password and website used by Smart Login. Tags can provide an optional default website that you explicitly copy into an entry. Sync previews compare individual fields, mask secrets until revealed, and let you resolve conflicts before saving.
 
 ---
 
@@ -35,7 +39,7 @@ graph TD
 ```
 
 * **Single-Pass Authenticated Header**: Header metadata (magic, version, salt, KDF params) is bound as AAD into `XChaCha20-Poly1305`, authenticating header and payload before deserialization.
-* **Local network sync and device pairing**: PIN or QR pairing explicitly enrolls a separate signing key for each device. Protocol v3 authenticates both devices and uses fresh ECDH transfer keys. Smart Login and the Git credential helper enforce parsed exact HTTPS origins; Smart Login permits only explicitly listed SSO host pairs. Existing sync peers must update and re-pair. Removing a device blocks its later authenticated sync locally, but cannot erase old copies or revoke shared keys from snapshots acquired separately.
+* **Local network sync and device pairing**: PIN or QR pairing explicitly enrolls a separate signing key for each device. Protocol v3 authenticates both devices and uses fresh ECDH transfer keys. Smart Login and the Git credential helper enforce parsed exact HTTPS origins; Smart Login permits only explicitly listed SSO host pairs. The unreleased reviewed-sync protocol requires both peers to update; existing valid device identities remain paired. Removing a device blocks its later authenticated sync locally, but cannot erase old copies or revoke shared keys from snapshots acquired separately.
 * **Hardware Envelopes (TPM 2.0 & App-Bound DPAPI)**: Sensitive secrets and biometric session tokens are hardware-bound using Windows TPM 2.0 RSA encryption and BLAKE3 installation-bound DPAPI envelopes.
 * **Passkey Support**: Native ES256 (ECDSA P-256) keypair generation and signing per entry.
 * **Zeroize Memory Protection**: Critical keys and decrypted fields implement `zeroize::ZeroizeOnDrop` alongside guard-paged locked buffers (`PAGE_NOACCESS` / `mlock` + `MADV_DONTDUMP`).
@@ -68,7 +72,7 @@ graph TD
 
 ## Internationalization (24 Languages)
 
-Yntra Vault is localized into 24 languages with 100% string coverage (824 translation keys per language, validated by automated test suites):
+Yntra Vault includes 24 languages. Automated tests check translation-key coverage; they do not establish native-speaker review of every translation.
 
 | Region | Supported Languages |
 |:---|:---|
@@ -97,7 +101,7 @@ Yntra Vault is localized into 24 languages with 100% string coverage (824 transl
 | Password History & Rollback | `core::vault::history` | `PasswordDetail.tsx` | Windows, macOS, Linux | ✅ Complete |
 | Hardware Envelopes (TPM 2.0 / DPAPI) | `crypto::tpm` | `Login.tsx` | Windows, macOS | ✅ Complete |
 | Shamir Secret Sharing & Emergency Kit | `core::vault::emergency` | `SecurityTab.tsx` | Cross-Platform | ✅ Complete |
-| WebDAV & P2P Sync | `core::sync` | `DevicePairingWizard.tsx`, `SettingsPanel.tsx` | Cross-Platform | Implemented; v3 peers require re-pairing |
+| WebDAV & reviewed P2P sync | `core::sync` | `SyncReview.tsx`, `SettingsPanel.tsx` | Cross-Platform | Unreleased; automated checks and selected Pixel/Windows CLI flows verified |
 | QR Device Pairing (YQR3) | `core::sync` | `QrScannerModal.tsx`, `DevicePairingWizard.tsx` | Cross-Platform | Implemented; physical-device validation is separate |
 | Command Line Interface (`yntra-cli`) | `cli/` | Terminal TUI (`yntra tui`) | Cross-Platform | ✅ Complete |
 | 24 Locales & RTL Support | — | `src/i18n/` | Cross-Platform | ✅ Complete |
@@ -115,7 +119,7 @@ Yntra Vault features an ultra-fast command-line interface (`yntra` / `yntra-cli`
 - **Developer Ecosystem Protocols**:
   - `yntra git-credential setup`: One-click Git HTTPS credential helper setup.
   - `yntra ssh-agent`: OpenSSH Agent pipe server (`SSH_AUTH_SOCK`) for in-memory SSH authentication.
-  - `yntra native-host install <chrome|firefox>`: Chrome/Firefox Native Messaging host installer.
+  - `yntra native-host install <chrome|edge|firefox> --extension-id <ID>`: Register the native host for one explicitly trusted browser extension. The extension is installed separately.
 - **Shell Auto-Completions**: Subcommand `yntra completions <zsh|bash|fish|powershell>`.
 
 ### Quick CLI Usage
@@ -147,8 +151,8 @@ yntra completions zsh > ~/.zsh/completion/_yntra
 ### Prerequisites
 
 #### 1. Common Dependencies
-* **Rust**: `1.75.0` or higher ([Install Rust](https://www.rust-lang.org/tools/install))
-* **Bun**: `1.0.0` or higher ([Install Bun](https://bun.sh)) or Node.js 18+
+* **Rust**: `1.95.0`, pinned in `rust-toolchain.toml` ([Install Rust](https://www.rust-lang.org/tools/install)).
+* **Bun**: `1.4.2`, matching the build workflows ([Install Bun](https://bun.sh)).
 
 #### 2. System Build Tools (Required for Tauri)
 * **Windows**: Visual Studio 2022 C++ Build Tools (`Desktop development with C++`) and Microsoft Edge WebView2 runtime.

@@ -1,103 +1,16 @@
 //! Yntra Vault — Browser Extension Native Messaging Host
-//!
-//! Provides secure stdio communication with authorized browser extensions (Chrome, Edge, Firefox).
-//! Enforces caller origin allowlist checking to prevent unauthorized extensions or local processes
-//! from exfiltrating credentials.
 
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::process::Command;
-use colored::*;
 use serde_json::json;
 
 use yntra_vault_core::{Result, VaultError};
 use crate::ipc::{try_ipc_request, IpcRequest, IpcResponse};
 
-/// Official canonical extension identifiers
-pub const DEFAULT_ALLOWED_ORIGINS: &[&str] = &[
-    "chrome-extension://yntravaultbrowserextensionid/",
-    "edge-extension://yntravaultbrowserextensionid/",
-    "yntravault@yntra.com",
-];
-
-/// Retrieve effective allowed origins list (default + optional environment overrides)
-pub fn get_allowed_origins() -> Vec<String> {
-    let mut origins: Vec<String> = DEFAULT_ALLOWED_ORIGINS.iter().map(|s| s.to_string()).collect();
-    if let Ok(env_allowed) = std::env::var("YNTRA_ALLOWED_EXTENSIONS") {
-        for item in env_allowed.split(&[',', ';'][..]) {
-            let trimmed = item.trim();
-            if !trimmed.is_empty() {
-                origins.push(trimmed.to_string());
-            }
-        }
-    }
-    origins
-}
-
-/// Verify that the CLI arguments correspond to an authorized browser extension or authenticated session.
-pub fn verify_caller_origin(args: &[String]) -> Result<String> {
-    let allowed = get_allowed_origins();
-
-    // 1. Check for explicit Chromium/Edge/Mozilla extension origin URIs
-    for arg in args.iter().skip(1) {
-        let lower = arg.to_lowercase();
-        if lower.starts_with("chrome-extension://") || lower.starts_with("edge-extension://") || lower.starts_with("moz-extension://") {
-            let normalized = if lower.ends_with('/') { lower } else { format!("{}/", lower) };
-            if allowed.iter().any(|a| a.to_lowercase().trim_end_matches('/') == normalized.trim_end_matches('/')) {
-                return Ok(normalized);
-            } else {
-                return Err(VaultError::InvalidFormat(format!(
-                    "Access Denied: Browser extension origin '{}' is not in the allowed extensions allowlist",
-                    arg
-                )));
-            }
-        }
-    }
-
-    // 2. Check for Firefox extension ID (e.g. yntravault@yntra.com) passed as argument
-    for arg in args.iter().skip(1) {
-        if arg.contains('@') {
-            let lower = arg.to_lowercase();
-            if allowed.iter().any(|a| a.to_lowercase() == lower) {
-                return Ok(lower);
-            } else {
-                return Err(VaultError::InvalidFormat(format!(
-                    "Access Denied: Firefox extension ID '{}' is not in the allowed extensions allowlist",
-                    arg
-                )));
-            }
-        }
-    }
-
-    // 3. Direct invocation via flags: require active session token in environment or keychain
-    let is_direct_flag = args.iter().skip(1).any(|a| {
-        let lower = a.to_lowercase();
-        lower == "--native-host" || lower == "native-host" || lower == "run" || lower == "stdio"
-    });
-
-    if is_direct_flag {
-        let token = crate::ipc::get_session_token_from_env();
-        if !token.is_empty() {
-            return Ok("authenticated-cli-session".to_string());
-        } else {
-            return Err(VaultError::InvalidFormat(
-                "Access Denied: Direct native-host execution requires an active authenticated YNTRA_SESSION".into(),
-            ));
-        }
-    }
-
-    Err(VaultError::InvalidFormat(
-        "Access Denied: Missing or unrecognized browser extension origin".into(),
-    ))
-}
-
-/// Verify origin and run native messaging loop
-pub async fn verify_and_run_native_host(args: &[String]) -> Result<()> {
-    let origin = verify_caller_origin(args)?;
-    run_native_host_loop(&origin).await
-}
-
-pub async fn run_native_host_loop(_caller_origin: &str) -> Result<()> {
+pub async fn run_native_host_loop() -> Result<()> {
+    verify_caller()?;
     let mut stdin_handle = io::stdin();
     let mut stdout_handle = io::stdout();
 
@@ -107,7 +20,7 @@ pub async fn run_native_host_loop(_caller_origin: &str) -> Result<()> {
             break;
         }
 
-        let msg_len = u32::from_le_bytes(len_bytes) as usize;
+        let msg_len = u32::from_ne_bytes(len_bytes) as usize;
         if msg_len == 0 || msg_len > 10 * 1024 * 1024 {
             break;
         }
@@ -117,11 +30,11 @@ pub async fn run_native_host_loop(_caller_origin: &str) -> Result<()> {
             break;
         }
 
-        if let Ok(req_val) = serde_json::from_slice::<serde_json::Value>(&msg_buf) {
-            let command = req_val.get("command").and_then(|v| v.as_str()).unwrap_or("list");
+        let resp_val = if let Ok(req_val) = serde_json::from_slice::<serde_json::Value>(&msg_buf) {
+            let command = req_val.get("command").and_then(|v| v.as_str()).unwrap_or("");
             
-            let resp_val = match command {
-                "ping" => json!({"status": "ok", "version": "0.1.0"}),
+            match command {
+                "ping" => json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}),
                 "list" => {
                     if let Some(IpcResponse::ListEntries(list)) = try_ipc_request(&IpcRequest::ListEntries).await {
                         json!({"status": "ok", "entries": list})
@@ -138,127 +51,118 @@ pub async fn run_native_host_loop(_caller_origin: &str) -> Result<()> {
                     }
                 }
                 _ => json!({"status": "error", "error": "Unknown command"}),
-            };
-
-            let resp_bytes = serde_json::to_vec(&resp_val).unwrap();
-            let resp_len_bytes = (resp_bytes.len() as u32).to_le_bytes();
-
-            let _ = stdout_handle.write_all(&resp_len_bytes);
-            let _ = stdout_handle.write_all(&resp_bytes);
-            let _ = stdout_handle.flush();
-        }
+            }
+        } else { json!({"status": "error", "error": "Invalid JSON request"}) };
+            let mut resp_bytes = serde_json::to_vec(&resp_val).map_err(|e| VaultError::InvalidFormat(e.to_string()))?;
+            if resp_bytes.len() > 1024 * 1024 {
+                resp_bytes = br#"{"status":"error","error":"Response exceeds the native messaging limit"}"#.to_vec();
+            }
+            let resp_len_bytes = (resp_bytes.len() as u32).to_ne_bytes();
+            stdout_handle.write_all(&resp_len_bytes)?;
+            stdout_handle.write_all(&resp_bytes)?;
+            stdout_handle.flush()?;
     }
 
     Ok(())
 }
 
 pub fn is_browser_native_host_invocation(args: &[String]) -> bool {
-    args.iter().skip(1).any(|arg| {
+    args.get(1).is_some_and(|arg| {
         let lower = arg.to_lowercase();
         lower.starts_with("chrome-extension://")
             || lower.starts_with("moz-extension://")
             || lower.starts_with("edge-extension://")
             || (lower.ends_with(".json") && (lower.contains("nativemessaginghosts") || lower.contains("com.yntra.vault")))
             || lower == "--native-host"
-            || lower == "native-host"
     })
 }
 
-pub fn install_native_host_manifest(browser: &str) -> Result<()> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| VaultError::InvalidFormat(format!("Failed to locate binary path: {}", e)))?;
 
-    let mut dir = if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-        PathBuf::from(appdata)
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".config")
-    } else {
-        std::env::temp_dir()
+fn manifest_directory(browser: &str) -> Result<PathBuf> {
+    #[cfg(windows)]
+    let directory = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or_else(|| VaultError::InvalidState("LOCALAPPDATA is unavailable".into()))?).join("YntraVault").join("NativeMessagingHosts").join(&browser);
+    #[cfg(not(windows))]
+    let directory = {
+        let home = dirs::home_dir().ok_or_else(|| VaultError::InvalidState("Home directory is unavailable".into()))?;
+        #[cfg(target_os = "macos")]
+        let relative = match browser { "firefox" => "Library/Application Support/Mozilla/NativeMessagingHosts", "edge" => "Library/Application Support/Microsoft Edge/NativeMessagingHosts", _ => "Library/Application Support/Google/Chrome/NativeMessagingHosts" };
+        #[cfg(not(target_os = "macos"))]
+        let relative = match browser.as_str() { "firefox" => ".mozilla/native-messaging-hosts", "edge" => ".config/microsoft-edge/NativeMessagingHosts", _ => ".config/google-chrome/NativeMessagingHosts" };
+        home.join(relative)
     };
-    dir.push("YntraVault");
-    let _ = std::fs::create_dir_all(&dir);
+    Ok(directory)
+}
 
-    let manifest_path = dir.join("com.yntra.vault.json");
+fn caller_allowed(args: &[String], manifests: &[serde_json::Value], has_session: bool) -> bool {
+    let Some(first) = args.get(1) else { return false; };
+    if first == "--native-host" {
+        return has_session;
+    }
+    if first.starts_with("chrome-extension://") || first.starts_with("edge-extension://") || first.starts_with("moz-extension://") {
+        return manifests.iter().any(|manifest| manifest["allowed_origins"].as_array()
+            .is_some_and(|origins| origins.iter().any(|origin| origin.as_str() == Some(first))));
+    }
+    // Firefox supplies the registered manifest path followed by its extension ID.
+    if first.ends_with(".json") {
+        return args.get(2).is_some_and(|id| manifests.iter().any(|manifest|
+            manifest["allowed_extensions"].as_array().is_some_and(|ids|
+                ids.iter().any(|allowed| allowed.as_str() == Some(id)))));
+    }
+    has_session && args.windows(2).any(|pair| pair[0] == "native-host" && matches!(pair[1].as_str(), "run" | "stdio"))
+}
 
-    let is_firefox = browser.eq_ignore_ascii_case("firefox");
-    let manifest_json = if is_firefox {
-        json!({
-            "name": "com.yntra.vault",
-            "description": "Yntra Vault Password Manager Native Messaging Host",
-            "path": exe_path.to_string_lossy(),
-            "type": "stdio",
-            "allowed_extensions": [
-                "yntravault@yntra.com"
-            ]
-        })
-    } else {
-        json!({
-            "name": "com.yntra.vault",
-            "description": "Yntra Vault Password Manager Native Messaging Host",
-            "path": exe_path.to_string_lossy(),
-            "type": "stdio",
-            "allowed_origins": [
-                "chrome-extension://yntravaultbrowserextensionid/",
-                "edge-extension://yntravaultbrowserextensionid/"
-            ]
-        })
-    };
+fn verify_caller() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let executable = std::env::current_exe()?;
+    let manifests: Vec<_> = ["chrome", "edge", "firefox"].iter().filter_map(|browser| {
+        let path = manifest_directory(browser).ok()?.join("com.yntra.vault.json");
+        if std::fs::metadata(&path).ok()?.len() > 65536 { return None; }
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+        (manifest["name"] == "com.yntra.vault" && manifest["path"].as_str()
+            .is_some_and(|path| std::path::Path::new(path) == executable)).then_some(manifest)
+    }).collect();
+    let has_session = !crate::ipc::get_session_token_from_env().is_empty();
+    if caller_allowed(&args, &manifests, has_session) { Ok(()) }
+    else { Err(VaultError::InvalidState("Native host requires a registered extension origin or an active CLI session".into())) }
+}
 
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json).unwrap())
-        .map_err(|e| VaultError::InvalidFormat(format!("Failed to write manifest: {}", e)))?;
+fn native_manifest(browser: &str, extension_id: &str, executable: &std::path::Path) -> Result<serde_json::Value> {
+    if !matches!(browser, "chrome" | "edge" | "firefox") {
+        return Err(VaultError::InvalidFormat("Choose chrome, edge or firefox for native-host installation".into()));
+    }
+    let valid = if browser == "firefox" {
+        !extension_id.is_empty() && extension_id.len() <= 255 && !extension_id.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | '\\' | '*'))
+    } else { extension_id.len() == 32 && extension_id.bytes().all(|c| (b'a'..=b'p').contains(&c)) };
+    if !valid { return Err(VaultError::InvalidFormat("Provide the exact installed extension ID with --extension-id".into())); }
+    let mut manifest = json!({ "name": "com.yntra.vault", "description": "Yntra Vault Password Manager Native Messaging Host", "path": executable, "type": "stdio" });
+    if browser == "firefox" { manifest["allowed_extensions"] = json!([extension_id]); }
+    else { manifest["allowed_origins"] = json!([format!("chrome-extension://{extension_id}/")]); }
+    Ok(manifest)
+}
 
-    println!("{} Generated Native Messaging manifest at: {}", "✓".green().bold(), manifest_path.display().to_string().yellow());
-
+pub fn install_native_host_manifest(browser: &str, extension_id: &str) -> Result<()> {
+    let browser = browser.to_lowercase();
+    let executable = std::env::current_exe()?;
+    let manifest = native_manifest(&browser, extension_id, &executable)?;
+    let directory = manifest_directory(&browser)?;
+    std::fs::create_dir_all(&directory)?;
+    let manifest_path = directory.join("com.yntra.vault.json");
+    let bytes = serde_json::to_vec_pretty(&manifest).map_err(|e| VaultError::InvalidFormat(e.to_string()))?;
+    let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
+    staged.write_all(&bytes)?;
+    staged.as_file().sync_all()?;
+    staged.persist(&manifest_path).map_err(|error| VaultError::from(error.error))?;
     #[cfg(windows)]
     {
-        let browsers: Vec<&str> = if browser.eq_ignore_ascii_case("all") {
-            vec!["chrome", "edge", "firefox"]
-        } else {
-            vec![browser]
+        let key = match browser.as_str() {
+            "firefox" => r"HKCU\Software\Mozilla\NativeMessagingHosts\com.yntra.vault",
+            "edge" => r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.yntra.vault",
+            _ => r"HKCU\Software\Google\Chrome\NativeMessagingHosts\com.yntra.vault",
         };
-
-        for b in browsers {
-            let reg_path = match b.to_lowercase().as_str() {
-                "firefox" => r"HKCU\Software\Mozilla\NativeMessagingHosts\com.yntra.vault",
-                "edge" => r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.yntra.vault",
-                _ => r"HKCU\Software\Google\Chrome\NativeMessagingHosts\com.yntra.vault",
-            };
-
-            let status = Command::new("reg")
-                .args(["add", reg_path, "/ve", "/t", "REG_SZ", "/d", &manifest_path.to_string_lossy(), "/f"])
-                .status();
-
-            if let Ok(st) = status
-                && st.success() {
-                    println!("{} Registered Windows Registry key for {}", "✓".green().bold(), b.cyan());
-                }
-        }
+        let status = Command::new("reg").args(["add", key, "/ve", "/t", "REG_SZ", "/d", &manifest_path.to_string_lossy(), "/f"]).status()?;
+        if !status.success() { return Err(VaultError::InvalidState("Native messaging registration failed".into())); }
     }
-
-    #[cfg(not(windows))]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            let home_path = PathBuf::from(home);
-            let target_dirs = vec![
-                home_path.join(".config/google-chrome/NativeMessagingHosts"),
-                home_path.join(".config/chromium/NativeMessagingHosts"),
-                home_path.join(".config/microsoft-edge/NativeMessagingHosts"),
-                home_path.join(".mozilla/native-messaging-hosts"),
-                home_path.join("Library/Application Support/Google/Chrome/NativeMessagingHosts"),
-                home_path.join("Library/Application Support/Mozilla/NativeMessagingHosts"),
-            ];
-
-            for t_dir in target_dirs {
-                if t_dir.parent().map(|p| p.exists()).unwrap_or(false) {
-                    let _ = std::fs::create_dir_all(&t_dir);
-                    let target_file = t_dir.join("com.yntra.vault.json");
-                    let _ = std::fs::copy(&manifest_path, target_file);
-                }
-            }
-        }
-    }
-
-    println!("{} Native Messaging Host installation complete!", "✓".green().bold());
+    println!("Native messaging host installed for {}: {}", browser, manifest_path.display());
     Ok(())
 }
 
@@ -267,14 +171,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn caller_must_match_registered_origin_or_have_a_session() {
+        let manifests = vec![native_manifest("chrome", "abcdefghijklmnopabcdefghijklmnop", std::path::Path::new("/yntra")).unwrap(), native_manifest("firefox", "fixture@example.test", std::path::Path::new("/yntra")).unwrap()];
+        let args = |values: &[&str]| values.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+        assert!(caller_allowed(&args(&["yntra", "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]), &manifests, false));
+        assert!(!caller_allowed(&args(&["yntra", "chrome-extension://pppppppppppppppppppppppppppppppp/"]), &manifests, true));
+        assert!(caller_allowed(&args(&["yntra", "com.yntra.vault.json", "fixture@example.test"]), &manifests, false));
+        assert!(!caller_allowed(&args(&["yntra", "com.yntra.vault.json", "other@example.test"]), &manifests, true));
+        assert!(!caller_allowed(&args(&["yntra", "native-host", "run"]), &manifests, false));
+        assert!(caller_allowed(&args(&["yntra", "native-host", "run"]), &manifests, true));
+        assert!(caller_allowed(&args(&["yntra", "--json", "--path", "fixture.vdb", "native-host", "stdio"]), &manifests, true));
+    }
+
+    #[test]
+    fn manifests_bind_one_real_extension_and_browser_family() {
+        let path = std::path::Path::new("/fixture/yntra");
+        for browser in ["chrome", "edge"] {
+            let manifest = native_manifest(browser, "abcdefghijklmnopabcdefghijklmnop", path).unwrap();
+            assert_eq!(manifest["allowed_origins"], json!(["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]));
+            assert!(manifest.get("allowed_extensions").is_none());
+        }
+        let firefox = native_manifest("firefox", "fixture@example.test", path).unwrap();
+        assert_eq!(firefox["allowed_extensions"], json!(["fixture@example.test"]));
+        assert!(firefox.get("allowed_origins").is_none());
+        for (browser, id) in [("all", "fixture"), ("chrome", "*"), ("chrome", "yntravaultbrowserextensionid"), ("firefox", "*")] { assert!(native_manifest(browser, id, path).is_err()); }
+        assert!(!is_browser_native_host_invocation(&["yntra.exe".into(), "native-host".into(), "install".into()]));
+        assert!(!is_browser_native_host_invocation(&["yntra.exe".into(), "get".into(), "chrome-extension://example/".into()]));
+    }
+
+    #[test]
     fn test_is_browser_native_host_detection() {
         assert!(is_browser_native_host_invocation(&[
             "yntra.exe".into(),
-            "chrome-extension://yntravaultbrowserextensionid/".into(),
+            "chrome-extension://knldjmfmopnmpfpdoneapnegffipkgkd/".into(),
         ]));
         assert!(is_browser_native_host_invocation(&[
             "yntra.exe".into(),
-            "edge-extension://yntravaultbrowserextensionid/".into(),
+            "edge-extension://knldjmfmopnmpfpdoneapnegffipkgkd/".into(),
         ]));
         assert!(is_browser_native_host_invocation(&[
             "yntra.exe".into(),
@@ -285,44 +218,5 @@ mod tests {
             "get".into(),
             "github".into(),
         ]));
-    }
-
-    #[test]
-    fn test_verify_caller_origin_allowed() {
-        let chrome_args = vec![
-            "yntra.exe".to_string(),
-            "chrome-extension://yntravaultbrowserextensionid/".to_string(),
-        ];
-        assert!(verify_caller_origin(&chrome_args).is_ok());
-
-        let edge_args = vec![
-            "yntra.exe".to_string(),
-            "edge-extension://yntravaultbrowserextensionid/".to_string(),
-        ];
-        assert!(verify_caller_origin(&edge_args).is_ok());
-
-        let firefox_args = vec![
-            "yntra.exe".to_string(),
-            "/path/to/com.yntra.vault.json".to_string(),
-            "yntravault@yntra.com".to_string(),
-        ];
-        assert!(verify_caller_origin(&firefox_args).is_ok());
-    }
-
-    #[test]
-    fn test_verify_caller_origin_unauthorized_rejected() {
-        let rogue_args = vec![
-            "yntra.exe".to_string(),
-            "chrome-extension://rogueextensionid1234567890/".to_string(),
-        ];
-        let err = verify_caller_origin(&rogue_args);
-        assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("Access Denied"));
-
-        let rogue_ff = vec![
-            "yntra.exe".to_string(),
-            "evil@attacker.com".to_string(),
-        ];
-        assert!(verify_caller_origin(&rogue_ff).is_err());
     }
 }

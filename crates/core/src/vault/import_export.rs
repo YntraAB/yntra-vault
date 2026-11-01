@@ -28,6 +28,32 @@ mod import_tests {
     use crate::vault::importer::{Importer, ImportFormat};
 
     #[test]
+    fn encrypted_export_preserves_source_aliases_and_previous_backups_on_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.vdb");
+        let alias = directory.path().join("alias.vdb");
+        let destination = directory.path().join("backup.vdb");
+        let manager = VaultManager::create("Export", "Synthetic-Export-2026!", &path).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        std::fs::hard_link(&path, &alias).unwrap();
+        assert!(manager.export_encrypted(&path).is_err());
+        assert!(manager.export_encrypted(&alias).is_err());
+        assert!(write_export_file(&path, &alias, b"synthetic attachment").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        manager.export_encrypted(&destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert!(manager.export_encrypted(directory.path()).is_err());
+        let mut other = VaultManager::open(&path, "Synthetic-Export-2026!").unwrap();
+        other.data.metadata.name = "Newer revision".into(); other.save().unwrap();
+        assert!(manager.export_encrypted(&destination).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        other.export_encrypted(&destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), std::fs::read(&path).unwrap());
+        other.lock();
+        assert!(other.export_encrypted(&destination).is_err());
+    }
+
+    #[test]
     fn plaintext_export_rejects_source_and_hardlink_without_changes() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("source.vdb");
@@ -96,6 +122,15 @@ mod import_tests {
 }
 
 impl VaultManager {
+    pub fn export_encrypted(&self, destination: &Path) -> crate::Result<()> {
+        self.get_subkeys()?;
+        let bytes = super::storage::read_bounded(&self.path)?;
+        if self.disk_revision != Some(*blake3::hash(&bytes).as_bytes()) {
+            return Err(VaultError::InvalidState("Vault changed in another session; reload before exporting".into()));
+        }
+        write_export_file(&self.path, destination, &bytes)
+    }
+
     /// Checks an array of ParsedImportEntry against current vault entries for duplicates.
     pub fn check_import_duplicates(&self, entries: &mut [ParsedImportEntry]) -> usize {
         let mut dup_count = 0;
@@ -151,7 +186,7 @@ impl VaultManager {
                 let tag_name = tag_name.trim();
                 if !tag_name.is_empty() && !self.data.tags.iter().any(|t| t.name == tag_name) {
                     self.data.tags.push(Tag { id: Uuid::new_v4(), name: tag_name.into(),
-                        color: tag_colors[color_idx % tag_colors.len()].into(), icon: "tag".into() });
+                        color: tag_colors[color_idx % tag_colors.len()].into(), icon: "tag".into() , default_url: String::new(),});
                     color_idx += 1;
                 }
             }
@@ -347,11 +382,16 @@ impl VaultManager {
     }
 }
 
-fn reject_vault_destination(vault: &Path, destination: &Path) -> crate::Result<()> {
+pub fn reject_vault_destination(vault: &Path, destination: &Path) -> crate::Result<()> {
     if vault == destination || (destination.exists() && same_file::is_same_file(vault, destination)?) {
         return Err(VaultError::ExportError("Choose a different file: exporting here would overwrite the active vault".into()));
     }
     Ok(())
+}
+
+pub fn write_export_file(vault: &Path, destination: &Path, bytes: &[u8]) -> crate::Result<()> {
+    reject_vault_destination(vault, destination)?;
+    super::storage::atomic_write(destination, bytes)
 }
 
 fn write_sensitive_file_safely(path: &Path, content: &str) -> crate::Result<()> {

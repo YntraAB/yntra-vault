@@ -1,3 +1,4 @@
+import type { SyncPreview, SyncDecision, SyncPolicy } from '@/features/sync/types';
 /**
  * Backend Abstraction Layer
  * 
@@ -15,6 +16,8 @@ import type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAudit
 export type { EmergencyKit, EmergencyShare, EmergencyKitAudit, EmergencyKitAuditEntry, PairingStats, LocalDeviceInfo, QrSessionInfo, QrClientPairingResult, CheckUpdateResult };
 
 // ─── Types ──────────────────────────────────────────────────────────────
+
+export interface ConflictHistoryItem { id: string; saved_at: string }
 
 export interface VaultInfo {
   id: string;
@@ -146,6 +149,11 @@ export interface NewEntry {
   attachments?: NewAttachment[];
 }
 
+export interface BulkEntryUpdate {
+  title?: string; username?: string; url?: string; favorite?: boolean; pinned?: boolean; notes?: string;
+  append_notes: boolean; tags_to_add: string[]; tags_to_remove: string[];
+}
+
 export interface UpdateEntry {
   title?: string;
   username?: string;
@@ -267,6 +275,7 @@ export interface Tag {
   name: string;
   color: string;
   icon: string;
+  default_url?: string;
 }
 
 export interface TrashedEntryPreview {
@@ -387,6 +396,8 @@ export interface YntraVaultBackend {
   getEntry(id: string): Promise<DecryptedEntry>;
   addEntry(entry: NewEntry): Promise<string>;
   updateEntry(id: string, update: UpdateEntry): Promise<void>;
+  bulkUpdateEntries(ids: string[], patch: BulkEntryUpdate): Promise<void>;
+  bulkDeleteEntries(ids: string[]): Promise<void>;
   updateEntryBreachStatus(id: string, breachStatus: BreachStatus): Promise<void>;
   saveVault(): Promise<void>;
   reloadVault(): Promise<void>;
@@ -410,6 +421,10 @@ export interface YntraVaultBackend {
 
   // Password History
   getPasswordHistory(entryId: string): Promise<DecryptedHistoryItem[]>;
+  listConflictHistory(entryId: string): Promise<ConflictHistoryItem[]>;
+  previewConflictHistory(entryId: string, versionId: string): Promise<SyncPreview>;
+  inspectConflictHistory(entryId: string, versionId: string, field: string): Promise<string>;
+  restoreConflictHistory(entryId: string, versionId: string, expectedRevision: string): Promise<void>;
 
   // TOTP
   generateTotp(secret: string): Promise<TotpCode>;
@@ -430,9 +445,9 @@ export interface YntraVaultBackend {
 
   // Tags
   getTags(): Promise<Tag[]>;
-  addTag(name: string, color: string, icon: string): Promise<string>;
+  addTag(name: string, color: string, icon: string, defaultUrl?: string): Promise<string>;
   deleteTag(id: string): Promise<void>;
-  updateTag(id: string, name: string, color: string, icon: string): Promise<void>;
+  updateTag(id: string, name: string, color: string, icon: string, defaultUrl?: string): Promise<void>;
   reorderTags(tagIds: string[]): Promise<void>;
 
   // Vault File Helper
@@ -457,11 +472,21 @@ export interface YntraVaultBackend {
   webdavTestConnection(url: string, username: string, password: string | null): Promise<void>;
   webdavUpload(url: string, username: string, password: string | null, dbPath: string, ifMatchEtag?: string | null): Promise<string | null>;
   webdavDownload(url: string, username: string, password: string | null, destDbPath: string): Promise<void>;
-  webdavSync(url: string, username: string, password: string | null): Promise<MergeStats>;
+  getSyncOperations(): Promise<import("@/features/sync/types").SyncOperation[]>;
+  onSyncOperation(callback: (operation: import("@/features/sync/types").SyncOperation) => void): Promise<() => void>;
+  getSyncReview(): Promise<SyncPreview | null>;
+  inspectSyncField(id: string, key: string, remote: boolean): Promise<string>;
+  approveSyncReview(id: string, decisions: SyncDecision[]): Promise<void>;
+  cancelSyncReview(): Promise<void>;
+  onSyncReview(callback: (preview: SyncPreview | null) => void): Promise<() => void>;
+  getSyncPolicy(): Promise<SyncPolicy>;
+  setSyncPolicy(policy: SyncPolicy): Promise<void>;
+  webdavSync(url: string, username: string, password: string | null, background?: boolean): Promise<MergeStats>;
+  onVaultContentChanged(callback: () => void): Promise<() => void>;
   onP2pListenerReady(callback: () => void): Promise<() => void>;
   cancelP2pSyncListener(): Promise<void>;
   runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats>;
-  runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string): Promise<MergeStats>;
+  runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string, background?: boolean): Promise<MergeStats>;
   getLocalIp(): Promise<string | null>;
   getLocalIps(): Promise<string[]>;
   scanP2pDiscovery(timeoutMs?: number | null): Promise<string | null>;
@@ -542,8 +567,8 @@ export interface YntraVaultBackend {
   smartLoginCloseBrowser(processName: string): Promise<void>;
   smartLoginStart(entryId: string, browserIndex: number): Promise<void>;
   smartLoginCancel(): Promise<void>;
-  onSmartLoginProgress(callback: (event: any) => void): Promise<() => void>;
-  onSmartLoginResult(callback: (result: any) => void): Promise<() => void>;
+  onSmartLoginProgress(callback: (event: SmartLoginEvent) => void): Promise<() => void>;
+  onSmartLoginResult(callback: (result: unknown) => void): Promise<() => void>;
 
   // File Dialogs
   openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null>;
@@ -587,7 +612,7 @@ export interface SmartLoginPreCheckResult {
 export async function openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null> {
   if (isTauri()) {
     const { open } = await import('@tauri-apps/plugin-dialog');
-    return open(options as any);
+    return open(options);
   }
   return null;
 }
@@ -600,7 +625,7 @@ export async function openFileDialog(options?: OpenDialogOptions): Promise<strin
 export async function saveFileDialog(options?: SaveDialogOptions): Promise<string | null> {
   if (isTauri()) {
     const { save } = await import('@tauri-apps/plugin-dialog');
-    return save(options as any);
+    return save(options);
   }
   return null;
 }
@@ -644,3 +669,5 @@ export function resetBackend(): void {
 
 
 
+
+export interface SmartLoginEvent { timestamp: string; state: unknown; message: string; detail?: unknown }

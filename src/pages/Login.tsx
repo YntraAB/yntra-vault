@@ -35,8 +35,14 @@ export default function Login() {
   const secretInputRef = useRef<SecureSecretInputRef>(null);
   const autoBioTriggered = useRef(false);
 
-  const isLockedOut = Date.now() < lockedUntil;
-  const lockoutRemaining = Math.ceil((lockedUntil - Date.now()) / 1000);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!lockedUntil) return;
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [lockedUntil]);
+  const isLockedOut = now < lockedUntil;
+  const lockoutRemaining = Math.max(0, Math.ceil((lockedUntil - now) / 1000));
 
   const triggerShake = useCallback(() => {
     setShake(true);
@@ -60,7 +66,7 @@ export default function Login() {
                 setCurrentVault(v);
                 return;
               }
-            } catch {}
+            } catch { /* Unavailable optional metadata must not prevent unlocking. */ }
           }
           navigate('/');
         } catch {
@@ -75,7 +81,7 @@ export default function Login() {
       // Purge any legacy stored paths.
       try {
         localStorage.removeItem('yntra-vault-keyfiles');
-      } catch {}
+      } catch { /* Unavailable optional metadata must not prevent unlocking. */ }
 
       getBackend().then(async (backend) => {
         try {
@@ -136,7 +142,7 @@ export default function Login() {
 
       // Save to recent vaults list & update search paths using internal ID
       const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
-      const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+      const updated = recent.filter((v: { id?: string; path?: string }) => v.id !== info.id && v.path !== info.path);
       const newVault = { id: info.id, name: info.name, path: info.path };
       appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
@@ -147,8 +153,8 @@ export default function Login() {
       setIsLocked(false);
       setAttempts(0);
       navigate('/app');
-    } catch (err: any) {
-      const msg = err?.message || String(err) || '';
+    } catch (err) {
+      const msg = (err instanceof Error ? err.message : String(err)) || String(err) || '';
       console.warn('Biometric unlock attempt:', msg);
 
       if (msg.includes('Window is hidden') || msg.includes('Window is not visible')) {
@@ -239,7 +245,7 @@ export default function Login() {
 
         // Save to recent vaults list & update search paths using internal ID
         const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
-        const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+        const updated = recent.filter((v: { id?: string; path?: string }) => v.id !== info.id && v.path !== info.path);
         const newVault = { id: info.id, name: info.name, path: info.path };
         appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
@@ -249,7 +255,7 @@ export default function Login() {
         setAttempts(0);
         navigate('/app');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Hardware unlock error:', err);
       const nextAttempts = attempts + 1;
       setAttempts(nextAttempts);
@@ -316,7 +322,7 @@ export default function Login() {
 
         // Save to recent vaults list & update search paths using internal ID
         const recent = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
-        const updated = recent.filter((v: any) => v.id !== info.id && v.path !== info.path);
+        const updated = recent.filter((v: { id?: string; path?: string }) => v.id !== info.id && v.path !== info.path);
         const newVault = { id: info.id, name: info.name, path: info.path };
         appMetadata.setItem('yntra-vault-recent-vaults', JSON.stringify([newVault, ...updated.slice(0, 9)]));
 
@@ -328,8 +334,8 @@ export default function Login() {
         setPassword(''); // Security: clear from state
         setAttempts(0);
         navigate('/app');
-      } catch (err: any) {
-        const errMsg = err.toString();
+      } catch (err) {
+        const errMsg = String(err);
         if (errMsg.includes('Hardware 2FA / YubiKey required') || errMsg.includes('Hardware2FaRequired')) {
           setHardware2FaRequired(true);
           setActiveView('hardware_2fa');

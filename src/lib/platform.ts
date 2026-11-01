@@ -13,7 +13,7 @@ export async function initializePlatform() {
 export function capabilitiesFor(os: RuntimePlatform) {
   const desktop = ['windows', 'macos', 'linux', 'preview'].includes(os);
   return { os, desktop, mobile: os === 'android' || os === 'ios',
-    automation: desktop, usbBinding: os === 'windows' || os === 'preview',
+    automation: desktop, autoType: os === 'windows' || os === 'preview', usbBinding: os === 'windows' || os === 'preview',
     captureProtection: os === 'windows' || os === 'android' || os === 'preview',
     systemLock: os === 'windows' || os === 'preview',
     nativeAuthentication: desktop };

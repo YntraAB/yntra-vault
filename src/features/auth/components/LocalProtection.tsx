@@ -36,27 +36,16 @@ export function UsbPicker({ value, onChange, disabled = false }: { value: string
   const mounted = useRef(false);
   const c = useCopy();
 
-  const refresh = async () => {
+  const refresh = () => {
     const request = ++sequence.current;
-    setBusy(true);
-    setError('');
-    try {
-      const devices = await (await getBackend()).listUsbStorageDevices();
+    return getBackend().then(backend => backend.listUsbStorageDevices()).then(devices => {
       if (!mounted.current || request !== sequence.current) return;
-      setDevices(devices);
-      if (selection.current.value && !devices.some(device => device.id === selection.current.value)) {
-        selection.current.onChange(devices.length > 0 ? devices[0].id : '');
-      } else if (!selection.current.value && devices.length > 0) {
-        selection.current.onChange(devices[0].id);
-      }
-    } catch (e) {
+      setDevices(devices); setError('');
+      if (!selection.current.value || !devices.some(device => device.id === selection.current.value)) selection.current.onChange(devices[0]?.id ?? '');
+    }).catch(error => {
       if (!mounted.current || request !== sequence.current) return;
-      setDevices([]);
-      selection.current.onChange('');
-      setError(String(e));
-    } finally {
-      if (mounted.current && request === sequence.current) setBusy(false);
-    }
+      setDevices([]); selection.current.onChange(''); setError(String(error));
+    }).finally(() => { if (mounted.current && request === sequence.current) setBusy(false); });
   };
 
   useEffect(() => {
@@ -141,20 +130,11 @@ export function LocalProtectionSettings({
     changed.current = onProtectionChanged;
   }, [onProtectionChanged]);
 
-  const refresh = async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const current = await (await getBackend()).getLocalProtection();
-      if (!alive.current) return;
-      setInfo(current);
-      changed.current?.(current);
-    } catch (e) {
-      if (alive.current) setLoadError(String(e));
-    } finally {
-      if (alive.current) setLoading(false);
-    }
-  };
+  const refresh = () => getBackend().then(backend => backend.getLocalProtection()).then(current => {
+    if (!alive.current) return;
+    setInfo(current); setLoadError(''); changed.current?.(current);
+  }).catch(error => { if (alive.current) setLoadError(String(error)); })
+    .finally(() => { if (alive.current) setLoading(false); });
 
   useEffect(() => {
     alive.current = true;

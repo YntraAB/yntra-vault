@@ -1,4 +1,4 @@
-(fieldType) => {
+(fieldType, identifierKind = 'any') => {
     // Walk open shadow roots and same-origin frames. Cross-origin frames are
     // intentionally skipped by the browser's normal DOM security boundary.
     function walk(root, seen = new Set()) {
@@ -70,11 +70,20 @@
             /identifier|email|user(name)?|login/i.test(hint);
     });
     const ordered = fieldType === 'password' ? candidates : candidates.filter(el => {
-        const hint = loginHint(el);
-        return !/search|query|filter|find/i.test(hint);
+        const hint = loginHint(el).toLowerCase();
+        if (/search|query|filter|find|one-time|\botp\b|verification.code/.test(hint)) return false;
+        const phone = el.type === 'tel' || /phone|mobile|telephone/.test(hint);
+        const email = el.type === 'email' || /e-?mail/.test(hint);
+        const generic = /user|identifier|login/.test(hint);
+        if (identifierKind === 'phone' && email && !phone && !generic) return false;
+        if (identifierKind === 'email' && phone && !email && !generic) return false;
+        if (identifierKind === 'username' && (email || phone) && !generic) return false;
+        return true;
     }).sort((a, b) => {
         const score = el => {
             const hint = loginHint(el).toLowerCase();
+            if (identifierKind === 'phone' && (el.type === 'tel' || /phone|mobile|telephone/.test(hint))) return -1;
+            if (identifierKind === 'username' && /user|identifier|login/.test(hint)) return -1;
             if (el.tagName === 'INPUT' && el.type === 'email') return 0;
             if (el.getAttribute('autocomplete') || /identifier|email|user|login/.test(hint)) return 1;
             if (el.tagName === 'INPUT' && el.type === 'tel') return 2;

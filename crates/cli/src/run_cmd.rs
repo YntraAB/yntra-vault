@@ -135,17 +135,5 @@ async fn resolve_yntra_secret_uri(
 }
 
 fn resolve_entry_id_from_manager(manager: &VaultManager, query: &str) -> Result<uuid::Uuid> {
-    if let Ok(id) = uuid::Uuid::parse_str(query) {
-        return Ok(id);
-    }
-    let entries = manager.list_entries()?;
-    let matches: Vec<_> = entries.iter().filter(|e| e.title.to_lowercase().contains(&query.to_lowercase())).collect();
-    if matches.is_empty() {
-        return Err(VaultError::EntryNotFound(format!("No entry matching title/UUID '{}'", query)));
-    }
-    let exact_matches: Vec<_> = matches.iter().filter(|e| e.title.eq_ignore_ascii_case(query)).collect();
-    if exact_matches.len() == 1 {
-        return Ok(exact_matches[0].id);
-    }
-    Ok(matches[0].id)
+    crate::resolve_entry_id(manager, query)
 }

@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Globe, Star, Plus, Settings, Lock, Database, Shield, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +15,8 @@ export interface MobileDrawerProps {
 }
 
 export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProps) {
+  const drawerRef = useRef<HTMLElement>(null);
+  useModalFocus(open, drawerRef, onClose);
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { currentVault, lockVault, setCurrentVault } = useAuth();
@@ -37,6 +41,11 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
 
         {/* Drawer Content */}
         <motion.aside
+          ref={drawerRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={currentVault?.name || 'Yntra Vault'}
+          tabIndex={-1}
           initial={{ x: '-100%' }}
           animate={{ x: 0 }}
           exit={{ x: '-100%' }}
@@ -57,6 +66,7 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
               </div>
             </div>
             <button
+              aria-label={t('common.close')}
               onClick={onClose}
               className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-tertiary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
             >
@@ -110,7 +120,8 @@ export function MobileDrawer({ open, onClose, onOpenSettings }: MobileDrawerProp
                 {t('sidebar.tags')}
               </span>
               <button
-                onClick={() => setIsCreateTagOpen(true)}
+                aria-label={t('sidebar.new_tag')}
+                onClick={() => { onClose(); setIsCreateTagOpen(true); }}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-tertiary)] active:bg-[var(--bg-hover)] active:text-[var(--text-primary)] cursor-pointer"
               >
                 <Plus size={16} />

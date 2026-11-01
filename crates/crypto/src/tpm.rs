@@ -365,48 +365,44 @@ pub mod macos_hdw {
     }
 }
 
-// ─── Linux File-Based Key Wrapping ──────────────────────────────────────
+#[cfg(any(target_os = "android", target_os = "ios"))]
+static PRIVATE_APP_DIRECTORY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Bind mobile key storage to the private directory supplied by the application runtime.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn initialize_private_app_directory(path: &std::path::Path) -> crate::Result<()> {
+    if !path.is_absolute() {
+        return Err(crate::error::VaultError::TpmError("Private app directory must be absolute".into()));
+    }
+    std::fs::create_dir_all(path)?;
+    let directory = std::fs::canonicalize(path)?;
+    let initialized = PRIVATE_APP_DIRECTORY.get_or_init(|| directory.clone());
+    if initialized != &directory {
+        return Err(crate::error::VaultError::TpmError("Private app directory is already initialized".into()));
+    }
+    Ok(())
+}
+
+// ─── Sandbox / Linux File-Based Key Wrapping ────────────────────────────
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn linux_get_or_create_wrap_key() -> crate::Result<[u8; 32]> {
     use rand::Rng;
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let base_dir = PRIVATE_APP_DIRECTORY.get().cloned().ok_or_else(|| {
+        crate::error::VaultError::TpmError("Private app directory has not been initialized".into())
+    })?;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let base_dir = std::env::var("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|_| {
             std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
         })
-        .or_else(|_| {
-            // Android sandbox / private data directory fallbacks
-            let android_candidates = [
-                "/data/user/0/com.yntravault.app",
-                "/data/data/com.yntravault.app",
-                "/data/user/0/com.yntra.vault",
-                "/data/data/com.yntra.vault",
-            ];
-            for path in &android_candidates {
-                let pb = std::path::PathBuf::from(path);
-                if pb.exists() {
-                    let files_dir = pb.join("files");
-                    let _ = std::fs::create_dir_all(&files_dir);
-                    return Ok(files_dir);
-                }
-            }
-            if let Ok(data_dir) = std::env::var("ANDROID_DATA") {
-                let pb = std::path::PathBuf::from(data_dir).join("data/com.yntravault.app");
-                if pb.exists() {
-                    let files_dir = pb.join("files");
-                    let _ = std::fs::create_dir_all(&files_dir);
-                    return Ok(files_dir);
-                }
-            }
-            // Security Invariant 25: Never fallback to world-writable /tmp paths
-            Err(())
-        })
-        .map_err(|_: ()| {
+        .map_err(|_| {
             crate::error::VaultError::TpmError(
-                "Neither XDG_CONFIG_HOME, HOME, nor valid private app sandbox is accessible".into(),
+                "Neither XDG_CONFIG_HOME nor HOME is available for private key storage".into(),
             )
         })?;
 

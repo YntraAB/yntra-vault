@@ -1,6 +1,10 @@
 package com.yntravault.app
 
 import android.os.Bundle
+import android.os.Build
+import android.view.View
+import android.view.ViewStructure
+import android.widget.FrameLayout
 import android.view.WindowManager
 import android.Manifest
 import android.content.Intent
@@ -15,6 +19,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
 class MainActivity : TauriActivity() {
+    override fun setContentView(view: View?) {
+        if (view == null) { super.setContentView(view); return }
+        val privateContent = object : FrameLayout(this) {
+            override fun dispatchProvideAutofillStructure(structure: ViewStructure, flags: Int) {
+                // New Android versions may include views marked unimportant for autofill.
+                // Vault contents must not enter another password manager's form snapshot.
+                structure.setClassName(FrameLayout::class.java.name)
+                structure.setChildCount(0)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Keep this boundary in the tree so Android cannot flatten through it.
+            privateContent.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES_EXCLUDE_DESCENDANTS
+        }
+        privateContent.addView(view, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        super.setContentView(privateContent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -69,6 +93,9 @@ class MainActivity : TauriActivity() {
 
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        }
 
         webView.webChromeClient = object : WebChromeClient() {
             /**

@@ -5,7 +5,7 @@
  * Automatically detects Tauri vs WASM runtime.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getBackend, type YntraVaultBackend } from './backend';
 import type {
   VaultInfo,
@@ -36,7 +36,7 @@ export function useBackend() {
   useEffect(() => {
     getBackend()
       .then(setBackend)
-      .catch((e) => setError(e.message))
+      .catch((e) => setError((e instanceof Error ? e.message : String(e))))
       .finally(() => setLoading(false));
   }, []);
 
@@ -61,8 +61,8 @@ export function useVault() {
       setVaultInfo(info);
       setIsLocked(false);
       return info;
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -78,8 +78,8 @@ export function useVault() {
       setVaultInfo(info);
       setIsLocked(false);
       return info;
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -95,8 +95,8 @@ export function useVault() {
       setVaultInfo(info);
       setIsLocked(false);
       return info;
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -111,8 +111,8 @@ export function useVault() {
       await backend.lockVault();
       setVaultInfo(null);
       setIsLocked(true);
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
       throw e;
     } finally {
       setLoading(false);
@@ -258,8 +258,8 @@ export function useEntries() {
     try {
       const list = await backend.listEntries();
       setEntries(list);
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -271,8 +271,8 @@ export function useEntries() {
     try {
       const results = await backend.searchEntries(query);
       setEntries(results);
-    } catch (e: any) {
-      setError(e.toString());
+    } catch (e) {
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -311,68 +311,40 @@ export function useEntries() {
 
 export function useEntry(id: string | null) {
   const { backend } = useBackend();
-  const [entry, setEntry] = useState<DecryptedEntry | null>(null);
-  const [loading, setLoading] = useState(false);
-
+  const [result, setResult] = useState<{ id: string; entry: DecryptedEntry | null } | null>(null);
   useEffect(() => {
-    if (!backend || !id) {
-      setEntry(null);
-      return;
-    }
-    setLoading(true);
-    backend.getEntry(id)
-      .then(setEntry)
-      .catch(() => setEntry(null))
-      .finally(() => setLoading(false));
+    if (!backend || !id) return;
+    let active = true;
+    const locked = () => { active = false; setResult(null); };
+    window.addEventListener('yntra-session-locked', locked);
+    void backend.getEntry(id).then(entry => { if (active) setResult({ id, entry }); })
+      .catch(() => { if (active) setResult({ id, entry: null }); });
+    return () => { active = false; window.removeEventListener('yntra-session-locked', locked); };
   }, [backend, id]);
-
-  return { entry, loading };
+  return { entry: id && result?.id === id ? result.entry : null, loading: Boolean(backend && id && result?.id !== id) };
 }
-
-// ─── TOTP Hook (auto-refreshing) ────────────────────────────────────────
 
 export function useTotp(secret: string | null) {
   const { backend } = useBackend();
-  const [code, setCode] = useState<TotpCode | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const generate = useCallback(async () => {
-    if (!backend || !secret) return;
-    try {
-      const result = await backend.generateTotp(secret);
-      setCode(result);
-    } catch {
-      setCode(null);
-    }
-  }, [backend, secret]);
-
+  const [result, setResult] = useState<{ secret: string; code: TotpCode | null } | null>(null);
   useEffect(() => {
-    if (!secret) {
-      setCode(null);
-      return;
-    }
-
-    generate();
-
-    // Refresh every second for countdown, regenerate when period expires
-    intervalRef.current = setInterval(() => {
-      setCode((prev) => {
-        if (!prev) return null;
-        const remaining = prev.seconds_remaining - 1;
-        if (remaining <= 0) {
-          generate(); // Get fresh code
-          return prev;
-        }
-        return { ...prev, seconds_remaining: remaining };
-      });
-    }, 1000);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    if (!backend || !secret) return;
+    let active = true;
+    let running = false;
+    const locked = () => { active = false; setResult(null); };
+    const generate = async () => {
+      if (!active || running) return;
+      running = true;
+      try { const code = await backend.generateTotp(secret); if (active) setResult({ secret, code }); }
+      catch { if (active) setResult({ secret, code: null }); }
+      finally { running = false; }
     };
-  }, [secret, generate]);
-
-  return code;
+    window.addEventListener('yntra-session-locked', locked);
+    void generate();
+    const timer = setInterval(() => { void generate(); }, 1000);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('yntra-session-locked', locked); };
+  }, [backend, secret]);
+  return secret && result?.secret === secret ? result.code : null;
 }
 
 // ─── Password Generator Hook ────────────────────────────────────────────

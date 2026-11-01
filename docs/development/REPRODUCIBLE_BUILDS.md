@@ -2,6 +2,8 @@
 
 This document defines the architecture, environment normalization rules, and verification procedures for achieving reproducible builds in Yntra Vault.
 
+These procedures are verification requirements, not a guarantee for every package or source revision. Record the source revision, exact tools, artifact type and matching hashes for each completed comparison. The unpublished synchronization work has not been verified through independent release builds.
+
 ---
 
 ## 1. Overview & Security Objective
@@ -20,7 +22,7 @@ A build is reproducible when executing the compilation process on identical sour
 
 ### 2.1 Pinned Toolchain Matrix
 - **Rust Compiler**: `1.95.0` (pinned via `rust-toolchain.toml`)
-- **Package Manager**: `Bun 1.4.2` (pinned via `package.json` & lockfile)
+- **Package Manager**: `Bun 1.4.2` (selected by the build workflows; dependencies resolved through the lockfile)
 - **Rust Edition**: `2024`
 
 ### 2.2 Compiler Path Remapping & PE Linker Parity (`.cargo/config.toml`)
@@ -102,6 +104,10 @@ docker run --rm yntra-vault-reproducible
 
 ### 4.2 GitHub Actions Continuous Integration
 Automated reproducible build verification is configured in [`.github/workflows/reproducible-builds.yml`](../../.github/workflows/reproducible-builds.yml). Commits, pull requests and release tags trigger the configured checks. Inspect their results before treating a package as independently reproduced.
+
+The verification scripts rebuild release outputs before comparing them and require nonempty SHA-256 values for the core library, desktop app, CLI and frontend. A failed build command or missing required output stops verification. Docker also requires all three native outputs and excludes local vaults, signing files and environment files from its build context.
+
+These checks compare repeated builds in the configured environment. They do not establish reproducibility across arbitrary operating systems or independently provisioned machines; the container still installs distribution packages from its configured repositories.
 
 ---
 

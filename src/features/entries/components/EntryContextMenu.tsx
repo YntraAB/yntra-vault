@@ -153,7 +153,7 @@ export function EntryContextMenu({
                 {t('menu.edit')}
               </button>
 
-              {capabilities.automation && (
+              {capabilities.autoType && (
               <button
                 disabled={!canAutotype}
                 onClick={() => {

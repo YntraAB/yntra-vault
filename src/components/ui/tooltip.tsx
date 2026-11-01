@@ -69,9 +69,12 @@ export function ActionTooltip({
   className?: string;
 }) {
   if (!content) return <>{children}</>;
+  const actionLabel = React.isValidElement(children) && children.type === 'button' && typeof content === 'string'
+    ? content
+    : undefined;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipTrigger asChild aria-label={actionLabel}>{children}</TooltipTrigger>
       <TooltipContent side={side} className={className}>
         {content}
       </TooltipContent>

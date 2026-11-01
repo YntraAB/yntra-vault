@@ -8,34 +8,23 @@ use yntra_vault_core::{Result, VaultError};
 use crate::ipc::{try_ipc_request, IpcRequest, IpcResponse};
 
 pub async fn run_ssh_agent_pipe() -> Result<()> {
-    let pipe_name = get_ssh_agent_pipe_name();
+    let pipe_name = get_ssh_agent_pipe_name()?;
     println!("{} Starting Yntra SSH Agent pipe server on {}", "🔑".bold(), pipe_name.cyan());
     println!("   Set SSH_AUTH_SOCK to use with git and ssh:");
     println!("   {}", format!("$env:SSH_AUTH_SOCK='{}'", pipe_name).green());
 
     #[cfg(windows)]
     {
-        use tokio::net::windows::named_pipe::ServerOptions;
+        use crate::pipe_security::create_pipe;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use crate::pipe_security::PipeSecurityAttributes;
 
-        let mut sec_attrs = PipeSecurityAttributes::new_current_user_only()?;
-        let mut server = unsafe {
-            ServerOptions::new()
-                .first_pipe_instance(true)
-                .reject_remote_clients(true)
-                .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
-        }
-        .map_err(|e| VaultError::SyncError(format!("Failed to create SSH agent pipe: {}", e)))?;
+        let mut server = create_pipe(&pipe_name, true)
+            .map_err(|e| VaultError::SyncError(format!("Failed to create SSH agent pipe: {}", e)))?;
 
         loop {
             if server.connect().await.is_ok() {
                 let mut client = server;
-                server = match unsafe {
-                    ServerOptions::new()
-                        .reject_remote_clients(true)
-                        .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
-                } {
+                server = match create_pipe(&pipe_name, false) {
                     Ok(next) => next,
                     Err(e) => {
                         eprintln!("Pipe recreate error: {}", e);
@@ -72,12 +61,8 @@ pub async fn run_ssh_agent_pipe() -> Result<()> {
                 });
             } else {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                server = unsafe {
-                    ServerOptions::new()
-                        .reject_remote_clients(true)
-                        .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
-                }
-                .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
+                server = create_pipe(&pipe_name, false)
+                    .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
             }
         }
         Ok(())
@@ -85,18 +70,9 @@ pub async fn run_ssh_agent_pipe() -> Result<()> {
 
     #[cfg(not(windows))]
     {
-        use tokio::net::UnixListener;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let _ = std::fs::remove_file(&pipe_name);
-        let listener = UnixListener::bind(&pipe_name)
-            .map_err(|e| VaultError::SyncError(format!("Failed to bind unix socket: {}", e)))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&pipe_name, std::fs::Permissions::from_mode(0o600));
-        }
+        let listener = crate::socket_security::bind(std::path::Path::new(&pipe_name)).await?;
 
         loop {
             if let Ok((mut socket, _)) = listener.accept().await {
@@ -134,39 +110,17 @@ pub async fn run_ssh_agent_pipe() -> Result<()> {
     }
 }
 
-pub fn get_ssh_agent_pipe_name() -> String {
-    let username = std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_else(|_| "default".to_string());
+pub fn get_ssh_agent_pipe_name() -> Result<String> {
     #[cfg(windows)]
     {
-        format!(r"\\.\pipe\yntra-ssh-agent-{}", username)
+        let username = std::env::var("USERNAME").or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "default".into());
+        Ok(format!(r"\\.\pipe\yntra-ssh-agent-{}", username))
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-            if !runtime_dir.is_empty() {
-                return format!("{}/yntra-ssh-agent.sock", runtime_dir.trim_end_matches('/'));
-            }
-        }
-        if let Ok(home) = std::env::var("HOME") {
-            let user_dir = format!("{}/.local/share/yntra/run", home.trim_end_matches('/'));
-            let _ = std::fs::create_dir_all(&user_dir);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&user_dir, std::fs::Permissions::from_mode(0o700));
-            }
-            return format!("{}/yntra-ssh-agent.sock", user_dir);
-        }
-        let fallback_dir = format!("/tmp/yntra-{}-run", username);
-        let _ = std::fs::create_dir_all(&fallback_dir);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&fallback_dir, std::fs::Permissions::from_mode(0o700));
-        }
-        format!("{}/yntra-ssh-agent.sock", fallback_dir)
+        let path = crate::socket_security::socket_path("yntra-ssh-agent.sock")?;
+        path.into_os_string().into_string().map_err(|_| VaultError::InvalidState("Socket path must be valid UTF-8".into()))
     }
 }
 

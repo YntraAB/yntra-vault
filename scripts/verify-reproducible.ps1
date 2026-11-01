@@ -1,5 +1,7 @@
 # Yntra Vault - Reproducible Build Verification Script (PowerShell)
 $ErrorActionPreference = "Stop"
+$VerifyRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+Set-Location -LiteralPath $VerifyRoot
 
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host " Yntra Vault: Reproducible Build Verification Suite     " -ForegroundColor Cyan
@@ -34,10 +36,16 @@ try {
     $MismatchCount = 0
 
     $Keys1 = $Manifest1.artifacts.psobject.properties.Name
+    $Keys2 = $Manifest2.artifacts.psobject.properties.Name
+    if (Compare-Object $Keys1 $Keys2) { throw 'Build artifact sets differ' }
+    foreach ($required in @('libyntra_vault_core.rlib','yntra-vault-app.exe','yntra.exe','frontend_dist_bundle')) {
+        if ($Keys1 -notcontains $required) { throw "Missing required artifact: $required" }
+    }
 
     foreach ($key in $Keys1) {
         $hash1 = $Manifest1.artifacts.$key.sha256
         $hash2 = $Manifest2.artifacts.$key.sha256
+        if ($hash1 -notmatch '^[a-f0-9]{64}$' -or $hash2 -notmatch '^[a-f0-9]{64}$') { throw "Invalid checksum for $key" }
 
         Write-Host "`nArtifact: $key" -ForegroundColor Gray
         Write-Host "  Build #1 SHA-256: $hash1" -ForegroundColor Gray
@@ -54,6 +62,8 @@ try {
 
     Write-Host "`n-------------------------------------------------------" -ForegroundColor Gray
     if ($MismatchCount -eq 0 -and $MatchCount -gt 0) {
+        New-Item -ItemType Directory -Force -Path 'reproducible-dist' | Out-Null
+        Copy-Item -LiteralPath "$Dir2/reproducible-manifest.json" -Destination 'reproducible-dist/reproducible-manifest.json'
         Write-Host "VERIFICATION PASSED: All $MatchCount artifacts are byte-for-byte reproducible!" -ForegroundColor Green
     } else {
         Write-Error "VERIFICATION FAILED: $MismatchCount artifact(s) differed between independent builds."
@@ -62,6 +72,12 @@ try {
 }
 finally {
     # Cleanup temporary verification folders
-    if (Test-Path $Dir1) { Remove-Item -Recurse -Force $Dir1 }
-    if (Test-Path $Dir2) { Remove-Item -Recurse -Force $Dir2 }
+    foreach ($relative in @($Dir1, $Dir2)) {
+        $target = [IO.Path]::GetFullPath((Join-Path $VerifyRoot $relative))
+        if (-not $target.StartsWith($VerifyRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Cleanup escaped build root' }
+        if (Test-Path -LiteralPath $target) {
+            if ((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing to clean a reparse point' }
+            Remove-Item -LiteralPath $target -Recurse -Force
+        }
+    }
 }

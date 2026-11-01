@@ -4,7 +4,7 @@
  * Bulk editable fields: Title, Username / Email, Tags (Add/Remove), Favorite status, Pin status, Website URL, Notes (Append/Overwrite)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Tag as TagIcon, Star, Pin, Globe, FileText, Plus, Minus, Type, User, Loader2 } from 'lucide-react';
 import { useEntries } from '../context/EntriesContext';
@@ -16,7 +16,9 @@ export interface BulkEditModalProps {
   onClose: () => void;
 }
 
-export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps) {
+export function BulkEditModal({ open, selectedIds, onClose: requestClose }: BulkEditModalProps) {
+  const savingRef = useRef(false);
+  const onClose = useCallback(() => { if (!savingRef.current) requestClose(); }, [requestClose]);
   const { t } = useTranslation();
   const { tags: allTags, bulkUpdateEntries } = useEntries();
 
@@ -63,11 +65,12 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
   };
 
   const handleSave = async () => {
-    if (selectedIds.length === 0 || isSubmitting) return;
+    if (selectedIds.length === 0 || isSubmitting || savingRef.current) return;
 
+    savingRef.current = true;
     setIsSubmitting(true);
     try {
-      const updates: any = {};
+      const updates: Partial<import("@/types").PasswordEntry> = {};
 
       if (applyTitle) updates.title = titleValue;
       if (applyUsername) updates.username = usernameValue;
@@ -89,9 +92,10 @@ export function BulkEditModal({ open, selectedIds, onClose }: BulkEditModalProps
         .filter(([, action]) => action === 'remove')
         .map(([name]) => name);
 
-      await bulkUpdateEntries(selectedIds, updates, tagsToAdd, tagsToRemove, notesMode);
-      onClose();
+      if (!await bulkUpdateEntries(selectedIds, updates, tagsToAdd, tagsToRemove, notesMode)) return;
+      requestClose();
     } finally {
+      savingRef.current = false;
       setIsSubmitting(false);
     }
   };

@@ -46,6 +46,7 @@ export interface CustomField {
   name: string;
   type: FieldType;
   value: string;
+  sensitive?: boolean;
 }
 
 export type FieldType =
@@ -66,6 +67,7 @@ export interface Tag {
   name: string;
   color: string;
   icon: string;
+  default_url?: string;
   count: number;
 }
 

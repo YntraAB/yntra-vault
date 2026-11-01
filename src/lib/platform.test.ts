@@ -9,6 +9,10 @@ describe('runtime capabilities', () => {
       expect(capabilitiesFor(os).nativeAuthentication).toBe(false);
     }
     expect(capabilitiesFor('windows').automation).toBe(true);
+    expect(capabilitiesFor('windows').autoType).toBe(true);
+    for (const os of ['macos', 'linux', 'android', 'ios', 'unknown'] as const) {
+      expect(capabilitiesFor(os).autoType).toBe(false);
+    }
     expect(capabilitiesFor('windows').usbBinding).toBe(true);
     expect(capabilitiesFor('linux').usbBinding).toBe(false);
     expect(capabilitiesFor('android').captureProtection).toBe(true);

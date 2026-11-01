@@ -59,6 +59,34 @@ fn with_key<T>(f: impl FnOnce(SigningKey) -> T) -> Result<T> {
 }
 
 pub fn public_key() -> Result<Vec<u8>> { with_key(|key| key.verifying_key().to_bytes().to_vec()) }
+
+pub fn key_bound_device_id(public: &[u8]) -> Option<uuid::Uuid> {
+    let bytes: &[u8; 32] = public.try_into().ok()?;
+    let hash = blake3::derive_key("yntra-installation-identity-v1", bytes);
+    let mut id = [0; 16];
+    id.copy_from_slice(&hash[..16]);
+    Some(uuid::Builder::from_random_bytes(id).into_uuid())
+}
+
+pub fn canonical_device_id(device: &crate::vault::TrustedDevice) -> uuid::Uuid {
+    key_bound_device_id(&device.signing_public_key).unwrap_or(device.id)
+}
+
+pub fn canonical_devices(devices: &[crate::vault::TrustedDevice]) -> Vec<crate::vault::TrustedDevice> {
+    let mut seen = std::collections::BTreeSet::new();
+    devices.iter().rev().filter_map(|device| {
+        let mut device = device.clone();
+        device.id = canonical_device_id(&device);
+        seen.insert(device.id).then_some(device)
+    }).collect::<Vec<_>>().into_iter().rev().collect()
+}
+
+pub fn device_name(devices: &[crate::vault::TrustedDevice], id: uuid::Uuid) -> Option<String> {
+    let candidates: Vec<_> = devices.iter().filter(|device| device.id == id || canonical_device_id(device) == id).collect();
+    let first = candidates.first()?;
+    if candidates.iter().any(|device| canonical_device_id(device) != canonical_device_id(first)) { return None; }
+    candidates.iter().find(|device| !device.name.is_empty()).map(|device| device.name.clone())
+}
 pub fn sign(message: &[u8]) -> Result<[u8;64]> { with_key(|key| key.sign(message).to_bytes()) }
 
 pub fn verify(public: &[u8], message: &[u8], signature: &[u8;64]) -> Result<()> {
@@ -68,9 +96,9 @@ pub fn verify(public: &[u8], message: &[u8], signature: &[u8;64]) -> Result<()> 
 }
 
 pub fn trusted_key(devices: &[crate::vault::types::TrustedDevice], id: uuid::Uuid) -> Result<&[u8]> {
-    let mut matches = devices.iter().filter(|device| device.id == id && !id.is_nil());
+    let mut matches = devices.iter().filter(|device| !id.is_nil() && (device.id == id || canonical_device_id(device) == id));
     let device = matches.next().ok_or_else(|| VaultError::SyncError("Device revoked or not paired; re-pair to synchronize".into()))?;
-    if matches.next().is_some() || device.signing_public_key.len() != 32 {
+    if matches.any(|other| other.signing_public_key != device.signing_public_key) || device.signing_public_key.len() != 32 {
         return Err(VaultError::SyncError("Device identity is missing or ambiguous; re-pair to synchronize".into()));
     }
     Ok(&device.signing_public_key)
@@ -203,6 +231,33 @@ pub fn read_metadata(stream: &mut impl Read, keys: &crate::crypto::SubKeys, role
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_collision_keeps_both_pinned_keys_and_revocation_has_no_alias_bypass() {
+        let legacy = uuid::Uuid::new_v4();
+        let desktop = SigningKey::from_bytes(&[21; 32]);
+        let cli = SigningKey::from_bytes(&[22; 32]);
+        let devices = [desktop.clone(), cli.clone()].map(|key| crate::vault::TrustedDevice {
+            id: legacy, name: "Same computer".into(),
+            signing_public_key: key.verifying_key().to_bytes().to_vec(), ..Default::default()
+        });
+        let desktop_id = canonical_device_id(&devices[0]);
+        let cli_id = canonical_device_id(&devices[1]);
+        assert_ne!(desktop_id, cli_id);
+        assert_eq!(device_name(&devices, desktop_id).as_deref(), Some("Same computer"));
+        assert_eq!(device_name(&devices, legacy), None);
+        assert_eq!(canonical_devices(&devices).len(), 2);
+        assert!(trusted_key(&devices, legacy).is_err());
+        let message = transcript(b"client-proof", &[desktop_id.as_bytes(), b"fresh challenge"]);
+        let pinned = trusted_key(&devices, desktop_id).unwrap();
+        assert!(verify(pinned, &message, &desktop.sign(&message).to_bytes()).is_ok());
+        assert!(verify(pinned, &message, &cli.sign(&message).to_bytes()).is_err());
+        let remaining = &devices[1..];
+        assert!(trusted_key(remaining, desktop_id).is_err());
+        assert_eq!(trusted_key(remaining, cli_id).unwrap(), devices[1].signing_public_key);
+        assert!(verify(trusted_key(remaining, legacy).unwrap(), &message, &desktop.sign(&message).to_bytes()).is_err());
+        assert_eq!(trusted_key(&devices[..1], legacy).unwrap(), pinned);
+    }
+
     #[test]
     fn fresh_session_keys_require_ephemeral_private_keys_and_bound_context() {
         use p256::elliptic_curve::rand_core::OsRng;

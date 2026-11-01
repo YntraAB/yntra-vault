@@ -22,6 +22,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(commands::platform::AutoLockState::default())
         .manage(AppState {
+            sync_review: Default::default(),
+            sync_progress: Default::default(),
             vault: Mutex::new(None),
             minimize_to_tray: std::sync::atomic::AtomicBool::new(true),
             lock_on_focus_loss: std::sync::atomic::AtomicBool::new(false),
@@ -101,6 +103,8 @@ pub fn run() {
             commands::get_entry,
             commands::add_entry,
             commands::update_entry,
+            commands::bulk_update_entries,
+            commands::bulk_delete_entries,
             commands::update_entry_breach_status,
             commands::save_vault,
             commands::reload_vault,
@@ -121,6 +125,10 @@ pub fn run() {
             commands::compact_vault,
             // Password History
             commands::get_password_history,
+            commands::list_conflict_history,
+            commands::preview_conflict_history,
+            commands::inspect_conflict_history,
+            commands::restore_conflict_history,
             // TOTP
             commands::generate_totp,
             commands::generate_totp_with_config,
@@ -155,6 +163,13 @@ pub fn run() {
             commands::webdav_upload,
             commands::webdav_download,
             commands::webdav_sync,
+            commands::get_sync_review,
+            commands::get_sync_operations,
+            commands::inspect_sync_field,
+            commands::approve_sync_review,
+            commands::cancel_sync_review,
+            commands::get_sync_policy,
+            commands::set_sync_policy,
             commands::webdav_test_connection,
             commands::run_p2p_sync_listener,
             commands::cancel_p2p_sync_listener,
@@ -230,11 +245,16 @@ pub fn run() {
         ])
         .setup(|app| {
             use tauri::{Manager, Emitter};
-            yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&app.path().app_data_dir()?.join("device-id"))?;
+            // Android's app_data_dir is the sandbox root; retain the existing files/ key location.
+            #[cfg(target_os = "android")]
+            yntra_vault_core::crypto::tpm::initialize_private_app_directory(&app.path().app_data_dir()?.join("files"))?;
+            #[cfg(target_os = "ios")]
+            yntra_vault_core::crypto::tpm::initialize_private_app_directory(&app.path().app_data_dir()?)?;
             // A platform key-store failure disables enrollment; offline vault access still works.
             if yntra_vault_core::services::sync::pairing::initialize_local_signing_identity(&app.path().app_data_dir()?.join("device-signing-key")).is_err() {
                 eprintln!("Device signing identity unavailable; pairing requires a working local key store");
             }
+            yntra_vault_core::services::sync::pairing::initialize_local_device_identity(&app.path().app_data_dir()?.join("device-id"))?;
             yntra_vault_core::services::favicon::clear_favicon_cache();
 
             #[cfg(target_os = "windows")]
@@ -344,17 +364,13 @@ pub fn run() {
                     let Some(snapshot) = snapshot else { continue; };
                     let lost = if check_usb {
                         if snapshot.requires_usb() && !snapshot.usb_present() {
-                            // Debounce transient USB enumeration renegotiations
+                            // USB enumeration can briefly disappear during renegotiation.
                             std::thread::sleep(std::time::Duration::from_millis(300));
                             if !snapshot.usb_present() {
                                 std::thread::sleep(std::time::Duration::from_millis(400));
                                 !snapshot.usb_present()
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
+                            } else { false }
+                        } else { false }
                     } else {
                         // Atomic saves can briefly replace the path. Recheck after
                         // progressive grace periods, but never trust a leftover .tmp file.

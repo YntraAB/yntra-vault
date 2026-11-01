@@ -25,10 +25,14 @@ export LANG=C.UTF-8
 export CARGO_INCREMENTAL=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${ROOT_DIR}"
 export RUSTFLAGS="--remap-path-prefix=${ROOT_DIR}=/yntra-vault/ -C codegen-units=1 -C target-cpu=x86-64"
 
 OUT_DIR="${1:-reproducible-dist}"
 mkdir -p "${ROOT_DIR}/${OUT_DIR}"
+if [ "${2:-}" = "--clean" ]; then
+    cargo clean --release
+fi
 
 # Validate Linux host dependencies if running on Linux
 if [[ "${OSTYPE:-}" == "linux"* ]]; then
@@ -52,7 +56,7 @@ cargo build --manifest-path crates/core/Cargo.toml --release --frozen
 
 # 5. Build Desktop Binary
 echo -e "\n[3/3] Building Tauri Desktop Binary (release)..."
-cargo build --manifest-path src-tauri/Cargo.toml --release --frozen
+cargo build --workspace --release --frozen
 
 # 6. Generate SHA-256 Checksums
 echo -e "\nComputing SHA-256 checksums..."
@@ -80,6 +84,16 @@ elif [ -f "src-tauri/target/release/yntra-vault-app.exe" ]; then
     SHA_TAURI="$(sha256sum src-tauri/target/release/yntra-vault-app.exe | awk '{print $1}')"
 fi
 
+SHA_CLI="$(sha256sum target/release/yntra | awk '{print $1}')"
+SHA_FRONTEND="$(find dist -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+test -f dist/index.html
+for checksum in "$SHA_CORE" "$SHA_TAURI" "$SHA_CLI" "$SHA_FRONTEND"; do
+    if [[ ! "$checksum" =~ ^[a-f0-9]{64}$ ]]; then
+        echo "ERROR: Missing or invalid required build checksum" >&2
+        exit 1
+    fi
+done
+
 cat <<EOF > "${MANIFEST_FILE}"
 {
   "schema_version": "1.0.0",
@@ -88,7 +102,9 @@ cat <<EOF > "${MANIFEST_FILE}"
   "rust_version": "$(rustc --version)",
   "bun_version": "$(bun --version)",
   "sha256_core": "${SHA_CORE}",
-  "sha256_tauri": "${SHA_TAURI}"
+  "sha256_tauri": "${SHA_TAURI}",
+  "sha256_cli": "${SHA_CLI}",
+  "sha256_frontend": "${SHA_FRONTEND}"
 }
 EOF
 

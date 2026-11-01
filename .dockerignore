@@ -10,7 +10,24 @@
 
 # Private agent instructions and development records
 .agents
+**/AGENTS.md
+**/SKILL.md
 *.log
+**/.env*
+**/credentials*
+**/*.vdb*
+**/*.db
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/id_rsa*
+**/id_ed25519*
+**/local.properties
+src-tauri/gen/android/
+src-tauri/gen/apple/
 
 # Caches and host build outputs
 target/

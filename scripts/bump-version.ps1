@@ -13,3 +13,4 @@ if (Get-Command bun -ErrorAction SilentlyContinue) {
 } else {
     throw "Neither bun nor node was found on PATH."
 }
+if ($LASTEXITCODE -ne 0) { throw "Version update failed (exit $LASTEXITCODE)." }

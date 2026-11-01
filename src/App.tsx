@@ -1,3 +1,5 @@
+import { SyncOperationStatus } from '@/features/sync/components/SyncOperationStatus';
+import { SyncReviewHost } from '@/features/sync/components/SyncReview';
 import { appMetadata } from '@/lib/appMetadata';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@/contexts/ThemeContext';
@@ -23,6 +25,8 @@ export default function App() {
       <AppStateProvider>
         <LanguageProvider>
           <UpdaterProvider>
+          <SyncReviewHost />
+          <SyncOperationStatus />
           <Routes>
             <Route path="/" element={<RootRoute />} />
             <Route path="/setup" element={<Onboarding />} />

@@ -1,3 +1,4 @@
+import { useMutationGate } from '@/hooks/useMutationGate';
 /**
  * DeleteTagModal — Unified confirmation modal for deleting a tag
  *
@@ -5,7 +6,7 @@
  * Matches DeleteEntryModal visual styling, badge layout, and keyboard accessibility.
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Tag as TagIcon } from 'lucide-react';
 import { useTranslation } from '@/contexts/LanguageContext';
@@ -15,11 +16,19 @@ import { ActionTooltip } from '@/components/ui/tooltip';
 export interface DeleteTagModalProps {
   tag: Tag | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<boolean>;
 }
 
-export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps) {
+export function DeleteTagModal({ tag, onClose: requestClose, onConfirm }: DeleteTagModalProps) {
   const { t } = useTranslation();
+  const { busy, run, close } = useMutationGate();
+  const [error, setError] = useState('');
+  const onClose = useCallback(() => close(requestClose), [close, requestClose]);
+  const confirm = async () => {
+    setError('');
+    try { if (await run(onConfirm)) requestClose(); }
+    catch (reason) { setError(String(reason)); }
+  };
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -59,6 +68,9 @@ export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps)
           onClick={onClose}
         >
           <motion.div
+            role="alertdialog"
+            aria-modal="true"
+            aria-label={t('menu.delete_tag')}
             initial={{ scale: 0.97, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.97, opacity: 0 }}
@@ -79,6 +91,7 @@ export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps)
               <ActionTooltip content={t('common.close')}>
                 <button
                   type="button"
+                  aria-label={t('common.close')} disabled={busy}
                   onClick={onClose}
                   className="rounded-[3px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
                 >
@@ -110,9 +123,11 @@ export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps)
               )}
             </div>
 
+            {error && <p role="alert" className="px-4 py-2 text-[12px]">{error}</p>}
             {/* Footer */}
             <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3 bg-[var(--bg-surface)]">
               <button
+                disabled={busy}
                 ref={cancelBtnRef}
                 type="button"
                 onClick={onClose}
@@ -123,10 +138,8 @@ export function DeleteTagModal({ tag, onClose, onConfirm }: DeleteTagModalProps)
               <button
                 ref={deleteBtnRef}
                 type="button"
-                onClick={() => {
-                  onConfirm();
-                  onClose();
-                }}
+                disabled={busy}
+                onClick={() => void confirm()}
                 className="h-8 rounded-[3px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
               >
                 {t('common.delete')}

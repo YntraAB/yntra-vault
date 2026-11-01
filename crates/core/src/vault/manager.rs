@@ -23,13 +23,14 @@ use crate::vault::format::{FileHeader, KdfParams, VaultFile, FORMAT_VERSION};
 use crate::vault::types::*;
 
 // Re-exports for backwards compatibility across crates
-pub use crate::vault::entry::{DecryptedEntry, NewEntry, UpdateEntry};
+pub use crate::vault::entry::{BulkEntryUpdate, DecryptedEntry, NewEntry, UpdateEntry};
 pub use crate::vault::trash::{TrashedEntryPreview, VaultStorageMetrics};
 
 /// Active vault state — holds decrypted data + derived keys.
 pub struct VaultManager {
     /// Process-local identity; never serialized or shared with peers.
     pub(crate) session_id: Uuid,
+    pub(crate) migration_required: bool,
     /// Path to the .vdb file
     pub path: PathBuf,
     /// Decrypted vault contents
@@ -78,6 +79,7 @@ pub fn read_key_file_safely(path: &Path) -> crate::Result<crate::crypto::LockedB
 }
 
 impl VaultManager {
+    pub fn session_identity(&self) -> Uuid { self.session_id }
     pub(crate) fn transactional_data_change<T>(
         &mut self,
         operation: impl FnOnce(&mut Self) -> crate::Result<T>,
@@ -154,11 +156,12 @@ impl VaultManager {
             hardware2fa: None,
             storage: None,
             disk_revision: None,
+            migration_required: false,
             search_index: std::collections::HashMap::new(),
         };
 
         // Write initial empty vault to disk
-        manager.save_inner(true)?;
+        manager.save_inner(true, true)?;
         Ok(manager)
     }
 
@@ -297,8 +300,12 @@ impl VaultManager {
             hardware2fa: vault_file.hardware2fa,
             storage: None,
             disk_revision: Some(disk_revision),
+            migration_required: vault_file.header.version < FORMAT_VERSION,
             search_index: std::collections::HashMap::new(),
         };
+        if manager.data.settings.sync.version == 0 {
+            crate::services::sync::review::track(&mut manager.data, manager.keys.as_ref().ok_or(VaultError::VaultLocked)?, manager.session_id, Utc::now())?;
+        }
         manager.rebuild_search_index();
         Ok(manager)
     }
@@ -335,9 +342,13 @@ impl VaultManager {
             }
         }
 
-        let data = Self::decrypt_vault_payload(&vault_file, subkeys)?;
+        let mut data = Self::decrypt_vault_payload(&vault_file, subkeys)?;
+        if data.settings.sync.version == 0 {
+            crate::services::sync::review::track(&mut data, subkeys, self.session_id, Utc::now())?;
+        }
 
         self.data = data;
+        self.migration_required = vault_file.header.version < FORMAT_VERSION;
         self.salt = vault_file.header.salt;
         self.biometric = vault_file.biometric;
         self.hardware2fa = vault_file.hardware2fa;
@@ -349,11 +360,24 @@ impl VaultManager {
 
     /// Save the vault to disk with full encryption (Single-File .vdb Architecture).
     pub fn save(&mut self) -> crate::Result<()> {
-        self.save_inner(false)
+        self.save_with_cleanup(true)
     }
 
-    fn save_inner(&mut self, create_new: bool) -> crate::Result<()> {
+    /// Persist an approved snapshot without adding unreviewed trash deletions.
+    pub fn save_reviewed(&mut self) -> crate::Result<()> {
+        self.save_with_cleanup(false)
+    }
+
+    fn save_with_cleanup(&mut self, cleanup: bool) -> crate::Result<()> {
+        let previous = self.data.clone();
+        let result = self.save_inner(false, cleanup);
+        if result.is_err() { self.data = previous; }
+        result
+    }
+
+    fn save_inner(&mut self, create_new: bool, cleanup: bool) -> crate::Result<()> {
         let keys = self.keys.as_ref().ok_or(VaultError::VaultLocked)?;
+        let needs_migration = self.migration_required;
 
         // Update metadata
         self.data.metadata.updated_at = Utc::now();
@@ -361,7 +385,9 @@ impl VaultManager {
 
         // Clean up old trash (> 30 days)
         let cutoff = Utc::now() - chrono::Duration::days(30);
-        self.data.trash.retain(|t| t.deleted_at > cutoff);
+        if cleanup { self.data.trash.retain(|t| t.deleted_at > cutoff); }
+
+        crate::services::sync::review::track(&mut self.data, keys, self.session_id, Utc::now())?;
 
         // Serialize vault data as MessagePack (self-describing)
         let serialized = super::storage::serialize_payload(&self.data)?;
@@ -414,12 +440,18 @@ impl VaultManager {
             return Err(VaultError::InvalidState("Vault changed in another session; reload or unlock again before saving".into()));
         }
         if let Some(session) = &self.storage { session.check_disk_header(&self.path)?; }
+        if !create_new && needs_migration && self.disk_revision.is_some() {
+            let original = super::storage::read_bounded(&self.path)?;
+            let backup = self.path.with_extension(format!("vdb.before-sync-{}.bak", Uuid::new_v4()));
+            super::storage::atomic_create(&backup, &original)?;
+        }
         if create_new {
             super::storage::atomic_create(&self.path, &file_bytes)?;
         } else {
             super::storage::atomic_write(&self.path, &file_bytes)?;
         }
         self.disk_revision = Some(*blake3::hash(&file_bytes).as_bytes());
+        self.migration_required = false;
         if let Some(session) = &mut self.storage { session.mark_persisted()?; }
 
         // Clean up any legacy sidecar files if present
@@ -510,28 +542,23 @@ impl VaultManager {
         }
     }
 
-    /// Returns the list of paired trusted devices, deduplicated by ID and identity.
+    /// Device names are labels; distinct installations may share the same label.
     pub fn get_trusted_devices(&self) -> Vec<TrustedDevice> {
-        let mut seen_ids = std::collections::HashSet::new();
-        let mut seen_names = std::collections::HashSet::new();
-        let mut deduped = Vec::new();
-        for dev in &self.data.settings.trusted_devices {
-            let name_key = (dev.name.to_lowercase(), dev.os.to_lowercase());
-            if seen_ids.insert(dev.id) && seen_names.insert(name_key) {
-                deduped.push(dev.clone());
-            }
-        }
-        deduped
+        crate::services::sync::identity::canonical_devices(&self.data.settings.trusted_devices)
     }
 
     /// Revokes authorization for a paired trusted device by ID and persists changes to disk.
+    pub fn trusted_device_name(&self, device_id: Uuid) -> Option<String> {
+        crate::services::sync::identity::device_name(&self.data.settings.trusted_devices, device_id)
+    }
+
     pub fn revoke_trusted_device(&mut self, device_id: Uuid) -> crate::Result<()> {
         self.transactional_data_change(|manager| manager.revoke_trusted_device_inner(device_id))
     }
 
     fn revoke_trusted_device_inner(&mut self, device_id: Uuid) -> crate::Result<()> {
         let initial_len = self.data.settings.trusted_devices.len();
-        self.data.settings.trusted_devices.retain(|d| d.id != device_id);
+        self.data.settings.trusted_devices.retain(|d| d.id != device_id && crate::services::sync::identity::canonical_device_id(d) != device_id);
         if self.data.settings.trusted_devices.len() != initial_len {
             self.save()?;
         }
@@ -543,9 +570,10 @@ impl VaultManager {
         self.transactional_data_change(|manager| manager.register_trusted_device_inner(device))
     }
 
-    fn register_trusted_device_inner(&mut self, device: TrustedDevice) -> crate::Result<()> {
+    fn register_trusted_device_inner(&mut self, mut device: TrustedDevice) -> crate::Result<()> {
+        device.id = crate::services::sync::identity::canonical_device_id(&device);
         self.data.settings.trusted_devices.retain(|d| {
-            d.id != device.id && !(d.name.eq_ignore_ascii_case(&device.name) && d.os == device.os)
+            crate::services::sync::identity::canonical_device_id(d) != device.id
         });
         self.data.settings.trusted_devices.push(device);
         self.save()?;
@@ -617,10 +645,18 @@ pub(crate) struct LegacyTrashedEntry {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub(crate) struct LegacyTag {
+    pub id: Uuid,
+    pub name: String,
+    pub color: String,
+    pub icon: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct LegacyVaultData {
     pub metadata: VaultMetadata,
     pub entries: Vec<LegacyEntry>,
-    pub tags: Vec<Tag>,
+    pub tags: Vec<LegacyTag>,
     pub trash: Vec<LegacyTrashedEntry>,
 }
 
@@ -629,7 +665,10 @@ impl LegacyVaultData {
         VaultData {
             metadata: self.metadata,
             entries: self.entries.into_iter().map(|e| e.into_current()).collect(),
-            tags: self.tags,
+            tags: self.tags.into_iter().map(|tag| Tag {
+                id: tag.id, name: tag.name, color: tag.color, icon: tag.icon,
+                default_url: String::new(),
+            }).collect(),
             trash: self
                 .trash
                 .into_iter()

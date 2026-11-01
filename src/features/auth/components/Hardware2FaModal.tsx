@@ -14,7 +14,8 @@ export interface Hardware2FaModalProps {
   mode?: 'enroll' | 'test';
 }
 
-export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: Hardware2FaModalProps) {
+export function Hardware2FaModal(props: Hardware2FaModalProps) { return <Hardware2FaContent key={String(props.open)} {...props} />; }
+function Hardware2FaContent({ open, onClose, onSuccess, mode = 'enroll' }: Hardware2FaModalProps) {
   const { t, language } = useTranslation();
   const { currentVault } = useAuth();
   const [step, setStep] = useState<'select' | 'prompt' | 'success'>('select');
@@ -25,7 +26,7 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
   const [keyFilePath, setKeyFilePath] = useState('');
   const [keys, setKeys] = useState<HardwareKeyInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState(() => open && isTauri());
   const [error, setError] = useState<string | null>(null);
   const attemptRef = useRef(0);
 
@@ -37,33 +38,17 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
     onClose();
   };
 
-  const refreshKeys = async () => {
-    if (!isTauri()) return;
-    setRefreshing(true);
-    setError(null);
-    try {
-      const backend = await getBackend();
-      const list = await backend.listHardwareKeys();
-      setKeys(list);
-      if (list.length > 0) {
-        setKeyName(list[0].name);
-        setProtocol(list[0].protocol);
-      }
-    } catch (e: any) {
-      setError(e.toString());
-    } finally {
-      setRefreshing(false);
-    }
+  const refreshKeys = () => {
+    if (!isTauri()) return Promise.resolve();
+    return getBackend().then(backend => backend.listHardwareKeys()).then(list => {
+      setKeys(list); setError(null);
+      if (list.length) { setKeyName(list[0].name); setProtocol(list[0].protocol); }
+    }).catch(error => setError(String(error))).finally(() => setRefreshing(false));
   };
 
   useEffect(() => {
     if (open && isTauri()) {
       refreshKeys();
-      setStep('select');
-      setError(null);
-      setMasterPassword('');
-      setUseKeyFile(false);
-      setKeyFilePath('');
     }
   }, [open, currentVault]);
 
@@ -123,9 +108,9 @@ export function Hardware2FaModal({ open, onClose, onSuccess, mode = 'enroll' }: 
         onSuccess?.();
         onClose();
       }, 1200);
-    } catch (err: any) {
+    } catch (err) {
       if (attempt !== attemptRef.current) return;
-      setError(err.toString() || 'Hardware key authentication failed');
+      setError(String(err) || 'Hardware key authentication failed');
       setStep('select');
     } finally {
       if (attempt === attemptRef.current) setLoading(false);

@@ -36,7 +36,7 @@ impl Drop for OperationLease {
 
 /// Short socket waits preserve partially transferred frames while allowing
 /// cancellation on Windows, where shutdown of a cloned socket need not wake recv.
-pub struct CancellableStream { stream: TcpStream, cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>, network_generation: u64 }
+pub struct CancellableStream { stream: TcpStream, cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>, idle_timeout: Duration, network_generation: u64 }
 impl CancellableStream {
     pub fn new(stream: TcpStream, cancel: Option<Arc<AtomicBool>>) -> io::Result<Self> {
         let generation = crate::services::network::generation_token()
@@ -48,9 +48,10 @@ impl CancellableStream {
             .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e.to_string()))?;
         stream.set_read_timeout(Some(Duration::from_millis(200)))?;
         stream.set_write_timeout(Some(Duration::from_millis(200)))?;
-        Ok(Self { stream, cancel, deadline: Some(Instant::now() + Duration::from_secs(90)), network_generation })
+        Ok(Self { stream, cancel, deadline: Some(Instant::now() + Duration::from_secs(90)), idle_timeout: Duration::from_secs(30), network_generation })
     }
     pub fn set_deadline(&mut self, deadline: Instant) { self.deadline = Some(deadline); }
+    pub fn set_idle_timeout(&mut self, timeout: Duration) { self.idle_timeout = timeout; }
     fn io<T>(&mut self, mut operation: impl FnMut(&mut TcpStream) -> io::Result<T>) -> io::Result<T> {
         let start = Instant::now();
         loop {
@@ -63,7 +64,7 @@ impl CancellableStream {
             }
             match operation(&mut self.stream) {
                 Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted) => {
-                    if start.elapsed() >= Duration::from_secs(30) { return Err(io::Error::new(io::ErrorKind::TimedOut, "Peer did not respond within 30 seconds")); }
+                    if start.elapsed() >= self.idle_timeout { return Err(io::Error::new(io::ErrorKind::TimedOut, "Peer did not respond before the operation timed out")); }
                 }
                 result => return result,
             }

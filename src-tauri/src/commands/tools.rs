@@ -411,9 +411,7 @@ pub async fn export_vault(
         let bytes = super::documents::read(&app, &source, 512 * 1024 * 1024)?;
         return super::documents::write(&app, &dest_path, &bytes);
     }
-    std::fs::copy(&source, &dest_path)
-        .map_err(|e| format!("Export failed: {}", e))?;
-    Ok(())
+    manager.export_encrypted(std::path::Path::new(&dest_path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

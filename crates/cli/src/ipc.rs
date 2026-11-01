@@ -35,6 +35,7 @@ pub struct IpcEnvelope {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum IpcRequest {
+    ForVault { path: PathBuf, request: Box<IpcRequest> },
     Ping,
     ListEntries,
     GetEntry { query: String },
@@ -46,6 +47,13 @@ pub enum IpcRequest {
     Lock,
     SshListIdentities,
     SshSign { pubkey_blob: Vec<u8>, data: Vec<u8>, flags: u32 },
+}
+
+static VAULT_SCOPE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn bind_vault_scope(path: &std::path::Path) -> Result<()> {
+    let absolute = std::path::absolute(path)?;
+    VAULT_SCOPE.set(absolute).map_err(|_| VaultError::InvalidState("CLI vault scope already selected".into()))
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -65,39 +73,17 @@ pub enum IpcResponse {
     Error(String),
 }
 
-pub fn get_ipc_pipe_name() -> String {
-    let username = std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_else(|_| "default".to_string());
+pub fn get_ipc_pipe_name() -> Result<String> {
     #[cfg(windows)]
     {
-        format!(r"\\.\pipe\yntra-session-{}", username)
+        let username = std::env::var("USERNAME").or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "default".into());
+        Ok(format!(r"\\.\pipe\yntra-session-{}", username))
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-            if !runtime_dir.is_empty() {
-                return format!("{}/yntra-session.sock", runtime_dir.trim_end_matches('/'));
-            }
-        }
-        if let Ok(home) = std::env::var("HOME") {
-            let user_dir = format!("{}/.local/share/yntra/run", home.trim_end_matches('/'));
-            let _ = std::fs::create_dir_all(&user_dir);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&user_dir, std::fs::Permissions::from_mode(0o700));
-            }
-            return format!("{}/yntra-session.sock", user_dir);
-        }
-        let fallback_dir = format!("/tmp/yntra-{}-run", username);
-        let _ = std::fs::create_dir_all(&fallback_dir);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&fallback_dir, std::fs::Permissions::from_mode(0o700));
-        }
-        format!("{}/yntra-session.sock", fallback_dir)
+        let path = crate::socket_security::socket_path("yntra-session.sock")?;
+        path.into_os_string().into_string().map_err(|_| VaultError::InvalidState("Socket path must be valid UTF-8".into()))
     }
 }
 
@@ -109,72 +95,68 @@ pub fn get_session_token_from_env() -> String {
     crate::keychain::load_session_token().unwrap_or_default()
 }
 
-/// Send request to active IPC daemon if available. Returns Ok(Some(response)) if connected.
+/// None means no connection was established and no request was sent.
 pub async fn try_ipc_request(req: &IpcRequest) -> Option<IpcResponse> {
     let token = get_session_token_from_env();
     let envelope = IpcEnvelope {
         session_token: token,
-        request: req.clone_req(),
+        request: match VAULT_SCOPE.get() {
+            Some(path) if !matches!(req, IpcRequest::Ping | IpcRequest::Lock) => IpcRequest::ForVault { path: path.clone(), request: Box::new(req.clone_req()) },
+            _ => req.clone_req(),
+        },
     };
 
-    let timeout_dur = Duration::from_secs(5);
-
     #[cfg(windows)]
-    {
-        use tokio::net::windows::named_pipe::ClientOptions;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let pipe_name = get_ipc_pipe_name();
-        let mut client = ClientOptions::new().open(&pipe_name).ok()?;
-        
-        let payload = serde_json::to_vec(&envelope).ok()?;
-        let len_bytes = (payload.len() as u32).to_le_bytes();
-        
-        tokio::time::timeout(timeout_dur, client.write_all(&len_bytes)).await.ok()?.ok()?;
-        tokio::time::timeout(timeout_dur, client.write_all(&payload)).await.ok()?.ok()?;
-        tokio::time::timeout(timeout_dur, client.flush()).await.ok()?.ok()?;
-
-        let mut resp_len_bytes = [0u8; 4];
-        tokio::time::timeout(timeout_dur, client.read_exact(&mut resp_len_bytes)).await.ok()?.ok()?;
-        let resp_len = u32::from_le_bytes(resp_len_bytes) as usize;
-
-        if resp_len > 16 * 1024 * 1024 {
-            return None;
-        }
-
-        let mut resp_buf = vec![0u8; resp_len];
-        tokio::time::timeout(timeout_dur, client.read_exact(&mut resp_buf)).await.ok()?.ok()?;
-
-        serde_json::from_slice(&resp_buf).ok()
-    }
+    let mut stream = tokio::net::windows::named_pipe::ClientOptions::new()
+        .open(get_ipc_pipe_name().ok()?).ok()?;
     #[cfg(not(windows))]
-    {
-        use tokio::net::UnixStream;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::UnixStream::connect(get_ipc_pipe_name().ok()?).await.ok()?;
+    Some(exchange_request(&mut stream, &envelope, Duration::from_secs(5)).await)
+}
 
-        let pipe_name = get_ipc_pipe_name();
-        let mut stream = UnixStream::connect(&pipe_name).await.ok()?;
-
-        let payload = serde_json::to_vec(&envelope).ok()?;
-        let len_bytes = (payload.len() as u32).to_le_bytes();
-
-        tokio::time::timeout(timeout_dur, stream.write_all(&len_bytes)).await.ok()?.ok()?;
-        tokio::time::timeout(timeout_dur, stream.write_all(&payload)).await.ok()?.ok()?;
-        tokio::time::timeout(timeout_dur, stream.flush()).await.ok()?.ok()?;
-
-        let mut resp_len_bytes = [0u8; 4];
-        tokio::time::timeout(timeout_dur, stream.read_exact(&mut resp_len_bytes)).await.ok()?.ok()?;
-        let resp_len = u32::from_le_bytes(resp_len_bytes) as usize;
-
-        if resp_len > 16 * 1024 * 1024 {
-            return None;
-        }
-
-        let mut resp_buf = vec![0u8; resp_len];
-        tokio::time::timeout(timeout_dur, stream.read_exact(&mut resp_buf)).await.ok()?.ok()?;
-
-        serde_json::from_slice(&resp_buf).ok()
+async fn exchange_request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    envelope: &IpcEnvelope,
+    deadline: Duration,
+) -> IpcResponse {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let exchange = async {
+        let payload = Zeroizing::new(serde_json::to_vec(envelope).map_err(|_| ())?);
+        let length = u32::try_from(payload.len()).map_err(|_| ())?;
+        stream.write_all(&length.to_le_bytes()).await.map_err(|_| ())?;
+        stream.write_all(&payload).await.map_err(|_| ())?;
+        stream.flush().await.map_err(|_| ())?;
+        let mut length = [0; 4];
+        stream.read_exact(&mut length).await.map_err(|_| ())?;
+        let length = u32::from_le_bytes(length) as usize;
+        if length > 16 * 1024 * 1024 { return Err(()); }
+        let mut response = Zeroizing::new(vec![0; length]);
+        stream.read_exact(&mut response).await.map_err(|_| ())?;
+        serde_json::from_slice(&response).map_err(|_| ())
+    };
+    match tokio::time::timeout(deadline, exchange).await {
+        Ok(Ok(response)) => response,
+        _ => IpcResponse::Error("Session response was not confirmed. The operation may have completed; check the vault before retrying.".into()),
     }
+}
+
+fn validate_mutation_response(req: &IpcRequest, response: Option<IpcResponse>) -> Result<Option<IpcResponse>> {
+    match response {
+        None => Ok(None),
+        Some(IpcResponse::Error(message)) => Err(VaultError::InvalidState(message)),
+        Some(response) => {
+            let expected = matches!((req, &response),
+                (IpcRequest::AddEntry { .. }, IpcResponse::AddEntrySuccess(_)) |
+                (IpcRequest::UpdateEntry { .. }, IpcResponse::UpdateEntrySuccess) |
+                (IpcRequest::DeleteEntry { .. }, IpcResponse::DeleteEntrySuccess));
+            if expected { Ok(Some(response)) }
+            else { Err(VaultError::InvalidState("Unexpected session response; operation was not retried".into())) }
+        }
+    }
+}
+
+pub async fn try_ipc_mutation(req: &IpcRequest) -> Result<Option<IpcResponse>> {
+    validate_mutation_response(req, try_ipc_request(req).await)
 }
 
 impl IpcRequest {
@@ -195,7 +177,7 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
     let session_token = data_encoding::HEXLOWER.encode(&token_bytes);
     let _ = crate::keychain::store_session_token(&session_token);
 
-    let pipe_name = get_ipc_pipe_name();
+    let pipe_name = get_ipc_pipe_name()?;
 
     println!("{}", "═════════════════════════════════════════════".blue());
     println!("  {}", "YNTRA VAULT SESSION UNLOCKED".bold().green());
@@ -238,18 +220,11 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
 
     #[cfg(windows)]
     {
-        use tokio::net::windows::named_pipe::ServerOptions;
+        use crate::pipe_security::create_pipe;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use crate::pipe_security::PipeSecurityAttributes;
 
-        let mut sec_attrs = PipeSecurityAttributes::new_current_user_only()?;
-        let mut server = unsafe {
-            ServerOptions::new()
-                .first_pipe_instance(true)
-                .reject_remote_clients(true)
-                .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
-        }
-        .map_err(|e| VaultError::SyncError(format!("Failed to create named pipe server: {}", e)))?;
+        let mut server = create_pipe(&pipe_name, true)
+            .map_err(|e| VaultError::SyncError(format!("Failed to create named pipe server: {}", e)))?;
 
         loop {
             if server.connect().await.is_ok() {
@@ -296,29 +271,16 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
             }
 
             // Recreate pipe instance for next client
-            server = unsafe {
-                ServerOptions::new()
-                    .reject_remote_clients(true)
-                    .create_with_security_attributes_raw(&pipe_name, sec_attrs.as_mut_ptr())
-            }
-            .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
+            server = create_pipe(&pipe_name, false)
+                .map_err(|e| VaultError::SyncError(format!("Pipe recreate failed: {}", e)))?;
         }
     }
 
     #[cfg(not(windows))]
     {
-        use tokio::net::UnixListener;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let _ = std::fs::remove_file(&pipe_name);
-        let listener = UnixListener::bind(&pipe_name)
-            .map_err(|e| VaultError::SyncError(format!("Failed to bind unix socket: {}", e)))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&pipe_name, std::fs::Permissions::from_mode(0o600));
-        }
+        let listener = crate::socket_security::bind(std::path::Path::new(&pipe_name)).await?;
 
         loop {
             if let Ok((mut socket, _)) = listener.accept().await {
@@ -370,8 +332,20 @@ pub async fn run_ipc_daemon(vault_path: PathBuf, password: Zeroizing<String>, ke
 }
 
 fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> IpcResponse {
-    let mut mgr = manager.lock().unwrap();
+    let Ok(mut mgr) = manager.lock() else { return IpcResponse::Error("Vault session unavailable".into()); };
+    let req = match req {
+        IpcRequest::ForVault { path, request } => {
+            let requested = std::fs::canonicalize(path);
+            let active = std::fs::canonicalize(&mgr.path);
+            if !matches!((requested, active), (Ok(requested), Ok(active)) if requested == active) {
+                return IpcResponse::Error("The active IPC session belongs to a different vault".into());
+            }
+            *request
+        }
+        request => request,
+    };
     match req {
+        IpcRequest::ForVault { .. } => IpcResponse::Error("Nested vault requests are not supported".into()),
         IpcRequest::Ping => IpcResponse::Pong,
         IpcRequest::ListEntries => {
             match mgr.list_entries() {
@@ -605,23 +579,62 @@ fn handle_ipc_request(manager: &Arc<Mutex<VaultManager>>, req: IpcRequest) -> Ip
 }
 
 fn resolve_id(mgr: &VaultManager, query: &str) -> Result<Uuid> {
-    if let Ok(id) = Uuid::parse_str(query) {
-        return Ok(id);
+    crate::resolve_entry_id(mgr, query)
+}
+
+#[cfg(test)]
+mod vault_scope_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_lost_mutation_reply_cannot_trigger_direct_file_fallback() {
+        use tokio::io::AsyncReadExt;
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let applied = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server_applied = applied.clone();
+        let request = IpcRequest::DeleteEntry { id: Uuid::new_v4(), permanent: false };
+        let envelope = IpcEnvelope { session_token: "synthetic-session".into(), request: request.clone() };
+        let worker = tokio::spawn(async move {
+            let mut length = [0; 4];
+            server.read_exact(&mut length).await.unwrap();
+            let mut payload = vec![0; u32::from_le_bytes(length) as usize];
+            server.read_exact(&mut payload).await.unwrap();
+            let received: IpcEnvelope = serde_json::from_slice(&payload).unwrap();
+            assert!(matches!(received.request, IpcRequest::DeleteEntry { .. }));
+            server_applied.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // The daemon applied the request, then disconnected before its reply.
+        });
+        let response = exchange_request(&mut client, &envelope, Duration::from_secs(1)).await;
+        worker.await.unwrap();
+        assert_eq!(applied.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(matches!(&response, IpcResponse::Error(message) if message.contains("may have completed")));
+        assert!(validate_mutation_response(&request, Some(response)).is_err());
+        assert!(validate_mutation_response(&request, Some(IpcResponse::Pong)).is_err());
+        assert!(matches!(validate_mutation_response(&request, Some(IpcResponse::DeleteEntrySuccess)), Ok(Some(IpcResponse::DeleteEntrySuccess))));
+        assert!(validate_mutation_response(&request, None).unwrap().is_none());
     }
-    let entries = mgr.list_entries()?;
-    let matches: Vec<_> = entries.iter().filter(|e| e.title.to_lowercase().contains(&query.to_lowercase())).collect();
-    if matches.is_empty() {
-        return Err(VaultError::EntryNotFound(format!("No entry matching title/UUID '{}'", query)));
+
+    #[test]
+    fn scoped_mutations_cannot_use_a_different_unlocked_vault() {
+        let directory = tempfile::tempdir().unwrap();
+        let active = directory.path().join("active.vdb");
+        let other = directory.path().join("other.vdb");
+        let manager = VaultManager::create("Active", "synthetic fixture password", &active).unwrap();
+        VaultManager::create("Other", "synthetic fixture password", &other).unwrap();
+        let before = std::fs::read(&active).unwrap();
+        let manager = Arc::new(Mutex::new(manager));
+        let entry = NewEntry { title: "Synthetic Gmail".into(), password: "fixture only".into(), username: String::new(), email: String::new(), url: String::new(), notes: String::new(), tags: vec![], totp_secret: None, custom_fields: vec![], entry_type: None, generate_passkey: None, attachments: None };
+        let request = IpcRequest::AddEntry { new_entry: entry.clone() };
+        let wrong = handle_ipc_request(&manager, IpcRequest::ForVault { path: other, request: Box::new(request.clone()) });
+        assert!(matches!(wrong, IpcResponse::Error(message) if message.contains("different vault")));
+        assert!(manager.lock().unwrap().data.entries.is_empty());
+        assert_eq!(std::fs::read(&active).unwrap(), before);
+        let correct = handle_ipc_request(&manager, IpcRequest::ForVault { path: active.clone(), request: Box::new(request) });
+        assert!(matches!(correct, IpcResponse::AddEntrySuccess(_)));
+        assert_eq!(VaultManager::open(&active, "synthetic fixture password").unwrap().data.entries.len(), 1);
+        let mut guard = manager.lock().unwrap();
+        let sibling = guard.add_entry(NewEntry { title: "Synthetic Gmail Work".into(), ..entry }).unwrap();
+        assert!(resolve_id(&guard, "Synthetic").is_err());
+        assert_eq!(resolve_id(&guard, "Synthetic Gmail Work").unwrap(), sibling);
     }
-    let exact_matches: Vec<_> = matches.iter().filter(|e| e.title.eq_ignore_ascii_case(query)).collect();
-    if exact_matches.len() == 1 {
-        return Ok(exact_matches[0].id);
-    }
-    if exact_matches.len() > 1 {
-        return Err(VaultError::InvalidFormat(format!(
-            "Ambiguous match: Found {} entries titled '{}'. Please specify exact UUID.",
-            exact_matches.len(), query
-        )));
-    }
-    Ok(matches[0].id)
 }

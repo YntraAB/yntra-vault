@@ -152,7 +152,7 @@ describe('Entries Feature Slice', () => {
 
   it('correctly handles remote deletion and remote updates during refresh revalidation', () => {
     // Simulate active selected entry
-    let activeEntry: PasswordEntry | null = {
+    const activeEntry: PasswordEntry | null = {
       id: 'entry-sync-1',
       title: 'Sync Service',
       username: 'user1',
@@ -288,7 +288,7 @@ describe('Entries Feature Slice', () => {
     expect(entriesState[0].favorite).toBe(true);
 
     // Simulated backend failure
-    let backendFailed = true;
+    const backendFailed = true;
     if (backendFailed) {
       // Rollback
       entriesState = prevEntries;

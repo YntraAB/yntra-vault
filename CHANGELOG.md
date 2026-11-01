@@ -5,6 +5,64 @@ All notable changes to Yntra Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.2.8] - 2026-11-01
+
+This is a preview version. Windows downloads are available first; Android and Linux packages follow after their checks. Automatic updates remain on the latest verified stable release.
+
+### Added
+- Set an optional website on a tag and explicitly copy it into an entry. Tag changes do not silently rewrite existing entries.
+- Add multiple usernames, emails, phone numbers, passwords and websites to one entry. Reorder them with a drag handle or arrow buttons; Smart Login uses the first non-empty identifier, password and website.
+- Browse encrypted conflict history, reveal a selected version explicitly and restore it after revision validation.
+- Review P2P and WebDAV changes before saving, with masked field comparisons, explicit conflict choices, edited text and keep-both options for notes and passwords.
+- Track causal field revisions, persistent deletion markers and up to ten encrypted conflict versions per entry. Keep-both password copies receive new IDs and re-encrypted secrets.
+- Add separate review and conflict preferences. Automatic application requires compatible preferences on both peers; deletion conflicts still require a choice.
+- Add authenticated reviewed transfers, storage acknowledgments, interrupted-sync status and conditional WebDAV writes using ETags.
+- Receive a manually started sync during the current unlocked session without enabling automatic synchronization.
+
+### Changed
+- Write vault format 6 (7 with legacy hardware protection). Older clients cannot open the new format. The first write to an older vault creates an encrypted recovery copy; both sync peers must upgrade.
+- Keep local protection, recovery data and synchronization preferences local during ordinary synchronization and pairing.
+
+### Fixed
+- Restrict WebDAV uploads to encrypted snapshots of the active vault; reject arbitrary files and local recovery envelopes before connecting.
+- Reject Unix socket directories with unsafe owners, permissions or symlinks. Preserve live sockets and unrelated files instead of unlinking them.
+- Validate version changes before writing, roll back manifests and lockfile on failure, and refuse replacement or downgrade versions.
+- Stop build verification on missing binaries or failed commands, and rebuild Linux outputs before comparing them.
+- Wait for late-loading login controls and delayed password steps without submitting the identifier repeatedly. Match phone, email and username controls, including visible shadow-root/frame content, and ignore hidden frame decoys.
+- Keep populated fields when switching entry templates. Prevent mobile scrolling from dragging fields, respect Android safe areas and contain keyboard focus in the editor.
+- Keep whole account versions when resolving a conflict in an additional password field.
+- Rotate inner keys and salt as well as the local storage envelope when changing a protected vault password. Re-encrypt conflict history and refresh keyed sync hashes.
+- Restrict Windows IPC and SSH pipes with an explicit user/SYSTEM/Administrators DACL and reject remote clients. Check browser-host origins against installed manifests; direct host use requires a CLI session.
+- Make WebDAV restore revision-checked and atomic, require a successful backup, restrict the GUI destination to its active vault and reject late results after a session change.
+- Preserve pending storage confirmations independently for each device and reject mismatched acknowledgements.
+- Prevent CLI mutations from being repeated after a lost or invalid session response, and reject ambiguous entry names consistently in direct, session and run commands.
+- Preserve custom-field sensitivity when editing or duplicating entries, and mask sensitive custom text in detail and editor views.
+- Name settings and pairing switches for assistive technology.
+- Preserve deletions after emptying trash, combine independent field edits and reject approvals based on changed vault revisions.
+- Prevent late session responses and QR-camera requests from reviving closed or locked views. Report entry-load errors instead of leaving stale details visible.
+- Restore the password-history version selected in the interface and roll back failed tag, trash and history writes.
+- Preserve fields received through sync when reopening an older editor layout, and retain the layout field's ID across edits.
+- Initialize mobile device-signing storage from the app's private directory while retaining Android's existing key location.
+- Derive installation IDs from retained signing keys and migrate legacy identities without losing valid pairings. Reject ambiguous or revoked identities.
+- Keep equally named paired installations visible and independently revocable. Refresh the active vault identity and discard old session responses after pairing.
+- Keep Android vault contents out of external autofill snapshots, update last-sync times after storage acknowledgments, and clear obsolete failure notices after a successful retry with the same device.
+- Report changed-during-review failures directly instead of reopening the network-address dialog, and keep sync notices above mobile navigation.
+- Reject unsupported vault version zero before reading its payload.
+- Give tooltip-backed action buttons accessible names and label synchronization choices explicitly.
+- Hide unavailable Auto-Type controls and return an explicit error on unsupported platforms.
+- Resolve frontend lint errors without disabling lint rules.
+- Track tag membership by stable IDs, reconcile independent renames and expose concurrent duplicate-name conflicts for explicit review.
+- Keep tag and entry dialogs open on failed storage, prevent duplicate submissions and save bulk changes atomically without dropping unread notes.
+- Roll back failed deletion, favorite and pin changes, including search indexes. Prevent export paths and hard links from overwriting the active vault.
+- Refresh received-sync timestamps and update dependency versions affected by published advisories.
+- Authenticate CLI locking before deleting the session token, reject unauthenticated existing sessions and withdraw SSH identities after locking.
+- Return framed native-host errors and the actual version. Require a real extension ID for installation, keep Firefox/Chromium manifests separate and report registration failures.
+- Bind CLI requests with an explicit vault path to that vault, preventing an unrelated unlocked session from receiving reads or writes. CLI update checks now require `--check-updates`, `YNTRA_CHECK_UPDATES=true`, or the explicit `update` command.
+
+Selected Pixel 9 Pro XL tests with isolated Windows installations verified PIN and optical QR pairing, LAN discovery, reviewed sync in both directions, independent Gmail edits, keep-both Discord notes, cancellation, stale-review rejection and unchanged repeat sync. Additional credential fields, tag website selection and reordered fields were saved, synchronized and checked by independently reopening both encrypted files. Camera denial and retry after restoring permission were exercised separately. Automated suites, local browser fixtures and native Windows keyboard tests pass; these do not establish every live website, hardware configuration or crash scenario. These changes remain unpublished. GitHub already contained release 0.2.7 when checked on 2026-10-24; no release was created or replaced during this work.
+
 ## [0.2.7] - 2026-10-09
 
 ### Security

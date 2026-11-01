@@ -6,6 +6,10 @@ pub mod auth;
 pub mod entries;
 pub mod attachments;
 pub mod sync;
+pub mod sync_operation;
+pub use sync_operation::*;
+pub mod sync_review;
+pub use sync_review::*;
 pub mod tools;
 pub mod smartlogin;
 pub mod updater;
@@ -30,6 +34,8 @@ pub use updater::*;
 
 /// Shared vault state across all IPC commands.
 pub struct AppState {
+    pub sync_progress: Mutex<Vec<sync_operation::SyncOperation>>,
+    pub sync_review: Mutex<Option<sync_review::PendingReview>>,
     pub vault: Mutex<Option<VaultManager>>,
     pub minimize_to_tray: AtomicBool,
     pub lock_on_focus_loss: AtomicBool,
@@ -45,6 +51,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn cancel_network_work(&self) {
+        if let Ok(mut progress) = self.sync_progress.lock() { progress.clear(); }
+        if let Ok(mut pending) = self.sync_review.lock() { *pending = None; }
         self.pairing_operation.cancel();
         self.sync_listener_operation.cancel();
         self.sync_client_operation.cancel();

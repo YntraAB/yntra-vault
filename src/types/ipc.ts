@@ -1,3 +1,4 @@
+import type { SyncPreview, SyncDecision, SyncPolicy } from '@/features/sync/types';
 /**
  * Tauri 2 IPC Schema Contract & Type Registry
  *
@@ -52,12 +53,10 @@ export type EntryType =
   | 'CryptoWallet'
   | 'Custom';
 
-export type BreachStatus =
-  | { type: 'Unknown' }
-  | { type: 'Checking' }
-  | { type: 'Safe'; checked_at: string }
-  | { type: 'Breached'; breach_count: number; checked_at: string }
-  | { type: 'Error'; message: string };
+export type BreachStatus = 'Unknown' | 'Checking'
+  | { Safe: { checked_at: string } }
+  | { Breached: { breach_count: number; checked_at: string } }
+  | { Error: { message: string } };
 
 export type StrengthLevel = 'Critical' | 'Weak' | 'Fair' | 'Strong' | 'Excellent';
 
@@ -83,7 +82,7 @@ export interface NewAttachment {
 }
 
 export interface PasswordHistoryItem {
-  password_encrypted: any;
+  password_encrypted: { nonce: number[]; ciphertext: number[] };
   changed_at: string;
   breach_status: BreachStatus;
 }
@@ -159,6 +158,11 @@ export interface NewEntry {
   entry_type?: EntryType | null;
   generate_passkey?: boolean;
   attachments?: NewAttachment[];
+}
+
+export interface BulkEntryUpdate {
+  title?: string; username?: string; url?: string; favorite?: boolean; pinned?: boolean; notes?: string;
+  append_notes: boolean; tags_to_add: string[]; tags_to_remove: string[];
 }
 
 export interface UpdateEntry {
@@ -339,6 +343,7 @@ export interface Tag {
   name: string;
   color: string;
   icon: string;
+  default_url?: string;
   count: number;
 }
 
@@ -570,8 +575,10 @@ export interface IpcCommands {
     args: { id: string; update: UpdateEntry };
     return: void;
   };
+  bulk_update_entries: { args: { ids: string[]; patch: BulkEntryUpdate }; return: void };
+  bulk_delete_entries: { args: { ids: string[] }; return: void };
   update_entry_breach_status: {
-    args: { id: string; breachStatus: any };
+    args: { id: string; breachStatus: BreachStatus };
     return: void;
   };
   save_vault: {
@@ -640,6 +647,10 @@ export interface IpcCommands {
   };
 
   // Password History
+  list_conflict_history: { args: { entryId: string }; return: { id: string; saved_at: string }[] };
+  preview_conflict_history: { args: { entryId: string; versionId: string }; return: SyncPreview };
+  inspect_conflict_history: { args: { entryId: string; versionId: string; field: string }; return: string };
+  restore_conflict_history: { args: { entryId: string; versionId: string; expectedRevision: string }; return: void };
   get_password_history: {
     args: { entryId: string };
     return: DecryptedHistoryItem[];
@@ -693,7 +704,7 @@ export interface IpcCommands {
     return: Tag[];
   };
   add_tag: {
-    args: { name: string; color: string; icon: string };
+    args: { name: string; color: string; icon: string; defaultUrl?: string };
     return: string;
   };
   delete_tag: {
@@ -701,7 +712,7 @@ export interface IpcCommands {
     return: void;
   };
   update_tag: {
-    args: { id: string; name: string; color: string; icon: string };
+    args: { id: string; name: string; color: string; icon: string; defaultUrl?: string };
     return: void;
   };
   reorder_tags: {
@@ -776,9 +787,16 @@ export interface IpcCommands {
     args: { url: string; username: string; password?: string | null; destDbPath: string };
     return: void;
   };
+  get_sync_operations: { args: Record<string, never> | undefined; return: import("@/features/sync/types").SyncOperation[] };
+  get_sync_review: { args: Record<string, never>; return: SyncPreview | null };
+  inspect_sync_field: { args: { id: string; key: string; remote: boolean }; return: string };
+  approve_sync_review: { args: { id: string; decisions: SyncDecision[] }; return: void };
+  cancel_sync_review: { args: Record<string, never>; return: void };
+  get_sync_policy: { args: Record<string, never>; return: SyncPolicy };
+  set_sync_policy: { args: { policy: SyncPolicy }; return: void };
   webdav_sync: {
-    args: { url: string; username: string; password?: string | null };
-    return: MergeStats;
+    args: { url: string; username: string; password?: string | null; background?: boolean };
+    return: import("@/features/sync/types").SyncOutcome;
   };
   webdav_test_connection: {
     args: { url: string; username: string; password?: string | null };
@@ -787,11 +805,11 @@ export interface IpcCommands {
   cancel_p2p_sync_listener: { args: Record<string, never>; return: void };
   run_p2p_sync_listener: {
     args: { listenAddr: string; dbPath: string };
-    return: MergeStats;
+    return: import("@/features/sync/types").SyncOutcome;
   };
   run_p2p_sync_client: {
-    args: { serverAddr: string; dbPath: string; deviceId?: string };
-    return: MergeStats;
+    args: { serverAddr: string; dbPath: string; deviceId?: string; background?: boolean };
+    return: import("@/features/sync/types").SyncOutcome;
   };
   get_local_ip: {
     args: Record<string, never>;
@@ -895,11 +913,11 @@ export interface IpcCommands {
   };
   query_mobile_autofill_status: {
     args: Record<string, never> | undefined;
-    return: any;
+    return: import('@/lib/backend').MobileAutofillStatus;
   };
   get_autofill_credentials_for_package: {
     args: { packageName: string; webDomain?: string | null };
-    return: any;
+    return: import('@/lib/backend').AutofillDatasetPayload;
   };
   parse_import_file: {
     args: { filePath: string; format?: string | null };
@@ -1009,5 +1027,5 @@ export async function invokeIpc<T extends IpcCommandName>(
     ? [args?: IpcCommandArgs<T>]
     : [args: IpcCommandArgs<T>]
 ): Promise<IpcCommandReturn<T>> {
-  return invoke(command, args[0] as any);
+  return invoke(command, args[0]);
 }

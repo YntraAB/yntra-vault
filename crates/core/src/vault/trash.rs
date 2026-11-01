@@ -63,6 +63,10 @@ impl VaultManager {
 
     /// Restore an entry from trash back to active entries.
     pub fn restore_from_trash(&mut self, id: Uuid) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.restore_from_trash_inner(id))
+    }
+
+    fn restore_from_trash_inner(&mut self, id: Uuid) -> crate::Result<()> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -94,6 +98,10 @@ impl VaultManager {
 
     /// Permanently delete an individual entry from trash.
     pub fn permanent_delete(&mut self, id: Uuid) -> crate::Result<()> {
+        self.transactional_data_change(|manager| manager.permanent_delete_inner(id))
+    }
+
+    fn permanent_delete_inner(&mut self, id: Uuid) -> crate::Result<()> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -109,6 +117,10 @@ impl VaultManager {
 
     /// Permanently empty all entries from trash and return the count of deleted entries.
     pub fn purge_all_trash(&mut self) -> crate::Result<usize> {
+        self.transactional_data_change(|manager| manager.purge_all_trash_inner())
+    }
+
+    fn purge_all_trash_inner(&mut self) -> crate::Result<usize> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -121,6 +133,10 @@ impl VaultManager {
     /// Purge expired entries from trash whose retention exceeds `max_age_days`.
     /// Returns the number of permanently removed items.
     pub fn purge_expired_trash(&mut self, max_age_days: i64) -> crate::Result<usize> {
+        self.transactional_data_change(|manager| manager.purge_expired_trash_inner(max_age_days))
+    }
+
+    fn purge_expired_trash_inner(&mut self, max_age_days: i64) -> crate::Result<usize> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
@@ -183,11 +199,16 @@ impl VaultManager {
     /// zero-disclosure search terms, writes an atomic re-packed vault file, and returns
     /// storage metrics.
     pub fn compact_vault(&mut self) -> crate::Result<VaultStorageMetrics> {
+        self.transactional_data_change(|manager| manager.compact_vault_inner())
+    }
+
+    fn compact_vault_inner(&mut self) -> crate::Result<VaultStorageMetrics> {
         if !self.is_unlocked() {
             return Err(VaultError::VaultLocked);
         }
 
-        self.purge_expired_trash(30)?;
+        let cutoff = Utc::now() - chrono::Duration::days(30);
+        self.data.trash.retain(|item| item.deleted_at > cutoff);
         self.rebuild_search_index();
         self.save()?;
         self.get_storage_metrics()

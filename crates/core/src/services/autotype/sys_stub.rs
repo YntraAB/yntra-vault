@@ -17,27 +17,17 @@ impl AutotypeDriver for StubAutotypeDriver {
         _char_delay_ms: u64,
         _settle_delay_ms: u64,
     ) -> crate::Result<()> {
-        Ok(())
+        Err(crate::VaultError::InvalidState("Auto-Type is not supported on this platform".into()))
     }
 
     fn run_smart_autotype(
         &self,
-        guard: AutotypeGuard,
+        _guard: AutotypeGuard,
         _url: &str,
         _launch_browser: bool,
-        char_delay_ms: u64,
+        _char_delay_ms: u64,
         _field_delay_ms: u64,
     ) -> crate::Result<()> {
-        let generation = guard.generation;
-        std::thread::spawn(move || {
-            super::bind_autotype_session(generation);
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            if super::is_cancelled() { return; }
-            let driver = StubAutotypeDriver::new();
-            let _ = driver.autotype_text_with_delay(&guard.username, char_delay_ms, 0);
-            let _ = driver.autotype_text_with_delay("\t", char_delay_ms, 0);
-            let _ = driver.autotype_text_with_delay(&guard.password, char_delay_ms, 0);
-        });
-        Ok(())
+        Err(crate::VaultError::InvalidState("Auto-Type is not supported on this platform".into()))
     }
 }

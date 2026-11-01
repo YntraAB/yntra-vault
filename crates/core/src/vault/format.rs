@@ -1,27 +1,16 @@
-//! .vdb binary vault file format
-//!
-//! ┌──────────────────────────────────┐
-//! │  Magic: "YNTR" (4 bytes)         │
-//! │  Version: u16 (2 bytes)          │
-//! │  Flags: u16 (2 bytes)            │
-//! │  Salt: [u8; 32] (32 bytes)       │
-//! │  Nonce: [u8; 24] (24 bytes)      │
-//! │  HMAC: [u8; 64] (64 bytes)       │
-//! │  KDF Params (serialized)         │
-//! │  Payload Length: u64 (8 bytes)    │
-//! │  ────────────────────────────────│
-//! │  Encrypted Payload (bincode)     │
-//! └──────────────────────────────────┘
+//! YNTR vault framing: authenticated versioned header, optional protection
+//! containers, and an encrypted payload. Versions 6/7 retain causal sync metadata.
+//! Legacy versions 1/2 also carry an outer HMAC; version 1 uses bincode.
 
 use std::io::{Read, Write, Cursor};
 use serde::{Deserialize, Serialize};
 use crate::error::VaultError;
 
 pub const MAGIC_BYTES: &[u8; 4] = b"YNTR";
-pub const FORMAT_VERSION: u16 = 4;
+pub const FORMAT_VERSION: u16 = 6;
 /// Random payload keys bound to hardware. Older applications must reject these
 /// files instead of removing a factor using the legacy password-only key model.
-pub const HARDWARE_BOUND_VERSION: u16 = 5;
+pub const HARDWARE_BOUND_VERSION: u16 = 7;
 pub const FLAG_HAS_BIOMETRIC: u16 = 0x0001;
 pub const FLAG_HAS_HARDWARE_2FA: u16 = 0x0002;
 
@@ -190,7 +179,7 @@ impl VaultFile {
             .map_err(|_| VaultError::InvalidFormat("Failed to read version".into()))?;
         let version = u16::from_le_bytes(version_bytes);
 
-        if version > HARDWARE_BOUND_VERSION {
+        if !(1..=HARDWARE_BOUND_VERSION).contains(&version) {
             return Err(VaultError::InvalidFormat(format!(
                 "Unsupported vault version {} (max supported: {})",
                 version, HARDWARE_BOUND_VERSION
@@ -461,6 +450,16 @@ mod tests {
     fn test_truncated_file() {
         let result = VaultFile::from_bytes(b"YN");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn unsupported_versions_are_rejected_before_reading_payload() {
+        for version in [0_u16, HARDWARE_BOUND_VERSION + 1, u16::MAX] {
+            let mut bytes = b"YNTR".to_vec();
+            bytes.extend_from_slice(&version.to_le_bytes());
+            assert!(matches!(VaultFile::from_bytes(&bytes),
+                Err(VaultError::InvalidFormat(message)) if message.starts_with("Unsupported vault version")));
+        }
     }
 }
 

@@ -146,6 +146,7 @@ impl VaultManager {
     ) -> crate::Result<Self> {
         let storage = StorageSession::new(password, None, None, &keys)?;
         let mut manager = Self {
+            migration_required: false,
             session_id: uuid::Uuid::new_v4(),
             path: path.to_owned(),
             data,

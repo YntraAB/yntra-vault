@@ -37,11 +37,64 @@ async function setup(overrides: Record<string,unknown>={}) {
   return backend;
 }
 describe('session mutation security regressions',()=>{
+  it('preserves protected custom notes when editing another field and duplicating the entry',async()=>{
+    const protectedNote={id:'protected-note',name:'Notes (other device)',field_type:'Notes',value:'SYNTHETIC PRIVATE NOTE',sensitive:true};
+    const writes: Array<{custom_fields?: typeof protectedNote[]}> = [];
+    await setup({
+      getEntry:async()=>({...fixture,custom_fields:[protectedNote]}),
+      updateEntry:async(_id:string,payload:typeof writes[number])=>{writes.push(payload);},
+      addEntry:async(payload:typeof writes[number])=>{writes.push(payload);return 'duplicate-fixture';},
+    });
+    await act(async()=>{await entries.selectEntryById(fixture.id);});
+    expect(entries.selectedEntry!.customFields[0].sensitive).toBe(true);
+    const edited={...entries.selectedEntry!,notes:'Updated ordinary notes'};
+    await act(async()=>{await entries.updateEntry(edited);});
+    await act(async()=>{await entries.addEntry({...edited,id:'duplicate-fixture'});});
+    expect(writes).toHaveLength(2);
+    for(const write of writes) expect(write.custom_fields).toEqual([protectedNote]);
+  });
+  it('discards old details when pairing replaces the session at the same vault path',async()=>{
+    let resolve!: (entry:typeof fixture)=>void;
+    await setup({getEntry:async()=>new Promise<typeof fixture>(done=>{resolve=done;})});
+    let pending!:Promise<void>;
+    await act(async()=>{pending=entries.selectEntryById(fixture.id);});
+    const oldGeneration=auth.getSessionGeneration();
+    await act(async()=>auth.setCurrentVault({...auth.currentVault!},true));
+    expect(auth.isSessionCurrent(oldGeneration)).toBe(false);
+    await act(async()=>{resolve({...fixture});await pending;});
+    expect(entries.selectedEntry).toBeNull();
+    expect(auth.isLocked).toBe(false);
+  });
+  it('manual receiving ends on lock or vault change without enabling automatic sync',async()=>{
+    let listening=0, outgoing=0;
+    let ready=()=>{};
+    let finish: (()=>void)|undefined;
+    await setup({
+      onP2pListenerReady: async (callback:()=>void)=>{ready=callback;return ()=>{};},
+      runP2pSyncListener: async ()=>{listening++;ready();return new Promise(resolve=>{finish=()=>resolve({entries_added:0,entries_updated:0});});},
+      cancelP2pSyncListener: async ()=>{finish?.();},
+      runP2pSyncClient: async ()=>{outgoing++;return {};},
+    });
+    expect(entries.p2pReceiverEnabled).toBe(false);
+    await act(async()=>entries.toggleP2pListener(true));
+    expect(entries.p2pReceiverEnabled).toBe(true);
+    expect(listening).toBe(1);
+    await act(async()=>auth.lockVault());
+    await act(async()=>auth.setIsLocked(false));
+    expect(entries.p2pReceiverEnabled).toBe(false);
+    expect(listening).toBe(1);
+    await act(async()=>entries.toggleP2pListener(true));
+    expect(listening).toBe(2);
+    await act(async()=>auth.setCurrentVault({id:'other-receiver',name:'Other',path:'/other-receiver.vdb'}));
+    expect(entries.p2pReceiverEnabled).toBe(false);
+    expect(listening).toBe(2);
+    expect(outgoing).toBe(0);
+  });
   it('discards an old add response after switching to another unlocked vault',async()=>{
     let resolve!: (id:string)=>void;
     await setup({addEntry:async()=>new Promise<string>(r=>{resolve=r;})});
     let pending!:Promise<void>;
-    await act(async()=>{pending=entries.addEntry(fixture as any);});
+    await act(async()=>{pending=entries.addEntry(fixture);});
     await act(async()=>{auth.setIsLocked(true);auth.setCurrentVault({id:'other',name:'Other',path:'/other.vdb'});auth.setIsLocked(false);resolve('old-session-entry');await pending;});
     expect(entries.entries.some(entry=>entry.id==='old-session-entry')).toBe(false);
     expect(entries.selectedEntry).toBeNull();
@@ -50,7 +103,7 @@ describe('session mutation security regressions',()=>{
     let resolve!: (id:string)=>void;
     await setup({addEntry:async()=>new Promise<string>(r=>{resolve=r;})});
     let pending!:Promise<void>;
-    await act(async()=>{pending=entries.addEntry(fixture as any);});
+    await act(async()=>{pending=entries.addEntry(fixture);});
     await act(async()=>{await auth.lockVault();});
     expect(auth.isLocked).toBe(true);expect(entries.entries).toEqual([]);expect(entries.selectedEntry).toBeNull();
     await act(async()=>{resolve('new-audit-entry');await pending;});
@@ -77,7 +130,7 @@ describe('session mutation security regressions',()=>{
     expect(entries.selectedEntry).toBeNull();expect(entries.entries[0]?.password).toBe('••••••••');
   });
   it('never projects recovery, TOTP, notes, custom secrets or attachments into preview state',()=>{
-    const preview=passwordEntryToPreview({...fixture,notes:'private-note',totpSecret:'private-totp',recoveryCodes:'private-recovery',customFields:[{id:'s',name:'Secret',type:'password',value:'private-field'}],newAttachments:[{name:'secret.txt',mime_type:'text/plain',data:[1,2,3]}]} as any);
+    const preview=passwordEntryToPreview({...fixture,notes:'private-note',totpSecret:'private-totp',recoveryCodes:'private-recovery',customFields:[{id:'s',name:'Secret',type:'password',value:'private-field'}],newAttachments:[{name:'secret.txt',mime_type:'text/plain',data:[1,2,3]}]} );
     expect(preview.password).toBe('••••••••');expect(preview.totpSecret).toBe('has-totp');
     expect(preview.notes).toBe('');expect(preview.customFields).toEqual([]);
     expect(preview.recoveryCodes).toBeUndefined();expect(preview.newAttachments).toBeUndefined();
@@ -122,7 +175,7 @@ describe('network privacy regressions',()=>{
     }}});
     await getBackend();
     dom.localStorage.setItem('yntra-vault-settings',JSON.stringify({operationMode:'airgap',externalFaviconsEnabled:true}));
-    let currentSettings:any;
+    let currentSettings!: ReturnType<typeof useSettings>;
     function Harness(){const a=useAuth(),s=useSettings();useEffect(()=>{auth=a;currentSettings=s;},[a,s]);return !a.isLocked?<Favicon title="Synthetic" url="https://synthetic-sensitive-service.test"/>:null;}
     const container=dom.document.createElement('div');dom.document.body.append(container);
     await act(async()=>{root=mount(container as unknown as Element);root.render(<ToastProvider><SettingsProvider><AuthProvider><Harness/></AuthProvider></SettingsProvider></ToastProvider>);});
@@ -137,3 +190,48 @@ describe('network privacy regressions',()=>{
   });
 });
 
+
+
+describe('tag storage acknowledgements', () => {
+  const tag = { id: 'tag-a', name: 'Accounts', color: '#777777', icon: 'tag', count: 1 };
+  it('keeps names and selected entry tags unchanged on failed writes', async () => {
+    let fail = true;
+    await setup({ getTags: async () => [tag], getEntry: async () => ({ ...fixture, tags: [tag.name] }), updateTag: async () => { if (fail) throw Error('Disk full'); }, deleteTag: async () => { throw Error('Disk full'); } });
+    await act(async () => { await entries.selectEntryById(fixture.id); });
+    await act(async () => { expect(await entries.updateTag(tag.id, { name: 'Renamed' })).toBe(false); expect(await entries.removeTag(tag.id)).toBe(false); });
+    expect(entries.tags[0].name).toBe('Accounts'); expect(entries.selectedEntry!.tags).toEqual(['Accounts']);
+    fail = false;
+    await act(async () => { expect(await entries.updateTag(tag.id, { name: 'Renamed' })).toBe(true); });
+    expect(entries.tags[0].name).toBe('Renamed'); expect(entries.selectedEntry!.tags).toEqual(['Renamed']);
+  });
+  it('does not expose an unsaved tag and discards acknowledgement after vault lock', async () => {
+    let resolve!: (id: string) => void;
+    await setup({ addTag: async () => new Promise<string>(done => { resolve = done; }) });
+    let pending!: Promise<boolean>;
+    await act(async () => { pending = entries.addTag(tag); });
+    expect(entries.tags).toEqual([]);
+    await act(async () => { await auth.lockVault(); });
+    await act(async () => { resolve(tag.id); expect(await pending).toBe(false); });
+    expect(entries.tags).toEqual([]);
+  });
+});
+
+
+describe('entry storage acknowledgements', () => {
+  it('preserves draft state and reports failure instead of success when saving or deleting fails', async () => {
+    await setup({ updateEntry: async () => { throw Error('Disk full'); }, deleteEntry: async () => { throw Error('Disk full'); } });
+    await act(async () => { await entries.selectEntryById(fixture.id); });
+    await act(async () => { expect(await entries.updateEntry({ ...entries.selectedEntry!, notes: 'Unsaved draft' })).toBe(false); });
+    expect(entries.selectedEntry!.notes).toBe('');
+    await act(async () => { expect(await entries.deleteEntry(fixture.id)).toBe(false); });
+    expect(entries.entries).toHaveLength(1); expect(entries.selectedEntry!.id).toBe(fixture.id);
+  });
+  it('sends one atomic bulk command and never falls back to overwriting notes after a failed read', async () => {
+    const requests: unknown[][] = []; let individualWrites = 0;
+    await setup({ bulkUpdateEntries: async (...args: unknown[]) => { requests.push(args); throw Error('Cannot read stored notes'); }, updateEntry: async () => { individualWrites++; } });
+    await act(async () => { expect(await entries.bulkUpdateEntries([fixture.id], { notes: 'Extra' }, ['Added'], [], 'append')).toBe(false); });
+    expect(requests).toHaveLength(1); expect(requests[0][0]).toEqual([fixture.id]);
+    expect(requests[0][1]).toMatchObject({ notes: 'Extra', append_notes: true, tags_to_add: ['Added'] }); expect(individualWrites).toBe(0);
+    expect(entries.entries).toHaveLength(1);
+  });
+});

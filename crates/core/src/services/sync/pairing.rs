@@ -34,7 +34,7 @@ use crate::vault::{
     manager::VaultManager,
 };
 use crate::services::sync::{
-    merge_vault_data, DEFAULT_DISCOVERY_PORT, DEFAULT_PAIRING_PORT,
+    DEFAULT_DISCOVERY_PORT, DEFAULT_PAIRING_PORT,
     P2P_AUTH_FAILED_SIG, MAX_DB_SIZE, DISCOVERY_MULTICAST_ADDR, PAIRING_QUERY_MAGIC,
     get_local_lan_ips,
 };
@@ -45,6 +45,13 @@ pub const PAIRING_AAD_CLIENT: &[u8] = b"yntra-pairing-client-v1";
 pub const PAIRING_AAD_HOST: &[u8] = b"yntra-pairing-host-v1";
 
 pub const QR_PAIRING_MAGIC: [u8; 4] = *b"YQR3";
+
+fn pairing_data(mut data: VaultData) -> VaultData {
+    let sync = std::mem::take(&mut data.settings.sync);
+    let trusted_devices = std::mem::take(&mut data.settings.trusted_devices);
+    data.settings = VaultSettings { sync, trusted_devices, ..Default::default() };
+    data
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SyncKeyMaterial(pub Zeroizing<Vec<u8>>);
@@ -300,6 +307,8 @@ pub struct DeviceInfo {
     pub qr_receipt_v1: bool,
     #[serde(default)]
     pub signing_public_key: Vec<u8>,
+    #[serde(default)]
+    pub reviewed_sync_v1: bool,
 }
 
 fn default_device_type_info() -> String {
@@ -310,22 +319,47 @@ fn default_os_info() -> String {
     "Windows".to_string()
 }
 
+fn validate_distinct_installations(host: &DeviceInfo, client: &DeviceInfo) -> crate::Result<()> {
+    if host.id == client.id && host.signing_public_key != client.signing_public_key {
+        return Err(VaultError::SyncError("These installations share an old device ID but have different signing keys. Pairing was stopped to preserve existing trust.".into()));
+    }
+    Ok(())
+}
+
 static INSTALLATION_DEVICE_ID: std::sync::OnceLock<uuid::Uuid> = std::sync::OnceLock::new();
 
-/// Persist an installation identity independently of device/display-name changes.
-/// Desktop upgrades retain the old default identity; mobile gets a random ID
-/// instead of deriving the same ID on every phone with an empty hostname.
 pub fn initialize_local_signing_identity(path: &Path) -> crate::Result<()> {
     super::identity::initialize(path)
 }
 
 pub fn initialize_local_device_identity(path: &Path) -> crate::Result<()> {
+    let mut id = load_or_create_device_identity(path)?;
+    if let Ok(public) = super::identity::public_key() {
+        id = migrate_device_identity(path, &public)?;
+    }
+    INSTALLATION_DEVICE_ID.set(id).map_err(|_| VaultError::SyncError("Device identity was already initialized".into()))
+}
+
+fn migrate_device_identity(path: &Path, public: &[u8]) -> crate::Result<uuid::Uuid> {
+    let id = super::identity::key_bound_device_id(public)
+        .ok_or_else(|| VaultError::SyncError("Invalid installation signing identity".into()))?;
+    if fs::read_to_string(path).ok().is_some_and(|value| value.trim() == id.to_string()) { return Ok(id); }
+    let parent = path.parent().ok_or_else(|| VaultError::InvalidFormat("Missing device identity directory".into()))?;
+    fs::create_dir_all(parent)?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    staged.write_all(id.to_string().as_bytes())?;
+    staged.as_file().sync_all()?;
+    staged.persist(path).map_err(|error| error.error)?;
+    Ok(id)
+}
+
+/// Separate installations have separate signing keys, so they also need separate
+/// IDs. Preserve existing identities when upgrading or changing the display name.
+fn load_or_create_device_identity(path: &Path) -> crate::Result<uuid::Uuid> {
     let id = match fs::read_to_string(path) {
         Ok(value) => uuid::Uuid::parse_str(value.trim()).map_err(|_| VaultError::InvalidFormat("Invalid local device identity file".into()))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let id = if cfg!(any(target_os = "android", target_os = "ios")) {
-                uuid::Uuid::new_v4()
-            } else { resolve_local_device_info(None).id };
+            let id = uuid::Uuid::new_v4();
             let parent = path.parent().ok_or_else(|| VaultError::InvalidFormat("Missing device identity directory".into()))?;
             fs::create_dir_all(parent)?;
             let mut file = tempfile::NamedTempFile::new_in(parent)?;
@@ -341,7 +375,7 @@ pub fn initialize_local_device_identity(path: &Path) -> crate::Result<()> {
         }
         Err(error) => return Err(error.into()),
     };
-    INSTALLATION_DEVICE_ID.set(id).map_err(|_| VaultError::SyncError("Device identity was already initialized".into()))
+    Ok(id)
 }
 
 pub fn resolve_local_device_info(custom_name: Option<&str>) -> DeviceInfo {
@@ -374,12 +408,16 @@ pub fn resolve_local_device_info(custom_name: Option<&str>) -> DeviceInfo {
     id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
     id_bytes[6] = (id_bytes[6] & 0x0f) | 0x40;
     id_bytes[8] = (id_bytes[8] & 0x3f) | 0x80;
-    let id = INSTALLATION_DEVICE_ID.get().copied().unwrap_or_else(|| uuid::Uuid::from_bytes(id_bytes));
+    let public = super::identity::public_key().unwrap_or_default();
+    let id = super::identity::key_bound_device_id(&public)
+        .or_else(|| INSTALLATION_DEVICE_ID.get().copied())
+        .unwrap_or_else(|| uuid::Uuid::from_bytes(id_bytes));
 
     DeviceInfo {
+        reviewed_sync_v1: true,
         storage_envelope_v2: true,
         qr_receipt_v1: true,
-        signing_public_key: super::identity::public_key().unwrap_or_default(),
+        signing_public_key: public,
         id,
         name,
         device_type: dtype,
@@ -430,6 +468,52 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
     accept_timeout: Duration,
     host_device_name: Option<String>,
     cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> crate::Result<(PairingStats, VaultData)> {
+    run_p2p_pairing_host_reviewed(listen_addr, master_password, pairing_code, host_db_path, accept_timeout, host_device_name, cancel_flag, |manager, incoming| {
+        let keys = manager.get_subkeys()?;
+        let preview = super::review::preview(&manager.data, incoming, keys)?;
+        super::review::resolve(&manager.data, incoming, &preview, &[], keys, manager.session_identity())
+    })
+}
+
+fn separate_imported_tag_names(local: &VaultData, incoming: &mut VaultData) -> crate::Result<()> {
+    let mut names: std::collections::BTreeSet<_> = local.tags.iter().map(|tag| tag.name.clone()).collect();
+    let mut renamed = std::collections::BTreeMap::new();
+    let mut source_names = std::collections::BTreeSet::new();
+    for tag in &mut incoming.tags {
+        if !source_names.insert(tag.name.clone()) {
+            return Err(VaultError::SyncError("Multiple imported tags have the same name; rename them before pairing".into()));
+        }
+        if local.tags.iter().any(|existing| existing.id == tag.id) { continue; }
+        if names.contains(&tag.name) {
+            let suffix = format!(" ({})", tag.id);
+            let limit = crate::vault::validation::MAX_DISPLAY_NAME_LENGTH - suffix.len();
+            let mut units = 0;
+            let prefix: String = tag.name.chars().take_while(|ch| { units += ch.len_utf16(); units <= limit }).collect();
+            let mut name = format!("{prefix}{suffix}");
+            while names.contains(&name) { name = format!("Imported tag {}", uuid::Uuid::new_v4()); }
+            renamed.insert(tag.name.clone(), name.clone());
+            tag.name = name;
+        }
+        names.insert(tag.name.clone());
+    }
+    for entry in incoming.entries.iter_mut().chain(incoming.trash.iter_mut().map(|item| &mut item.entry)) {
+        for name in &mut entry.tags {
+            if let Some(replacement) = renamed.get(name) { *name = replacement.clone(); }
+        }
+    }
+    Ok(())
+}
+
+pub fn run_p2p_pairing_host_reviewed(
+    listen_addr: &str,
+    master_password: &str,
+    pairing_code: &str,
+    host_db_path: &Path,
+    accept_timeout: Duration,
+    host_device_name: Option<String>,
+    cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    review: impl FnOnce(&VaultManager, &VaultData) -> crate::Result<VaultData>,
 ) -> crate::Result<(PairingStats, VaultData)> {
     let network_generation = crate::services::network::generation_token()?;
     if cancel_flag.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
@@ -563,7 +647,9 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
 
     // Authenticated metadata binds the enrolled device key to this pairing session.
     let client_info = super::identity::read_metadata(&mut stream, &pairing_subkeys, b"pair-client", &client_challenge, &host_challenge)?;
+    if !client_info.reviewed_sync_v1 { return Err(VaultError::SyncError("Update both devices before pairing a vault with reviewed synchronization".into())); }
     let host_info = resolve_local_device_info(host_device_name.as_deref());
+    validate_distinct_installations(&host_info, &client_info)?;
     if host_info.signing_public_key.len() != 32 { return Err(VaultError::SyncError("Initialize device signing before pairing".into())); }
     let host_dev_bytes = rmp_serde::to_vec(&host_info).map_err(|e| VaultError::SerializationError(e.to_string()))?;
     super::identity::write_metadata(&mut stream,&host_dev_bytes,&pairing_subkeys,b"pair-host",&client_challenge,&host_challenge)?;
@@ -607,10 +693,42 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
         let destination = &host_manager.get_subkeys()?.entry_key;
         for entry in &mut client_data.entries { VaultManager::reencrypt_entry(entry,&incoming.entry_key,destination)?; }
         for trash in &mut client_data.trash { VaultManager::reencrypt_entry(&mut trash.entry,&incoming.entry_key,destination)?; }
+        VaultManager::reencrypt_sync_history(&mut client_data, &incoming.entry_key, destination)?;
+        super::review::rehash(&mut client_data, host_manager.get_subkeys()?)?;
     } else if (!client_data.entries.is_empty() || !client_data.trash.is_empty()) && client_data.metadata.id != host_manager.data.metadata.id {
         return Err(VaultError::SyncError("Update the client before merging independently encrypted vaults".into()));
     }
-    let merge_stats = merge_vault_data(&mut host_manager.data, client_data);
+    if client_data.metadata.id != host_manager.data.metadata.id {
+        // Independent vaults are imported by identity; they have no shared deletion history.
+        separate_imported_tag_names(&host_manager.data, &mut client_data)?;
+        let mut imported = host_manager.data.clone();
+        for entry in client_data.entries.iter().chain(client_data.trash.iter().map(|t| &t.entry)) {
+            if imported.entries.iter().any(|e| e.id == entry.id) || imported.trash.iter().any(|t| t.entry.id == entry.id) {
+                return Err(VaultError::SyncError("Independent vaults contain the same entry identity; import and review them separately".into()));
+            }
+        }
+        imported.entries.extend(client_data.entries); imported.trash.extend(client_data.trash);
+        for tag in client_data.tags {
+            if let Some(existing) = imported.tags.iter().find(|t| t.id == tag.id) {
+                if existing.name != tag.name || existing.color != tag.color || existing.icon != tag.icon { return Err(VaultError::SyncError("Independent vaults contain conflicting tag identities".into())); }
+            } else { imported.tags.push(tag); }
+        }
+        imported.settings.sync.history.extend(client_data.settings.sync.history);
+        super::review::track(&mut imported, host_manager.get_subkeys()?, uuid::Uuid::new_v4(), Utc::now())?;
+        client_data = imported;
+    } else if client_data.settings.sync.version == 0 {
+        super::review::track(&mut client_data, host_manager.get_subkeys()?, uuid::Uuid::new_v4(), Utc::now())?;
+    }
+    stream.set_idle_timeout(Duration::from_secs(960));
+    stream.set_deadline(std::time::Instant::now() + Duration::from_secs(960));
+    let mut merged = review(&host_manager, &client_data)?;
+    if cancel_flag.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
+        return Err(VaultError::SyncError("Pairing cancelled".into()));
+    }
+    let merge_stats = super::review_transport::stats(&host_manager.data, &merged, host_manager.get_subkeys()?)?;
+    let sync = std::mem::take(&mut merged.settings.sync);
+    merged.settings = host_manager.data.settings.clone(); merged.settings.sync = sync;
+    host_manager.data = merged;
 
     // Register paired client as a Trusted Device in vault settings
     let trusted_client = crate::vault::types::TrustedDevice {
@@ -623,6 +741,7 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
         last_sync_at: Some(Utc::now()),
         token_hash: String::new(),
     };
+    host_manager.data.settings.trusted_devices = host_manager.get_trusted_devices();
     host_manager.data.settings.trusted_devices.retain(|d| {
         d.id != trusted_client.id
     });
@@ -657,13 +776,13 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
 
     host_manager.data.metadata.updated_at = Utc::now();
     host_manager.data.metadata.entry_count = host_manager.data.entries.len();
-    host_manager.save()?;
+    host_manager.save_reviewed()?;
 
     // 5. Return merged database + host root salt to Client (transit-encrypted inside AEAD blob)
     let host_payload = PairingHostPayload {
         sync_keys: if host_manager.storage.is_some() { Some(SyncKeyMaterial(Zeroizing::new(host_manager.get_subkeys()?.to_bytes()))) } else { None },
         salt: host_manager.salt,
-        data: { let mut data = host_manager.data.clone(); data.settings.emergency_kit_audit = None; data.settings.hardware_password_key = None; data },
+        data: pairing_data(host_manager.data.clone()),
         error_msg: None,
     };
     let serialized_merged = Zeroizing::new(
@@ -680,9 +799,13 @@ pub fn run_p2p_pairing_host_with_device_and_cancel(
     stream.write_all(&host_blob_bytes)
         .map_err(|e| VaultError::EncryptionError(format!("Send host payload data failed: {}", e)))?;
     stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush pairing data stream failed: {}", e)))?;
+    let mut receipt = [0; 64];
+    stream.read_exact(&mut receipt).map_err(|_| VaultError::SyncError("Host saved the vault, but the receiving device did not confirm storage. Check both devices before retrying.".into()))?;
+    let expected = super::identity::transcript(b"pin-stored-v1", &[&session_aad, blake3::hash(&host_blob_bytes).as_bytes()]);
+    verify_hmac(&expected, &receipt, &pairing_subkeys.hmac_key)?;
 
     let stats = PairingStats {
-        peer_saved: None,
+        peer_saved: Some(true),
         entries_sent: host_entries_before,
         entries_received: client_entries_count,
         entries_merged: merge_stats.entries_added + merge_stats.entries_updated,
@@ -829,7 +952,7 @@ pub fn run_p2p_pairing_client_cancellable(
     let sock_timeout = Some(Duration::from_secs(30));
     let _ = stream.set_read_timeout(sock_timeout);
     let _ = stream.set_write_timeout(sock_timeout);
-    let mut stream = super::lifecycle::CancellableStream::new_with_generation(stream, cancel, network_generation)?;
+    let mut stream = super::lifecycle::CancellableStream::new_with_generation(stream, cancel.clone(), network_generation)?;
 
     // 1. Mutual Challenge-Response Handshake
     let mut client_challenge = [0u8; 32];
@@ -874,18 +997,22 @@ pub fn run_p2p_pairing_client_cancellable(
     let client_dev_bytes = rmp_serde::to_vec(&client_info).map_err(|e| VaultError::SerializationError(e.to_string()))?;
     super::identity::write_metadata(&mut stream,&client_dev_bytes,&pairing_subkeys,b"pair-client",&client_challenge,&host_challenge)?;
     let host_info = super::identity::read_metadata(&mut stream,&pairing_subkeys,b"pair-host",&client_challenge,&host_challenge)?;
+    validate_distinct_installations(&host_info, &client_info)?;
+    if !host_info.reviewed_sync_v1 { return Err(VaultError::SyncError("Update both devices before pairing a vault with reviewed synchronization".into())); }
     let host_dev_bytes = rmp_serde::to_vec(&host_info).map_err(|e| VaultError::SerializationError(e.to_string()))?;
     let session_aad = super::identity::transcript(b"pair-payload", &[&client_challenge,&host_challenge,&client_dev_bytes,&host_dev_bytes]);
     // 3. Transmit Client's local data
     // INVARIANT: When in Adopt mode (e.g. from logged-out VaultSelect screen),
     // we NEVER open or read any local vault file from disk! Transmit empty vault data.
+    let mut existing_revision = None;
     let (client_data, client_entries_count, client_keys) = match &client_mode {
         ClientPairingMode::ExistingVault { path } => {
             if path.exists() && fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false) {
                 let mgr = VaultManager::open(path, master_password)?;
+                existing_revision = mgr.disk_revision;
                 let count = mgr.data.entries.len();
                 let keys=SyncKeyMaterial(Zeroizing::new(mgr.get_subkeys()?.to_bytes()));
-                let mut data=mgr.data;data.settings.emergency_kit_audit=None;
+                let data = pairing_data(mgr.data);
                 (data, count, Some(keys))
             } else {
                 return Err(VaultError::InvalidFormat(format!(
@@ -930,6 +1057,8 @@ pub fn run_p2p_pairing_client_cancellable(
         .map_err(|e| VaultError::EncryptionError(format!("Write client payload data failed: {}", e)))?;
     stream.flush().map_err(|e| VaultError::EncryptionError(format!("Flush client payload failed: {}", e)))?;
 
+    stream.set_idle_timeout(Duration::from_secs(960));
+    stream.set_deadline(std::time::Instant::now() + Duration::from_secs(960));
     // 4. Receive Host's adopted root salt & merged database (transit-encrypted inside AEAD blob)
     let mut size_buf = [0u8; 8];
     stream.read_exact(&mut size_buf)
@@ -957,7 +1086,19 @@ pub fn run_p2p_pairing_client_cancellable(
     }
 
     let host_salt = host_payload.salt;
-    let merged_data = host_payload.data;
+    let mut merged_data = host_payload.data;
+    if let ClientPairingMode::ExistingVault { path } = &client_mode {
+        let local = VaultManager::open(path, master_password)?;
+        if local.disk_revision != existing_revision { return Err(VaultError::SyncError("Local vault changed during pairing; restart pairing".into())); }
+        if local.hardware2fa.is_some() {
+            return Err(VaultError::SyncError("Remove legacy hardware protection before changing the paired vault identity".into()));
+        }
+        let sync = std::mem::take(&mut merged_data.settings.sync);
+        let trusted_devices = std::mem::take(&mut merged_data.settings.trusted_devices);
+        merged_data.settings = local.data.settings;
+        merged_data.settings.sync = sync;
+        merged_data.settings.trusted_devices = trusted_devices;
+    }
 
     // 5. Determine destination path with strict collision isolation
     let (final_dest_path, should_backup) = match &client_mode {
@@ -981,10 +1122,7 @@ pub fn run_p2p_pairing_client_cancellable(
         let _ = fs::create_dir_all(parent);
     }
 
-    if should_backup && final_dest_path.exists() {
-        let backup_path = final_dest_path.with_extension("vdb.bak");
-        let _ = fs::copy(&final_dest_path, &backup_path);
-    }
+
 
     let adopted_subkeys = if let Some(material) = &host_payload.sync_keys { SubKeys::from_bytes(&material.0)? } else { derive_subkeys(&derive_master_key(master_password.as_bytes(), &host_salt)?)? };
 
@@ -1013,23 +1151,41 @@ pub fn run_p2p_pairing_client_cancellable(
         encrypted_payload: payload,
     };
 
-    let file_bytes = if should_backup && crate::vault::storage::is_protected(&fs::read(&final_dest_path)?) {
-        let mut local = VaultManager::open(&final_dest_path,master_password)?;
-        local.replace_paired_data(merged_data.clone(),host_salt,adopted_subkeys.clone())?;
-        // The local transaction already saved the protected replica.
-        fs::read(&final_dest_path)?
-    } else if host_payload.sync_keys.is_some() {
-        let session = crate::vault::storage::StorageSession::new(master_password,None,None,&adopted_subkeys)?;
-        session.seal(&vault_file.to_bytes()?)?
-    } else { vault_file.to_bytes()? };
+    if cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
+        return Err(VaultError::SyncError("Pairing cancelled before local storage".into()));
+    }
     if should_backup {
-        crate::vault::storage::atomic_write(&final_dest_path, &file_bytes)?;
+        let mut local = VaultManager::open(&final_dest_path, master_password)?;
+        if local.disk_revision != existing_revision { return Err(VaultError::SyncError("Local vault changed during pairing; restart pairing to review the changes".into())); }
+        let original = crate::vault::storage::read_bounded(&final_dest_path)?;
+        let backup = final_dest_path.with_extension(format!("vdb.before-pairing-{}.bak", uuid::Uuid::new_v4()));
+        crate::vault::storage::atomic_create(&backup, &original)?;
+        if local.storage.is_some() {
+            local.replace_paired_data(merged_data.clone(), host_salt, adopted_subkeys.clone())?;
+        } else {
+            let _lock = crate::vault::storage::lock_vault_path(&final_dest_path)?;
+            let current = crate::vault::storage::read_bounded(&final_dest_path)?;
+            if Some(*blake3::hash(&current).as_bytes()) != existing_revision { return Err(VaultError::SyncError("Local vault changed during pairing; restart pairing".into())); }
+            let file_bytes = if host_payload.sync_keys.is_some() {
+                let session = crate::vault::storage::StorageSession::new(master_password, None, None, &adopted_subkeys)?;
+                session.seal(&vault_file.to_bytes()?)?
+            } else { vault_file.to_bytes()? };
+            crate::vault::storage::atomic_write(&final_dest_path, &file_bytes)?;
+        }
     } else {
+        let file_bytes = if host_payload.sync_keys.is_some() {
+            let session = crate::vault::storage::StorageSession::new(master_password, None, None, &adopted_subkeys)?;
+            session.seal(&vault_file.to_bytes()?)?
+        } else { vault_file.to_bytes()? };
         crate::vault::storage::atomic_create(&final_dest_path, &file_bytes)?;
     }
+    let receipt = super::identity::transcript(b"pin-stored-v1", &[&session_aad, blake3::hash(&host_encrypted_bytes).as_bytes()]);
+    stream.write_all(&compute_hmac(&receipt, &pairing_subkeys.hmac_key))
+        .map_err(|_| VaultError::SyncError("Vault saved locally; pairing confirmation did not reach the host".into()))?;
+    stream.flush()?;
 
     let stats = PairingStats {
-        peer_saved: None,
+        peer_saved: Some(true),
         entries_sent: client_entries_count,
         entries_received: merged_data.entries.len(),
         entries_merged: if client_entries_count == 0 { 0 } else { merged_data.entries.len() },
@@ -1412,7 +1568,9 @@ pub fn run_p2p_qr_pairing_host(
 
     // Authenticated metadata binds the enrolled device key to this pairing session.
     let client_info = super::identity::read_metadata(&mut stream, &pairing_subkeys, b"pair-client", &client_challenge, &host_challenge)?;
+    if !client_info.reviewed_sync_v1 { return Err(VaultError::SyncError("Update both devices before pairing a vault with reviewed synchronization".into())); }
     let host_info = resolve_local_device_info(host_device_name.as_deref());
+    validate_distinct_installations(&host_info, &client_info)?;
     if host_info.signing_public_key.len() != 32 { return Err(VaultError::SyncError("Initialize device signing before pairing".into())); }
     let host_dev_bytes = rmp_serde::to_vec(&host_info).map_err(|e| VaultError::SerializationError(e.to_string()))?;
     super::identity::write_metadata(&mut stream,&host_dev_bytes,&pairing_subkeys,b"pair-host",&client_challenge,&host_challenge)?;
@@ -1433,6 +1591,7 @@ pub fn run_p2p_qr_pairing_host(
         last_sync_at: Some(Utc::now()),
         token_hash: String::new(),
     };
+    host_manager.data.settings.trusted_devices = host_manager.get_trusted_devices();
     host_manager.data.settings.trusted_devices.retain(|d| {
         d.id != trusted_client.id
     });
@@ -1461,7 +1620,7 @@ pub fn run_p2p_qr_pairing_host(
     let host_payload = QrPairingPayload {
         sync_keys: if host_manager.storage.is_some() { Some(SyncKeyMaterial(Zeroizing::new(host_manager.get_subkeys()?.to_bytes()))) } else { None },
         salt: host_manager.salt,
-        data: { let mut data = host_manager.data.clone(); data.settings.emergency_kit_audit = None; data.settings.hardware_password_key = None; data },
+        data: pairing_data(host_manager.data.clone()),
         master_password: if include_password { Some(master_password.to_string()) } else { None },
         error_msg: None,
     };
@@ -1605,6 +1764,8 @@ pub fn run_p2p_qr_pairing_client_cancellable(
     let client_dev_bytes = rmp_serde::to_vec(&client_info).map_err(|e| VaultError::SerializationError(e.to_string()))?;
     super::identity::write_metadata(&mut stream,&client_dev_bytes,&pairing_subkeys,b"pair-client",&client_challenge,&host_challenge)?;
     let host_info = super::identity::read_metadata(&mut stream,&pairing_subkeys,b"pair-host",&client_challenge,&host_challenge)?;
+    validate_distinct_installations(&host_info, &client_info)?;
+    if !host_info.reviewed_sync_v1 { return Err(VaultError::SyncError("Update both devices before pairing a vault with reviewed synchronization".into())); }
     let host_dev_bytes = rmp_serde::to_vec(&host_info).map_err(|e| VaultError::SerializationError(e.to_string()))?;
     let session_aad = super::identity::transcript(b"pair-payload", &[&client_challenge,&host_challenge,&client_dev_bytes,&host_dev_bytes]);
     // 4. Receive Transit-Encrypted Vault Payload
@@ -1648,6 +1809,7 @@ pub fn run_p2p_qr_pairing_client_cancellable(
         last_sync_at: Some(Utc::now()),
         token_hash: String::new(),
     };
+    merged_data.settings.trusted_devices = super::identity::canonical_devices(&merged_data.settings.trusted_devices);
     merged_data.settings.trusted_devices.retain(|d| {
         d.id != trusted_host.id
     });
@@ -1726,6 +1888,71 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use subtle::ConstantTimeEq;
+
+    #[test]
+    fn independent_tag_names_are_separated_before_review_without_losing_memberships() {
+        let (mut local, keys) = super::super::review_tests::fixture();
+        let (mut incoming, _) = super::super::review_tests::fixture();
+        let name = "🔐".repeat(64);
+        let local_id = uuid::Uuid::new_v4();
+        let remote_id = uuid::Uuid::new_v4();
+        local.tags.push(crate::vault::Tag { id: local_id, name: name.clone(), color: "red".into(), icon: "tag".into() , default_url: String::new(),});
+        incoming.tags.push(crate::vault::Tag { id: remote_id, name: name.clone(), color: "blue".into(), icon: "tag".into() , default_url: String::new(),});
+        local.entries[0].tags = vec![name.clone()];
+        incoming.entries[0].tags = vec![name.clone()];
+        separate_imported_tag_names(&local, &mut incoming).unwrap();
+        assert_eq!(local.tags[0].name, name);
+        assert_eq!(local.entries[0].tags, vec![name]);
+        assert_ne!(local.tags[0].name, incoming.tags[0].name);
+        assert_eq!(incoming.entries[0].tags, vec![incoming.tags[0].name.clone()]);
+        assert_eq!(incoming.tags[0].id, remote_id);
+        crate::vault::validation::validate_display_name(&incoming.tags[0].name).unwrap();
+        local.entries.extend(incoming.entries.clone());
+        local.tags.extend(incoming.tags.clone());
+        super::super::review::track(&mut local, &keys, uuid::Uuid::new_v4(), Utc::now()).unwrap();
+    }
+
+    #[test]
+    fn legacy_identity_migration_is_stable_and_separates_installation_keys() {
+        let directory = tempdir().unwrap();
+        let desktop = directory.path().join("desktop-id");
+        let cli = directory.path().join("cli-id");
+        let legacy = uuid::Uuid::new_v4();
+        for path in [&desktop, &cli] { std::fs::write(path, legacy.to_string()).unwrap(); }
+        let first = migrate_device_identity(&desktop, &[21;32]).unwrap();
+        let second = migrate_device_identity(&cli, &[22;32]).unwrap();
+        assert_ne!(first, second);
+        assert_ne!(first, legacy);
+        assert_eq!(migrate_device_identity(&desktop, &[21;32]).unwrap(), first);
+        assert_eq!(load_or_create_device_identity(&desktop).unwrap(), first);
+        assert_eq!(load_or_create_device_identity(&cli).unwrap(), second);
+        assert!(migrate_device_identity(&desktop, &[21;31]).is_err());
+        assert_eq!(load_or_create_device_identity(&desktop).unwrap(), first);
+    }
+
+    #[test]
+    fn installations_on_the_same_host_get_distinct_persistent_identities() {
+        let directory = tempdir().unwrap();
+        let desktop = directory.path().join("desktop/device-id");
+        let cli = directory.path().join("cli/device-id");
+        let first = load_or_create_device_identity(&desktop).unwrap();
+        let second = load_or_create_device_identity(&cli).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(load_or_create_device_identity(&desktop).unwrap(), first);
+        let legacy = uuid::Uuid::new_v4();
+        std::fs::write(&cli, legacy.to_string()).unwrap();
+        assert_eq!(load_or_create_device_identity(&cli).unwrap(), legacy);
+    }
+
+    #[test]
+    fn colliding_device_ids_cannot_overwrite_the_local_trust_record() {
+        let host = resolve_local_device_info(None);
+        let mut client = host.clone();
+        client.signing_public_key = vec![123; 32];
+        assert!(validate_distinct_installations(&host, &client).is_err());
+        client.id = uuid::Uuid::new_v4();
+        assert!(validate_distinct_installations(&host, &client).is_ok());
+    }
 
     #[test]
     fn qr_busy_port_never_falls_back_to_an_unadvertised_port() {
@@ -1921,9 +2148,12 @@ mod tests {
         let (_, host_data) = host_handle.join().unwrap().unwrap();
 
         // Verify trusted device was added
+        // Both loopback peers share this process's signing identity. Display
+        // names cannot create a second installation for the same public key.
+        let local_identity = resolve_local_device_info(None);
         let client_device = host_data.settings.trusted_devices.iter()
-            .find(|d| d.name == "Client Phone")
-            .expect("Client Phone must be in host trusted devices");
+            .find(|d| d.id == local_identity.id && d.signing_public_key == local_identity.signing_public_key)
+            .expect("Authenticated installation must be in host trusted devices");
         let client_id = client_device.id;
 
         // This test runs two named devices in one process; enroll the listener's
@@ -1954,7 +2184,7 @@ mod tests {
             &client_path,
             Some(client_id),
         );
-        assert!(sync_res.is_ok());
+        assert!(sync_res.is_ok(), "{sync_res:?}");
         let _ = host_sync_handle.join().unwrap();
 
         // Now revoke the client device on the host!

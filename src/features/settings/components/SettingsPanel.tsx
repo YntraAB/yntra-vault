@@ -123,8 +123,8 @@ export function SettingsPanel() {
         setBioActive(true);
         addToast({ message: t('toast.biometric_enabled'), type: 'success' });
       }
-    } catch (err: any) {
-      const msg = err ? err.toString() : t('toast.biometric_failed');
+    } catch (err) {
+      const msg = err ? String(err) : t('toast.biometric_failed');
       if (msg.includes('canceled') || msg.includes('cancelled') || msg.includes('BiometricCanceled')) {
         addToast({ message: 'Biometric verification was canceled', type: 'info' });
       } else {
@@ -142,8 +142,8 @@ export function SettingsPanel() {
       await backend.disableHardware2Fa();
       setHwActive(false);
       addToast({ message: t('toast.hardware_2fa_disabled'), type: 'success' });
-    } catch (err: any) {
-      addToast({ message: err ? err.toString() : t('toast.hardware_2fa_disable_failed'), type: 'error' });
+    } catch (err) {
+      addToast({ message: err ? String(err) : t('toast.hardware_2fa_disable_failed'), type: 'error' });
     }
   };
 

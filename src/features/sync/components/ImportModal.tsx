@@ -137,8 +137,8 @@ export function ImportModal({ isOpen, onClose, onSuccess }: ImportModalProps) {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if ('path' in file && typeof (file as any).path === 'string') {
-        await parseFile((file as any).path);
+      if ('path' in file && typeof file.path === 'string') {
+        await parseFile(file.path);
       } else {
         const reader = new FileReader();
         reader.onload = (event) => {

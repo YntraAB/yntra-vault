@@ -245,7 +245,7 @@ impl VaultManager {
             && let Some(first) = hw_headers.first() {
                 return Ok(Some(Hardware2FaChallengeInfo {
                     enabled: true,
-                    payload_key_bound: vault_file.header.version >= super::format::HARDWARE_BOUND_VERSION,
+                    payload_key_bound: matches!(vault_file.header.version, 5 | 7),
                     protocol: first.protocol,
                     key_name: first.key_name.clone(),
                     challenge_salt: first.challenge_salt.to_vec(),

@@ -70,8 +70,9 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
 
   const presetInfo = getPreset();
 
-  // Apply preset rule on mount / url update
-  useEffect(() => {
+  const [appliedUrl, setAppliedUrl] = useState<string | null>(null);
+  if (appliedUrl !== url) {
+    setAppliedUrl(url);
     if (presetInfo) {
       setLength(presetInfo.rule.length);
       setUppercase(presetInfo.rule.uppercase);
@@ -89,7 +90,7 @@ export const PasswordGenerator: React.FC<PasswordGeneratorProps> = ({
       setExcludeAmbiguous(true);
       setMode('Random');
     }
-  }, [url, getPreset]);
+  }
 
   const buildOptions = useCallback((): GeneratorOptions => ({
     mode,

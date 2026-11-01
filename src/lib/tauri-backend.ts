@@ -1,3 +1,4 @@
+import type { SyncPreview, SyncDecision, SyncPolicy } from '@/features/sync/types';
 /**
  * Tauri Backend — calls Rust via IPC invoke()
  * 
@@ -17,6 +18,7 @@ import type {
   TrashedEntryPreview,
   VaultStorageMetrics,
   DecryptedHistoryItem,
+  ConflictHistoryItem,
   TotpCode,
   TotpConfig,
   GeneratorOptions,
@@ -109,7 +111,8 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   async updateEntry(id: string, update: UpdateEntry): Promise<void> {
-    const updatePayload = { ...update };
+    const { breach_status, ...fields } = update;
+    const updatePayload: import("@/types/ipc").UpdateEntry = { ...fields, ...(breach_status ? { breach_status: serializeBreachStatus(breach_status) } : {}) };
     if (update.breach_status) {
       updatePayload.breach_status = serializeBreachStatus(update.breach_status);
     }
@@ -121,6 +124,9 @@ export class TauriBackend implements YntraVaultBackend {
     }
     return invoke('update_entry', { id, update: updatePayload });
   }
+
+  async bulkUpdateEntries(ids: string[], patch: import('./backend').BulkEntryUpdate): Promise<void> { return invoke('bulk_update_entries', { ids, patch }); }
+  async bulkDeleteEntries(ids: string[]): Promise<void> { return invoke('bulk_delete_entries', { ids }); }
 
   async updateEntryBreachStatus(id: string, breachStatus: BreachStatus): Promise<void> {
     return invoke('update_entry_breach_status', {
@@ -152,14 +158,15 @@ export class TauriBackend implements YntraVaultBackend {
   // ─── Attachments ────────────────────────────────────────────────
 
   async getAttachmentData(entryId: string, attachmentId: string): Promise<number[] | Uint8Array> {
-    const res: any = await invoke('get_attachment_data', { entryId, attachmentId });
+    const res: unknown = await invoke('get_attachment_data', { entryId, attachmentId });
     if (res instanceof ArrayBuffer) {
       return new Uint8Array(res);
     }
     if (res instanceof Uint8Array) {
       return res;
     }
-    return res;
+    if (Array.isArray(res) && res.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) return res;
+    throw new Error("Invalid attachment data returned by the backend");
   }
 
   async addAttachment(entryId: string, name: string, mimeType: string, data: number[]): Promise<AttachmentInfo> {
@@ -201,6 +208,11 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   // ─── Password History ───────────────────────────────────────────
+
+  async listConflictHistory(entryId: string): Promise<ConflictHistoryItem[]> { return invoke('list_conflict_history', { entryId }); }
+  async previewConflictHistory(entryId: string, versionId: string): Promise<SyncPreview> { return invoke('preview_conflict_history', { entryId, versionId }); }
+  async inspectConflictHistory(entryId: string, versionId: string, field: string): Promise<string> { return invoke('inspect_conflict_history', { entryId, versionId, field }); }
+  async restoreConflictHistory(entryId: string, versionId: string, expectedRevision: string): Promise<void> { return invoke('restore_conflict_history', { entryId, versionId, expectedRevision }); }
 
   async getPasswordHistory(entryId: string): Promise<DecryptedHistoryItem[]> {
     return invoke('get_password_history', { entryId });
@@ -271,16 +283,16 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('get_tags');
   }
 
-  async addTag(name: string, color: string, icon: string): Promise<string> {
-    return invoke('add_tag', { name, color, icon });
+  async addTag(name: string, color: string, icon: string, defaultUrl?: string): Promise<string> {
+    return invoke('add_tag', { name, color, icon, defaultUrl });
   }
 
   async deleteTag(id: string): Promise<void> {
     return invoke('delete_tag', { id });
   }
 
-  async updateTag(id: string, name: string, color: string, icon: string): Promise<void> {
-    return invoke('update_tag', { id, name, color, icon });
+  async updateTag(id: string, name: string, color: string, icon: string, defaultUrl?: string): Promise<void> {
+    return invoke('update_tag', { id, name, color, icon, defaultUrl });
   }
 
   async reorderTags(tagIds: string[]): Promise<void> {
@@ -364,10 +376,34 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('webdav_download', { url, username, password, destDbPath });
   }
 
-  async webdavSync(url: string, username: string, password: string | null): Promise<MergeStats> {
-    return invoke('webdav_sync', { url, username, password });
+  getSyncOperations() { return invoke("get_sync_operations", {}); }
+  async onSyncOperation(callback: (operation: import("@/features/sync/types").SyncOperation) => void) {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<import("@/features/sync/types").SyncOperation>("sync-operation", event => callback(event.payload));
+  }
+  getSyncReview() { return invoke('get_sync_review', {}); }
+  inspectSyncField(id: string, key: string, remote: boolean) { return invoke('inspect_sync_field', { id, key, remote }); }
+  approveSyncReview(id: string, decisions: SyncDecision[]) { return invoke('approve_sync_review', { id, decisions }); }
+  cancelSyncReview() { return invoke('cancel_sync_review', {}); }
+  getSyncPolicy() { return invoke('get_sync_policy', {}); }
+  setSyncPolicy(policy: SyncPolicy) { return invoke('set_sync_policy', { policy }); }
+  async onSyncReview(callback: (preview: SyncPreview | null) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    let currentId: string | null = null;
+    const ready = await listen<SyncPreview>('sync-review-ready', event => { currentId = event.payload.id; callback(event.payload); });
+    try {
+      const closed = await listen<string>('sync-review-closed', event => { if (!currentId || currentId === event.payload) { currentId = null; callback(null); } });
+      return () => { ready(); closed(); };
+    } catch (error) { ready(); throw error; }
+  }
+  async webdavSync(url: string, username: string, password: string | null, background = false): Promise<MergeStats> {
+    return (await invoke('webdav_sync', { url, username, password, background })).stats;
   }
 
+  async onVaultContentChanged(callback: () => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen('vault-content-changed', callback);
+  }
   async onP2pListenerReady(callback: () => void): Promise<() => void> {
     const { listen } = await import('@tauri-apps/api/event');
     return listen('p2p-listener-ready', callback);
@@ -378,11 +414,11 @@ export class TauriBackend implements YntraVaultBackend {
   }
 
   async runP2pSyncListener(listenAddr: string, dbPath: string): Promise<MergeStats> {
-    return invoke('run_p2p_sync_listener', { listenAddr, dbPath });
+    return (await invoke('run_p2p_sync_listener', { listenAddr, dbPath })).stats;
   }
 
-  async runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string): Promise<MergeStats> {
-    return invoke('run_p2p_sync_client', { serverAddr, dbPath, deviceId });
+  async runP2pSyncClient(serverAddr: string, dbPath: string, deviceId?: string, background = false): Promise<MergeStats> {
+    return (await invoke('run_p2p_sync_client', { serverAddr, dbPath, deviceId, background })).stats;
   }
 
   async getLocalIp(): Promise<string | null> {
@@ -668,12 +704,12 @@ export class TauriBackend implements YntraVaultBackend {
   // ─── File Dialogs ────────────────────────────────────────────────
   async openFileDialog(options?: OpenDialogOptions): Promise<string | string[] | null> {
     const { open } = await import('@tauri-apps/plugin-dialog');
-    return open(options as any);
+    return open(options);
   }
 
   async saveFileDialog(options?: SaveDialogOptions): Promise<string | null> {
     const { save } = await import('@tauri-apps/plugin-dialog');
-    return save(options as any);
+    return save(options);
   }
 
   async getMobileVaultPath(name: string): Promise<string | null> {
@@ -698,13 +734,13 @@ export class TauriBackend implements YntraVaultBackend {
     return invoke('smart_login_cancel');
   }
 
-  async onSmartLoginProgress(callback: (event: any) => void): Promise<() => void> {
+  async onSmartLoginProgress(callback: (event: import("./backend").SmartLoginEvent) => void): Promise<() => void> {
     const { listen } = await import('@tauri-apps/api/event');
-    const unlisten = await listen('smart-login-progress', (e) => callback(e.payload));
+    const unlisten = await listen<import('./backend').SmartLoginEvent>('smart-login-progress', (e) => callback(e.payload));
     return unlisten;
   }
 
-  async onSmartLoginResult(callback: (result: any) => void): Promise<() => void> {
+  async onSmartLoginResult(callback: (result: unknown) => void): Promise<() => void> {
     const { listen } = await import('@tauri-apps/api/event');
     const unlisten = await listen('smart-login-result', (e) => callback(e.payload));
     return unlisten;
@@ -734,8 +770,7 @@ export class TauriBackend implements YntraVaultBackend {
 
 // ─── BreachStatus IPC Mappers ─────────────────────────────────────────
 
-function serializeBreachStatus(status?: BreachStatus): any {
-  if (!status) return undefined;
+function serializeBreachStatus(status: BreachStatus): import("@/types/ipc").BreachStatus {
   if (status.type === 'Unknown') return 'Unknown';
   if (status.type === 'Checking') return 'Checking';
   if (status.type === 'Safe') {
@@ -750,7 +785,7 @@ function serializeBreachStatus(status?: BreachStatus): any {
   return 'Unknown';
 }
 
-function deserializeBreachStatus(rawStatus: any): BreachStatus {
+function deserializeBreachStatus(rawStatus: import("@/types/ipc").BreachStatus): BreachStatus {
   if (!rawStatus) return { type: 'Unknown' };
   if (rawStatus === 'Unknown') return { type: 'Unknown' };
   if (rawStatus === 'Checking') return { type: 'Checking' };

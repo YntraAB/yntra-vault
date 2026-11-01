@@ -5,6 +5,12 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+$BuildRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+Set-Location -LiteralPath $BuildRoot
+function Invoke-BuildTool([string]$Tool, [string[]]$ToolArguments) {
+    & $Tool @ToolArguments
+    if ($LASTEXITCODE -ne 0) { throw "$Tool failed (exit $LASTEXITCODE)" }
+}
 
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host " Yntra Vault: SOTA Reproducible Build Pipeline  " -ForegroundColor Cyan
@@ -31,25 +37,33 @@ $env:RUSTFLAGS = "--remap-path-prefix=$PSScriptRoot\..=/yntra-vault/ -C codegen-
 # 3. Optional Clean Step
 if ($Clean) {
     Write-Host "Performing clean build..." -ForegroundColor Yellow
-    if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
-    if (Test-Path "target/release") { Remove-Item -Recurse -Force "target/release" }
-    if (Test-Path "crates/core/target/release") { Remove-Item -Recurse -Force "crates/core/target/release" }
-    if (Test-Path "src-tauri/target/release") { Remove-Item -Recurse -Force "src-tauri/target/release" }
+    foreach ($relative in @('dist','target/release','crates/core/target/release','src-tauri/target/release')) {
+        $target = [IO.Path]::GetFullPath((Join-Path $BuildRoot $relative))
+        if (-not $target.StartsWith($BuildRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Cleanup escaped build root' }
+        if (Test-Path -LiteralPath $target) {
+            $entry = Get-Item -LiteralPath $target -Force
+            while ($entry.FullName -ne $BuildRoot) {
+                if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing cleanup through a reparse point' }
+                $entry = $entry.Parent
+            }
+            Remove-Item -LiteralPath $target -Recurse -Force
+        }
+    }
 }
 
 # 4. Build Frontend Assets
 Write-Host "`n[1/3] Building frontend bundle with Bun..." -ForegroundColor Cyan
-bun install --frozen-lockfile
-bun run build
+Invoke-BuildTool 'bun' @('install','--frozen-lockfile')
+Invoke-BuildTool 'bun' @('run','build')
 
 # 5. Build Core Cryptography Engine
 Write-Host "`n[2/3] Building Rust Core Engine (release)..." -ForegroundColor Cyan
-cargo fetch --locked
-cargo build --manifest-path crates/core/Cargo.toml --release --frozen
+Invoke-BuildTool 'cargo' @('fetch','--locked')
+Invoke-BuildTool 'cargo' @('build','--manifest-path','crates/core/Cargo.toml','--release','--frozen')
 
 # 6. Build Desktop App Binary
 Write-Host "`n[3/3] Building Tauri Desktop Binary (release)..." -ForegroundColor Cyan
-cargo build --manifest-path src-tauri/Cargo.toml --release --frozen
+Invoke-BuildTool 'cargo' @('build','--workspace','--release','--frozen')
 
 # 7. Collect & Hash Artifacts
 $TargetDir = Join-Path -Path $PSScriptRoot -ChildPath "..\$OutDir"
@@ -58,9 +72,13 @@ if (-not (Test-Path $TargetDir)) { New-Item -ItemType Directory -Force -Path $Ta
 Write-Host "`nComputing SHA-256 checksums and generating reproducible manifest..." -ForegroundColor Cyan
 
 $Artifacts = @()
+foreach ($required in @('target/release/libyntra_vault_core.rlib','target/release/yntra-vault-app.exe','target/release/yntra.exe','dist/index.html')) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing build output: $required" }
+}
 
 # Find output binaries in workspace target/release or fallback crate release targets
 $CandidateFiles = @(
+    "target/release/yntra.exe",
     "target/release/yntra_vault_core.dll",
     "target/release/libyntra_vault_core.rlib",
     "target/release/yntra_vault_core.lib",
