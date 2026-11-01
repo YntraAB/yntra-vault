@@ -1,7 +1,13 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { load } from 'js-yaml';
-import { previewFiles, validatePreview, verifyExistingAsset } from './publish-preview.mjs';
+import { previewFiles, validatePreview, verifyExistingAsset, findPreviewRelease } from './publish-preview.mjs';
+
+test('authenticated release listing selects a draft before the first platform is published', () => {
+    const draft = { id: 42, tag_name: 'v0.2.8', draft: true, prerelease: true };
+    expect(findPreviewRelease([{ tag_name: 'v0.2.7' }, draft], 'v0.2.8')).toEqual(draft);
+    expect(() => findPreviewRelease([], 'v0.2.8')).toThrow();
+});
 
 test('preview packages have an exact platform allowlist', () => {
     expect(previewFiles('0.2.8', 'windows')).toHaveLength(4);

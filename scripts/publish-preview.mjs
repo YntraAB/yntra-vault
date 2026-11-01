@@ -25,6 +25,12 @@ export function verifyExistingAsset(asset, hash) {
     if (asset.digest !== `sha256:${hash}`) throw new Error(`Existing asset differs or lacks a verified digest: ${asset.name}`);
 }
 
+export function findPreviewRelease(releases, tag) {
+    const release = releases.find(item => item.tag_name === tag);
+    if (!release) throw new Error('Preview release was not found in the authenticated release list');
+    return release;
+}
+
 export async function publishPreview(platform) {
     const repo = process.env.GITHUB_REPOSITORY;
     const commit = process.env.RELEASE_COMMIT;
@@ -44,7 +50,9 @@ export async function publishPreview(platform) {
         if (!response.ok) throw new Error(`GitHub request failed (${response.status})`);
         return response;
     }
-    const release = await (await request(`${base}/releases/tags/${tag}`)).json();
+    // The tag endpoint excludes drafts, even for callers with push permission.
+    const releases = await (await request(`${base}/releases?per_page=100`)).json();
+    const release = findPreviewRelease(releases, tag);
     const sourceAsset = release.assets.find(asset => asset.name === 'release-source.json');
     if (!sourceAsset) throw new Error('Missing release provenance');
     const source = await (await request(`${base}/releases/assets/${sourceAsset.id}`, { headers: { Accept: 'application/octet-stream' } })).json();
