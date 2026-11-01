@@ -25,7 +25,7 @@ export default function VaultSelect() {
   // Load recent vaults and auto-select most recent non-deleted vault
   useEffect(() => {
     const initVaults = async () => {
-      let saved: Vault[] = [];
+      let saved: Vault[];
       try {
         saved = JSON.parse(appMetadata.getItem('yntra-vault-recent-vaults') || '[]');
       } catch {

@@ -137,9 +137,10 @@ fn session(peer_id: uuid::Uuid, shared: p256::ecdh::SharedSecret, context: &[u8]
 
 pub fn authenticate_listener(stream: &mut (impl Read + Write), keys: &crate::crypto::SubKeys,
     trusted: &[crate::vault::types::TrustedDevice], id: uuid::Uuid, server_commitment:&[u8;32], client_commitment:&[u8;32]) -> Result<Session> {
-    use p256::elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint};
-    let ephemeral = p256::ecdh::EphemeralSecret::random(&mut OsRng);
-    let public = ephemeral.public_key().to_encoded_point(false);
+    use p256::elliptic_curve::{Generate, sec1::ToSec1Point};
+    let ephemeral = p256::ecdh::EphemeralSecret::try_generate()
+        .map_err(|error| VaultError::EncryptionError(format!("Sync entropy unavailable: {error}")))?;
+    let public = ephemeral.public_key().to_sec1_point(false);
     let mut challenge=[0;32]; use rand::RngCore; rand::rng().fill_bytes(&mut challenge);
     stream.write_all(SYNC_VERSION)?;
     stream.write_all(&challenge)?;
@@ -176,7 +177,7 @@ pub fn authenticate_listener(stream: &mut (impl Read + Write), keys: &crate::cry
 
 pub fn authenticate_client(stream: &mut (impl Read + Write), keys: &crate::crypto::SubKeys,
     trusted: &[crate::vault::types::TrustedDevice], id:uuid::Uuid, server_commitment:&[u8;32], client_commitment:&[u8;32]) -> Result<Session> {
-    use p256::elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint};
+    use p256::elliptic_curve::{Generate, sec1::ToSec1Point};
     let mut version=[0;8]; stream.read_exact(&mut version)?;
     if &version != SYNC_VERSION { return Err(VaultError::SyncError("Update both devices and re-pair for secure sync".into())); }
     let mut server_challenge=[0;32]; stream.read_exact(&mut server_challenge)?;
@@ -184,8 +185,9 @@ pub fn authenticate_client(stream: &mut (impl Read + Write), keys: &crate::crypt
     let mut server_public=[0;65]; stream.read_exact(&mut server_public)?;
     let peer_id=uuid::Uuid::from_bytes(server_id);
     let peer_key=trusted_key(trusted,peer_id)?;
-    let ephemeral=p256::ecdh::EphemeralSecret::random(&mut OsRng);
-    let public=ephemeral.public_key().to_encoded_point(false);
+    let ephemeral=p256::ecdh::EphemeralSecret::try_generate()
+        .map_err(|error| VaultError::EncryptionError(format!("Sync entropy unavailable: {error}")))?;
+    let public=ephemeral.public_key().to_sec1_point(false);
     let mut challenge=[0;32]; use rand::RngCore; rand::rng().fill_bytes(&mut challenge);
     let context=transcript(b"session",&[SYNC_VERSION,server_commitment,client_commitment,&server_challenge,&challenge,&server_id,id.as_bytes(),&server_public,public.as_bytes()]);
     let client_proof=transcript(b"client-proof",&[&context]);
@@ -260,10 +262,10 @@ mod tests {
 
     #[test]
     fn fresh_session_keys_require_ephemeral_private_keys_and_bound_context() {
-        use p256::elliptic_curve::rand_core::OsRng;
-        let alice=p256::ecdh::EphemeralSecret::random(&mut OsRng);
-        let bob=p256::ecdh::EphemeralSecret::random(&mut OsRng);
-        let observer=p256::ecdh::EphemeralSecret::random(&mut OsRng);
+        use p256::elliptic_curve::Generate;
+        let alice=p256::ecdh::EphemeralSecret::generate();
+        let bob=p256::ecdh::EphemeralSecret::generate();
+        let observer=p256::ecdh::EphemeralSecret::generate();
         let id=uuid::Uuid::new_v4();
         let a=session(id,alice.diffie_hellman(&bob.public_key()),b"session one").unwrap();
         let b=session(id,bob.diffie_hellman(&alice.public_key()),b"session one").unwrap();

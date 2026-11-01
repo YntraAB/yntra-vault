@@ -8,6 +8,7 @@
 use data_encoding::BASE64;
 use ed25519_dalek::Signer as DalekSigner;
 use p256::ecdsa::SigningKey as P256SigningKey;
+use p256::ecdsa::signature::Signer as _;
 use zeroize::Zeroizing;
 
 use crate::error::VaultError;

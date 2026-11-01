@@ -54,7 +54,7 @@ same-file = "1"
 # HTTP client for HIBP breach checking
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
-p256 = { version = "0.13", features = ["ecdsa", "ecdh", "pkcs8"] }
+p256 = { version = "0.14", features = ["ecdsa", "ecdh", "pkcs8"] }
 
 # Smart Login — CDP browser automation
 chromiumoxide = { version = "0.9", default-features = false }

@@ -26,6 +26,8 @@ This is a preview version. Windows downloads are available first; Android and Li
 - Keep local protection, recovery data and synchronization preferences local during ordinary synchronization and pairing.
 
 ### Fixed
+- Update P-256 and its integer-arithmetic dependency to remove known timing-variability vulnerabilities while preserving existing key/signature encodings. Fail cleanly if operating-system entropy is unavailable.
+- Update vulnerable test/lint dependencies and check JavaScript and Rust advisories before preparing release packages. Keep maintenance notices visible separately from vulnerability matches.
 - Restrict WebDAV uploads to encrypted snapshots of the active vault; reject arbitrary files and local recovery envelopes before connecting.
 - Reject Unix socket directories with unsafe owners, permissions or symlinks. Preserve live sockets and unrelated files instead of unlinking them.
 - Validate version changes before writing, roll back manifests and lockfile on failure, and refuse replacement or downgrade versions.

@@ -2,7 +2,7 @@
 
 use p256::ecdsa::{SigningKey, VerifyingKey, Signature};
 use p256::ecdsa::signature::{Signer, Verifier};
-use p256::elliptic_curve::rand_core::OsRng;
+use p256::elliptic_curve::Generate;
 use zeroize::Zeroizing;
 
 pub struct PasskeyPair {
@@ -13,7 +13,8 @@ pub struct PasskeyPair {
 /// Generate a new ECDSA P-256 (ES256) keypair for a Passkey.
 /// Returns private key (raw 32-byte scalar) and public key (uncompressed SEC1 format).
 pub fn generate_passkey_pair() -> crate::Result<PasskeyPair> {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let signing_key = SigningKey::try_generate()
+        .map_err(|error| crate::error::VaultError::EncryptionError(format!("Passkey entropy unavailable: {error}")))?;
     let verifying_key = VerifyingKey::from(&signing_key);
 
     Ok(PasskeyPair {
@@ -64,6 +65,24 @@ pub fn verify_assertion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p256_preserves_existing_key_signature_and_ecdh_formats() {
+        // Fixed scalars 1 and 2, independently checked with OpenSSL via cryptography.
+        let decode = |value: &str| data_encoding::HEXLOWER.decode(value.as_bytes()).unwrap();
+        let public = decode("046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5");
+        let mut scalar = [0u8; 32];
+        scalar[31] = 1;
+        let signing_key = SigningKey::from_slice(&scalar).unwrap();
+        assert_eq!(signing_key.verifying_key().to_sec1_bytes().as_ref(), public);
+        let signature = decode("3045022100a53f6004980547220536fa38969f8e3b2c7196cf0cc987a6e796339bfaee3cc702205ce19fb3003cfa5914755a5b0e267f2b2c9aa01742dd5e8c01ee306d107794d6");
+        assert!(verify_assertion(&public, b"legacy-authenticator", b"legacy-client-hash", &signature).unwrap());
+        assert!(!verify_assertion(&public, b"changed-authenticator", b"legacy-client-hash", &signature).unwrap());
+        let peer = p256::PublicKey::from_sec1_bytes(&decode("047cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc4766997807775510db8ed040293d9ac69f7430dbba7dade63ce982299e04b79d227873d1")).unwrap();
+        let secret = p256::SecretKey::from_slice(&scalar).unwrap();
+        let shared = p256::ecdh::diffie_hellman(secret.to_nonzero_scalar(), peer.as_affine());
+        assert_eq!(shared.raw_secret_bytes().as_slice(), decode("7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978"));
+    }
 
     #[test]
     fn test_passkey_generation_and_assertion_roundtrip() {
