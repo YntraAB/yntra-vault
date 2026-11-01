@@ -1,6 +1,6 @@
 # Yntra Vault Database Format Specification (`YNTR` v6/v7 and `YNS2` v2)
 
-**Document Version**: 1.3 (reviewed synchronization working tree; unpublished)
+**Document Version**: 1.3 (0.2.8 preview)
 
 **Target Formats**: ordinary `YNTR` v6, hardware-bound `YNTR` v7, local-protection `YNS2` v2
 **Classification**: Public Specification  
@@ -10,7 +10,7 @@
 
 ## 0. Current format boundaries
 
-| Framing | Role in the unreleased working tree | Key distinction |
+| Framing | Role in 0.2.8 preview | Key distinction |
 | --- | --- | --- |
 | `YNTR`, version 6 | Ordinary vault representation and encrypted sync snapshots | Requires causal sync metadata support; transport snapshots omit local factor/recovery records. Versions 1–5 remain readable for migration. |
 | `YNTR`, version 7 | Hardware security-key vaults with causal sync metadata | Retains v5's random payload key and factor wrapping. Older clients reject the new version rather than discarding sync metadata. |
@@ -53,7 +53,7 @@ The first write of an older `YNTR` vault creates an exact encrypted sibling back
 named `*.vdb.before-sync-<uuid>.bak` before replacing the original atomically.
 Existing copies without common causal history require review of divergent values;
 their timestamps do not establish ancestry. Both applications must support the
-new format and reviewed protocol. These changes do not replace published 0.2.6.
+new format and reviewed protocol. Preserve the migration backup when testing the preview.
 
 ## 1. Overview & Architectural Principles
 
@@ -220,8 +220,8 @@ pub struct EncryptedBlob {
 | `3` | MessagePack | Header AAD Binding | Supported legacy format; upgraded on save. |
 | `4` | MessagePack | Header AAD Binding + Bio/HW2FA Containers | Supported legacy format; upgraded on save. |
 | `5` | MessagePack | Header AAD Binding + hardware-bound random payload key | Supported legacy hardware format; upgraded to v7 on save. |
-| `6` | MessagePack | Header AAD Binding + causal sync metadata | Current ordinary format, unreleased. |
-| `7` | MessagePack | Header AAD Binding + hardware-bound random payload key + causal sync metadata | Current hardware format, unreleased. |
+| `6` | MessagePack | Header AAD Binding + causal sync metadata | Current ordinary format in 0.2.8 preview. |
+| `7` | MessagePack | Header AAD Binding + hardware-bound random payload key + causal sync metadata | Current hardware format in 0.2.8 preview. |
 
 ---
 

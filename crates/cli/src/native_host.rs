@@ -87,7 +87,7 @@ fn manifest_directory(browser: &str) -> Result<PathBuf> {
         #[cfg(target_os = "macos")]
         let relative = match browser { "firefox" => "Library/Application Support/Mozilla/NativeMessagingHosts", "edge" => "Library/Application Support/Microsoft Edge/NativeMessagingHosts", _ => "Library/Application Support/Google/Chrome/NativeMessagingHosts" };
         #[cfg(not(target_os = "macos"))]
-        let relative = match browser.as_str() { "firefox" => ".mozilla/native-messaging-hosts", "edge" => ".config/microsoft-edge/NativeMessagingHosts", _ => ".config/google-chrome/NativeMessagingHosts" };
+        let relative = match browser { "firefox" => ".mozilla/native-messaging-hosts", "edge" => ".config/microsoft-edge/NativeMessagingHosts", _ => ".config/google-chrome/NativeMessagingHosts" };
         home.join(relative)
     };
     Ok(directory)

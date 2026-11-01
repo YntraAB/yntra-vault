@@ -4,16 +4,18 @@
 
 ### Frontend
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `react` | ^19.1.0 | UI framework |
-| `react-dom` | ^19.1.0 | DOM rendering |
-| `react-router-dom` | ^7.6.0 | Client-side routing (vault select → login → app) |
-| `framer-motion` | ^12.12.0 | Animations (panel slides, list stagger, modal transitions) |
-| `lucide-react` | ^0.511.0 | Icon system |
-| `geist` | ^1.4.0 | Geist Sans + Mono font families |
-| `clsx` | ^2.1.0 | Conditional classnames |
-| `tailwind-merge` | ^3.3.0 | Tailwind class deduplication |
+Exact dependency requirements are in [package.json](../../package.json); resolved versions are pinned in [bun.lock](../../bun.lock).
+
+| Package | Purpose |
+| --- | --- |
+| `react` / `react-dom` | UI components and rendering |
+| `react-router-dom` | Client-side navigation |
+| `framer-motion` | Interface animation |
+| `lucide-react` | Icons |
+| `clsx` / `tailwind-merge` | Conditional classes and Tailwind class merging |
+| `@tauri-apps/api` and plugins | Native IPC, files, dialogs, notifications and clipboard writes |
+| `jsqr` / `qrcode.react` | Optical pairing codes |
+| `fflate` | ZIP-based attachment previews |
 
 ### Backend (Rust Workspace)
 
@@ -24,7 +26,7 @@
 | `aes-gcm` | Entry-level AEAD (AES-256-GCM legacy fallback) |
 | `hkdf` + `sha2` | Subkey derivation (HKDF-SHA512) |
 | `hmac` | P2P handshake authentication & legacy v1/v2 file verification |
-| `p256` | Passkey generation and signing (ECDSA P-256 / ES256) |
+| `p256` | Passkey and SSH ECDSA signatures; ephemeral P-256 ECDH for authenticated sync |
 | `zeroize` | Memory safety — automatic sensitive buffer clearing |
 | `chromiumoxide` | Chrome DevTools Protocol (CDP) client for zero-extension Smart Login |
 | `rmp-serde` | Vault payload serialization (MessagePack format) |
@@ -61,12 +63,18 @@
 
 ---
 
+## Account fields and Smart Login
+
+Entries retain stable IDs for additional username, email, phone, password and URL fields. `_field_order` records their display and selection order. Smart Login uses the first non-empty identifier, password and URL in that order; it does not cycle through alternate passwords after a failure. Reordering fields changes the selection. A tag's optional default URL is an explicit copy into an entry, so later tag edits do not rewrite saved URLs.
+
+Smart Login waits for stable editable controls and a delayed password step, including supported visible frame/shadow content. Phone identifiers are supported. Origin, focus and cancellation checks remain active before credential input. Native Windows typing requires the intended browser to have foreground focus; MFA, CAPTCHA and website-specific flows can still require manual interaction. Automated browser fixtures do not establish compatibility with every live website.
+
 ## Internationalization (i18n)
 
 Yntra Vault features a zero-dependency, type-safe internationalization engine (`src/i18n/`):
 
 - **24 Supported Locales**: English (`en`), Swedish (`sv`), Danish (`da`), Norwegian (`no`), Finnish (`fi`), German (`de`), Dutch (`nl`), French (`fr`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Polish (`pl`), Czech (`cs`), Russian (`ru`), Ukrainian (`uk`), Turkish (`tr`), Greek (`el`), Hebrew (`he`), Arabic (`ar`), Hindi (`hi`), Japanese (`ja`), Korean (`ko`), Simplified Chinese (`zh-CN`), Traditional Chinese (`zh-TW`).
-- **Complete Coverage Invariant**: Every locale provides exact 1:1 coverage with `en` (824 translation keys), enforced via `translations.test.ts`.
+- **Complete Coverage Invariant**: Every locale provides exact 1:1 coverage with `en`, enforced via `translations.test.ts`.
 - **Right-To-Left (RTL)**: Dynamic document directionality (`dir="rtl"`) automatically toggled for Arabic and Hebrew locales.
 - **Dynamic Font & Locale Switching**: Instant UI re-render without app reloading via `LanguageContext`.
 
@@ -75,16 +83,19 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 ## Synchronization Protocol (WebDAV & P2P)
 
 ### WebDAV Cloud Sync
-- **Optimistic Concurrency**: Uses HTTP `If-Match` headers with normalized ETags (RFC 7232).
-- **Conflict Resolution**: On HTTP 412 (Precondition Failed), executes up to 3 optimistic retry attempts: fetches remote ETag, downloads remote payload, performs item-level 3-way merge with tombstone preservation, saves locally, and retries conditional PUT.
+- **Optimistic concurrency**: Reviewed downloads require a strong ETag. Updating a remote vault uses `If-Match`; initial creation uses `If-None-Match: *`.
+- **Reviewed field merge**: P2P and WebDAV share the causal field comparison and decision engine. Approval is bound to the reviewed local revision and remote ETag. HTTP 412 stops the operation and requires another comparison; it does not silently reapply an old approval. The remote write precedes the atomic local save. If the latter fails, the result reports incomplete synchronization.
 - **Transport Security**: Enforces HTTPS scheme for non-localhost endpoints via strict `url::Url` host validation (`http://` allowed strictly for loopback hosts: `localhost`, `127.0.0.1`, `[::1]`).
 - **Network and response limits**: Core network policy gates HTTP requests and cancels them when networking is disabled. Vault bodies and WebDAV discovery responses have bounded sizes; redirects remain disabled.
 - **Memory Protection**: Decrypted payload buffers zeroed using `Zeroize`. Remote credentials held strictly in volatile in-memory registry (`sessionSecrets.ts`), wiped upon vault lock.
 
 ### Peer-to-Peer (P2P) Direct Sync & Zero-Knowledge Device Pairing
 
-#### 1. Background Wi-Fi Sync (Port 5322)
-- **Opt-in LAN synchronization**: Paired devices exchange encrypted vault contents when network access and sync are enabled. Disabling networking cancels in-flight operations.
+#### 1. Reviewed Wi-Fi Sync (Port 5322)
+- **Opt-in LAN synchronization**: Background listening and sync are off by default. Manually initiated sync can be received during the current unlocked session. Disabling networking cancels in-flight operations.
+- **Review protocol (`YNREV001`)**: Authenticated peers exchange snapshots, then prepare and validate a selected result. Storage acknowledgments are bound to operation ID, peer and result digest. Completion requires both saves; per-peer pending confirmations survive restart. Preparation itself is not a durable distributed transaction journal.
+- **Review policy**: Review all changes and ask about conflicts are the defaults. Independent field edits can combine; concurrent changes to one field require a decision under the selected policy. Deletion versus editing always requires an explicit choice. Automatic P2P application requires both peers to allow it. Secrets remain masked until explicitly revealed.
+- **Deletion and history**: Permanent deletion retains identity/revision markers without entry content. Conflict history retains up to ten encrypted versions per entry and is removed with permanent deletion. See [the format specification](VDB_SPEC.md).
 - **Protocol v3 authentication (`YNSYN003`)**: A shared-vault HMAC proves membership, while a separately generated installation Ed25519 key proves the enrolled device identity. Both sides authenticate a length-prefixed, role-labelled transcript containing both UUIDs, salt commitments, fresh challenges, and ephemeral P-256 public keys. The listener checks the client first; the client verifies the listener before uploading entries.
 - **Fresh transfer encryption**: Ephemeral P-256 ECDH plus HKDF-SHA256 derives each session key. XChaCha20-Poly1305 AAD binds the handshake transcript and direction. A shared vault key alone cannot decrypt a captured v3 transfer.
 - **Fail-closed enrollment**: Missing, duplicate, legacy, or revoked device keys require explicit re-pairing. An empty trusted list authorizes no peers. Ordinary sync never imports the remote device trust policy; there is no legacy shared-key-only fallback.
@@ -100,7 +111,7 @@ Yntra Vault features a zero-dependency, type-safe internationalization engine (`
 - **QR secret**: A 256-bit random secret, UUID session, advertised listener address, and visual SAS are encoded in the unchanged `yntrapair://v2` URI format with a 90-second lifetime. No password or database is in the QR. Possession of the QR secret grants pairing authority during that lifetime.
 - **Transport**: `YQR3` and `PAIR3_OK` reject legacy metadata exchange. Mutual HMAC authentication, fresh challenges, and authenticated device metadata bind the UUIDs and signing public keys. XChaCha20-Poly1305 payload AAD binds the QR session and full metadata transcript.
 - **Native secret handling**: A received password is removed before the result crosses IPC. Passwordless adoption retains native vault data and sync keys until a local wrapping password is selected. Lock and cancellation clear pending state. The local wrapping password need not equal the host's master password for a protected replica.
-- **Migration**: Both peers must update and re-pair to enroll signing keys. Loss or replacement of an installation signing key also requires re-pairing. This optical bootstrap still transfers data over the network and is not an air-gapped protocol.
+- **Migration**: Both peers must support the current reviewed protocol and vault format. Valid enrolled signing identities remain usable. Legacy enrollment without signing keys, or loss/replacement of an installation signing key, requires re-pairing. Optical bootstrap transfers data over the network.
 #### 4. Active UDP Query-Response Discovery (Port 5323)
 - **Active Query-Response Protocol**: Clients emit periodic `YQRY` query pulses (`[YQRY (4B) | pairing_beacon_id (32B)]`). Hosts respond with immediate direct unicast `YPAR` packets (`[YPAR (4B) | pairing_beacon_id (32B) | local_port (2B)]`), allowing direct replies when the network permits them; discovery cannot bypass access-point isolation.
 - **In-Loop Self-Echo Isolation**: The receive loop in `listen_discovery_beacon` evaluates received packet source IP addresses against known local network adapters and loopback *inside* the receive loop. Self-echo packets are dropped immediately, allowing the listener to continue until remote peers respond or the timeout expires.
